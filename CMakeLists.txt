@@ -26,7 +26,9 @@ endfunction()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-set(WEIVEL_C_SOURCES src/core/load.c src/core/events.c src/core/wrapper.c src/core/calls.c)
+set(WEIVEL_C_SOURCES
+    src/core/load.c src/core/events.c src/core/wrapper.c src/core/calls.c
+    src/handles/table.c)
 if(WIN32)
     list(APPEND WEIVEL_C_SOURCES src/core/binary_windows.c src/core/mutex_windows.c)
 else()

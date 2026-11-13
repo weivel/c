@@ -7,5 +7,6 @@
  */
 
 #include <weivel/c/core.h>
+#include <weivel/c/handles.h>
 
 #endif

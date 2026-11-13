@@ -22,7 +22,7 @@ public name begins with `weivel_c_`, every public struct begins with its `size`,
 
 ## What is built
 
-The `core` module. The other seven modules hold only a header saying what they are for.
+The `core` and `handles` modules. The other six modules hold only a header saying what they are for.
 
 `weivel_c_core_load` opens the core's shared binary with the platform's loader and fills one table,
 `weivel_c_core_table`, with every function the core exports; a path that is no library and a library that lacks a
@@ -38,10 +38,22 @@ each call of the core has a `weivel_c_core_` function of the same name that goes
 - events are dispatched to the listeners first in, first out, outside the lock, by one thread at a time; a call made
   while a dispatch runs, from a listener or from another thread, joins the end of the queue, and `weivel_c_core_defer`
   puts a step there;
+- an event is heard even when memory ran out for its texts: it is then marked `incomplete`, every handle, code and
+  number exact and a fixed sentence in place of each text, and only an event with no memory at all is dropped;
 - what a listener, a step or a hook answers as a failure goes to the `weivel_c_error_sink` given at creation, which
   writes a line to standard error when none is given;
-- `weivel_c_core_set_deadline_hooks` is where the `timer` module will hear each deadline as it is drained and say
-  when one has fallen due.
+- nothing of the caller's is called under the lock: listeners, steps, the sink and the deadline hooks all run outside
+  it and may call in;
+- the wrapper records each `WEIVEL_EVENT_DEADLINE` as it drains it. `weivel_c_core_set_deadline_hooks` gives it a
+  clock, read before a call only while a deadline is recorded so a due deadline reaches the core first, and a
+  `follow` hook, told the latest deadline after the lock is let go and before the dispatch, by one thread at a time.
+
+`weivel_c_handles_create` makes the table from the core's handles to the layer's own objects: an entry per plugin,
+service registration, capability implementation, watch and want, made when the core answers the handle and ended
+when what it stands for ends. A handle the table does not hold answers nothing. What a plugin holds of another's is
+kept by the pair of handles and dropped by the `WEIVEL_EVENT_REVOKED` that names it, and each entry has a token that
+reaches it without a search, which is what a plugin is opened with as its payload. The table has its own lock and
+calls nothing, so any thread may use it.
 
 ## Building
 
