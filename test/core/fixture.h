@@ -91,8 +91,12 @@ static weivel_status counted_event_release(weivel_event *event) {
     return fail_event_release ? WEIVEL_STATUS_MALFORMED : status;
 }
 
+/** How often the core was asked for its deadline since the process began; never forgotten. */
+static uint32_t deadline_polls;
+
 static weivel_status counted_next_deadline(weivel_core *core, int64_t *deadline, uint32_t *pending_events) {
     crossed.next_deadline++;
+    deadline_polls++;
     return real_table.next_deadline(core, deadline, pending_events);
 }
 

@@ -8,5 +8,6 @@
 
 #include <weivel/c/core.h>
 #include <weivel/c/handles.h>
+#include <weivel/c/timer.h>
 
 #endif

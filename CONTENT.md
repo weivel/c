@@ -22,7 +22,7 @@ public name begins with `weivel_c_`, every public struct begins with its `size`,
 
 ## What is built
 
-The `core` and `handles` modules. The other six modules hold only a header saying what they are for.
+The `core`, `handles` and `timer` modules. The other five modules hold only a header saying what they are for.
 
 `weivel_c_core_load` opens the core's shared binary with the platform's loader and fills one table,
 `weivel_c_core_table`, with every function the core exports; a path that is no library and a library that lacks a
@@ -54,6 +54,16 @@ when what it stands for ends. A handle the table does not hold answers nothing. 
 kept by the pair of handles and dropped by the `WEIVEL_EVENT_REVOKED` that names it, and each entry has a token that
 reaches it without a search, which is what a plugin is opened with as its payload. The table has its own lock and
 calls nothing, so any thread may use it.
+
+`weivel_c_timer_create` arms the core's deadline on the caller's `weivel_c_scheduler`: a clock, `now`, and
+`schedule` and `cancel` for one task. The layer owns no thread and no timer. The task is scheduled from the latest
+deadline drained and from nothing else, replaced when the deadline moves and cancelled when none is left; when it
+runs it hands the core the clock's time, and when the scheduler says it cannot wait the whole way (`maximum_wait`)
+it waits as long as it may and arms again. While a deadline is armed the wrapper reads the clock before each call
+and advances the core first when the deadline has passed, so a registration at or after a want's deadline settles
+nothing even when the task has not run. `weivel_c_timer_destroy` cancels the task, so nothing of the layer's fires
+once its core is gone. A timer made without a scheduler arms nothing and reads no clock, and `weivel_c_timer_now`,
+where the layer takes the time for a want that needs it, then answers the caller's mistake.
 
 ## Building
 

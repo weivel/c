@@ -33,6 +33,9 @@ foreach(variant "" _shared)
     weivel_c_test(handles_table_test${variant} handles/table_test.c weivel_c${variant}
         $<TARGET_FILE:weivel_core_shared>)
     add_dependencies(handles_table_test${variant} weivel_core_shared)
+    weivel_c_test(timer_timer_test${variant} timer/timer_test.c weivel_c${variant}
+        $<TARGET_FILE:weivel_core_shared>)
+    add_dependencies(timer_timer_test${variant} weivel_core_shared)
     weivel_c_test(core_sink_test${variant} core/sink_test.c weivel_c${variant}
         $<TARGET_FILE:weivel_core_shared> ${CMAKE_CURRENT_BINARY_DIR}/core_sink_test${variant}.standard_error)
     add_dependencies(core_sink_test${variant} weivel_core_shared)
