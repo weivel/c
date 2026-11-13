@@ -26,7 +26,7 @@ typedef struct listener_slot {
 /**
  * @implNote `lock` is the layer lock. It guards every field below it, is held across a call and its drain, and is
  * never held while a listener, a step or the sink runs. `dispatching` is 1 exactly while one thread delivers the
- * queue, and the queue is empty whenever it is 0, since whoever drains into it either finds a dispatch running or
+ * queue, and the queue is empty whenever it is 0, since whoever adds to it either finds a dispatch running or
  * becomes it under the same hold. `core` is NULL once destroyed.
  */
 struct weivel_c_core {
@@ -510,9 +510,13 @@ weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *core, const weiv
     return WEIVEL_C_STATUS_OK;
 }
 
+/**
+ * @implNote A step is a queue entry like an event, whoever defers it, so a step and a listener never run at once:
+ * with no dispatch running the queue is empty, and `leave` makes the caller the dispatcher of this one entry.
+ */
 weivel_c_status weivel_c_core_defer(weivel_c_core *core, weivel_c_step *step) {
+    call_notes notes;
     weivel_c_status status;
-    int queued;
     if (core == NULL || step == NULL || step->size < FIRST_STEP_SIZE || step->run == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
@@ -524,14 +528,9 @@ weivel_c_status weivel_c_core_defer(weivel_c_core *core, weivel_c_step *step) {
         weivel_c_mutex_unlock(&core->lock);
         return WEIVEL_C_STATUS_MISUSE;
     }
-    queued = core->dispatching != 0;
-    if (queued) {
-        append(core, &step->place, PLACE_OF_A_STEP);
-    }
-    weivel_c_mutex_unlock(&core->lock);
-    if (!queued) {
-        run_step(core, step);
-    }
+    begin_notes(&notes);
+    append(core, &step->place, PLACE_OF_A_STEP);
+    leave(core, &notes);
     return WEIVEL_C_STATUS_OK;
 }
 

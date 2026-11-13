@@ -498,7 +498,40 @@ static void a_deferred_step_runs_in_queue_order_behind_what_was_already_drained(
     end_core(core);
 }
 
-static void a_step_deferred_while_no_dispatch_runs_is_run_at_once(void) {
+/** What a step that calls back in saw of its own call's events. */
+typedef struct calling_step {
+    const hearing *listener;
+    uint32_t heard_when_the_call_returned;
+    uint32_t runs;
+} calling_step;
+
+static weivel_c_status register_inside_a_step(void *data, weivel_c_core *core) {
+    calling_step *self = data;
+    weivel_handle handle = 0;
+    CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    self->heard_when_the_call_returned = self->listener->count;
+    self->runs++;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void a_step_runs_as_the_dispatcher_so_a_call_inside_it_joins_the_end(void) {
+    hearing listener = {0};
+    calling_step record = {0};
+    weivel_c_step step = WEIVEL_INIT(weivel_c_step);
+    weivel_handle handle = 0;
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    record.listener = &listener;
+    step.run = register_inside_a_step;
+    step.data = &record;
+    CHECK(weivel_c_core_defer(core, &step) == WEIVEL_C_STATUS_OK);
+    CHECK(record.runs == 1);
+    CHECK(record.heard_when_the_call_returned == 0);
+    CHECK(listener.count == 1 && listener.deepest == 1);
+    end_core(core);
+}
+
+static void a_step_deferred_while_no_dispatch_runs_has_run_when_the_call_returns(void) {
     hearing listener = {0};
     reentry more = {0};
     weivel_c_step small = WEIVEL_INIT(weivel_c_step);
@@ -976,7 +1009,8 @@ int main(int argument_count, char **arguments) {
     malformed_for_a_struct_the_caller_built_is_the_callers_mistake();
     a_call_inside_a_listener_joins_the_end_and_never_re_enters_the_dispatcher();
     a_deferred_step_runs_in_queue_order_behind_what_was_already_drained();
-    a_step_deferred_while_no_dispatch_runs_is_run_at_once();
+    a_step_deferred_while_no_dispatch_runs_has_run_when_the_call_returns();
+    a_step_runs_as_the_dispatcher_so_a_call_inside_it_joins_the_end();
     a_failing_listener_goes_to_the_sink_and_every_later_event_is_still_heard();
     listeners_hear_in_the_order_added_until_removed();
     a_deadline_is_announced_as_it_is_drained_and_before_it_is_dispatched();

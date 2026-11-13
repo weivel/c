@@ -4,8 +4,8 @@
  * thread at a time, every deferred step runs exactly once, and a refused call is answered its own refusal, which it
  * can only be while no other thread's call lands between a call and its drain.
  *
- * @implNote The listener's record is deliberately unguarded. One dispatcher at a time, handed on under the layer
- * lock, is what makes that safe, so a second dispatcher is a data race the thread sanitizer names.
+ * @implNote The record the listener and the steps write is deliberately unguarded. One dispatcher at a time, handed
+ * on under the layer lock, is what makes that safe, so a second dispatcher is a data race the thread sanitizer names.
  */
 
 #include "fixture.h"
@@ -26,6 +26,7 @@ typedef struct dispatch_record {
     uint32_t out_of_order;
     uint32_t inside;
     uint32_t overlaps;
+    uint32_t steps;
 } dispatch_record;
 
 typedef struct worker {
@@ -37,23 +38,30 @@ typedef struct worker {
 } worker;
 
 static weivel_c_status hear_in_order(void *data, weivel_c_core *core, const weivel_c_event *event) {
-    dispatch_record *record = data;
+    dispatch_record *heard = data;
     (void)core;
-    record->overlaps += record->inside;
-    record->inside = 1;
-    if (record->expected_sequence != 0 && event->sequence != record->expected_sequence) {
-        record->out_of_order++;
+    heard->overlaps += heard->inside;
+    heard->inside = 1;
+    if (heard->expected_sequence != 0 && event->sequence != heard->expected_sequence) {
+        heard->out_of_order++;
     }
-    record->expected_sequence = event->sequence + 1;
-    record->heard++;
-    record->inside = 0;
+    heard->expected_sequence = event->sequence + 1;
+    heard->heard++;
+    heard->inside = 0;
     return WEIVEL_C_STATUS_OK;
 }
+
+/** The one record every listener call and every step writes, unguarded. */
+static dispatch_record record;
 
 static weivel_c_status mark_run(void *data, weivel_c_core *core) {
     uint32_t *ran = data;
     (void)core;
+    record.overlaps += record.inside;
+    record.inside = 1;
     *ran += 1;
+    record.steps++;
+    record.inside = 0;
     return WEIVEL_C_STATUS_OK;
 }
 
@@ -146,7 +154,6 @@ static void check_every_step_ran_once(const worker *workers) {
 }
 
 static void calls_from_several_threads_are_dispatched_once_in_drained_order_by_one_thread(void) {
-    dispatch_record record = {0};
     weivel_c_listener listener = {hear_in_order, &record};
     uint64_t registration = 0;
     worker *workers = calloc(THREADS, sizeof *workers);
@@ -160,6 +167,7 @@ static void calls_from_several_threads_are_dispatched_once_in_drained_order_by_o
     CHECK(record.heard == crossed.events);
     CHECK(record.out_of_order == 0);
     CHECK(record.overlaps == 0);
+    CHECK(record.steps == (uint32_t)(THREADS * ROUNDS));
     CHECK(crossed.unreleased == 0 && crossed.most_unreleased == 1);
     end_core(core);
     free(workers);

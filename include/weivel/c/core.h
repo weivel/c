@@ -15,7 +15,7 @@
  * - Events are dispatched to the listeners first in, first out, outside the lock, by one thread at a time. A call
  *   made while a dispatch runs, from a listener or from another thread, drains its own events onto the end of the
  *   queue and returns; the running dispatch delivers them after everything drained before them. The dispatcher is
- *   never re-entered.
+ *   never re-entered. A deferred step is an entry of the same queue, so listeners and steps run one at a time.
  * - What a listener, a step or a hook answers as a failure goes to the error sink, never to a caller.
  *
  * Conventions every declaration of the layer follows:
@@ -442,11 +442,12 @@ WEIVEL_C_API weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *cor
                                                               const weivel_c_deadline_hooks *hooks);
 
 /**
- * Runs a step once every event drained so far has been dispatched. While a dispatch runs, on this thread or on
- * another, the step joins the end of the queue behind the events and steps already there and is run by that
- * dispatch, in queue order. While none runs, every event drained so far has been dispatched already, so the step is
- * run at once, on the calling thread, before this returns, and a call it makes dispatches its own events as a call
- * made outside a dispatch does.
+ * Runs a step once every event drained so far has been dispatched. A step is a queue entry like an event: it joins
+ * the end of the queue and is run by the one thread dispatching, in queue order, so no step runs while a listener or
+ * another step does. While a dispatch runs, on this thread or on another, that dispatch runs it, possibly after this
+ * returns. While none runs, every event drained so far has been dispatched already, so the calling thread becomes
+ * the dispatcher and the step has run when this returns; a call it makes is then a call made inside a dispatch, its
+ * events heard after the step returns and before this does.
  *
  * @param step an idle step, as WEIVEL_INIT or its last run leaves it. Required.
  * @return WEIVEL_C_STATUS_OK, whatever the step answers; WEIVEL_C_STATUS_MISUSE (NULL, a step smaller than its first
