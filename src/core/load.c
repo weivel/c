@@ -29,7 +29,7 @@ static const table_slot SLOTS[] = {WEIVEL_C_CORE_FUNCTIONS(SLOT)};
 WEIVEL_C_CORE_FUNCTIONS(SAME_TYPE_AS_THE_CORE)
 #undef SAME_TYPE_AS_THE_CORE
 
-_Static_assert(sizeof(weivel_c_binary_function) == sizeof(((weivel_c_core_table *)0)->core_create),
+_Static_assert(sizeof(weivel_c_binary_function) == sizeof(weivel_status (*)(weivel_core *)),
                "every function pointer must have one size");
 
 static size_t covered_size(const weivel_c_core_table *table) {

@@ -16,6 +16,8 @@
  *   made while a dispatch runs, from a listener or from another thread, drains its own events onto the end of the
  *   queue and returns; the running dispatch delivers them after everything drained before them. The dispatcher is
  *   never re-entered. A deferred step is an entry of the same queue, so listeners and steps run one at a time.
+ * - Nothing of the caller's is ever called under the layer lock: a listener, a step, a deadline hook and the error
+ *   sink each run outside it, and so each may call into the core.
  * - What a listener, a step or a hook answers as a failure goes to the error sink, never to a caller.
  *
  * Conventions every declaration of the layer follows:
@@ -320,10 +322,11 @@ typedef struct weivel_c_failure {
 } weivel_c_failure;
 
 /**
- * Where failures go: `report` and the `data` it is called with. It is called outside the layer lock, on the thread
- * that met the failure, so it may call into the core. A sink that answers a status other than WEIVEL_C_STATUS_OK has
- * itself failed, and that is written to standard error. A NULL `report` is the default sink, which writes one line
- * per failure to standard error.
+ * Where failures go: `report` and the `data` it is called with. It is given when the core is created and stays for
+ * the core's life, so an owner that lets its own caller replace the sink gives one of its own here and forwards. It
+ * is called outside the layer lock, on the thread that met the failure, so it may call into the core. A sink that
+ * answers a status other than WEIVEL_C_STATUS_OK has itself failed, and that is written to standard error. A NULL
+ * `report` is the default sink, which writes one line per failure to standard error.
  *
  * @implNote No `size`: it is embedded by value, so the struct embedding it is what grows.
  */
@@ -347,6 +350,9 @@ typedef struct weivel_c_listener {
 
 /**
  * The layer's place for a step in its queue. Private to the layer, and all zero while the step does not wait.
+ *
+ * @implNote No `size`: it is embedded by value in weivel_c_step, whose own size covers it, and nothing reads it but
+ * the layer.
  */
 typedef struct weivel_c_queue_place {
     struct weivel_c_queue_place *next;
@@ -367,27 +373,33 @@ typedef struct weivel_c_step {
 } weivel_c_step;
 
 /**
- * What the `timer` module installs to follow the core's deadline. Both hooks run under the layer lock, inside the
- * call that sets them off, so they do no more than read a clock and arm a timer: a call into this core from either
- * waits on itself for ever. A hook that answers a status other than WEIVEL_C_STATUS_OK is reported to the error
- * sink.
+ * How a timer follows the core's deadline; the `timer` module installs them for a caller's scheduler. The wrapper
+ * itself records the latest WEIVEL_EVENT_DEADLINE as it drains it, under the layer lock, and calls both hooks outside
+ * that lock, so either may call into the core.
  */
 typedef struct weivel_c_deadline_hooks {
     uint32_t size;
     /**
-     * Told of each WEIVEL_EVENT_DEADLINE as it is drained, before any event is dispatched: `set` 1 with the deadline
-     * `at`, or 0 when none is left. May be NULL.
-     *
-     * @implNote At drain time and not at dispatch, because a dispatch can run after a newer announcement was drained.
+     * The clock, in the milliseconds the core's deadlines are counted in. It is read before a call only while a
+     * deadline is recorded, once per call: when it has reached that deadline the wrapper hands the core the time
+     * with weivel_advance, drains and dispatches that as any call, and only then makes the call it was asked for. The
+     * advance it makes is not preceded by a check, and neither is weivel_c_core_advance, which hands the core a time
+     * itself. May be NULL, and then no call is checked and no clock is read. It must not make a checked call into
+     * this core itself: that call would read the clock again, without end.
      */
-    weivel_c_status (*announced)(void *data, int64_t at, uint32_t set);
+    int64_t (*now)(void *data);
     /**
-     * Asked before each call whether a deadline has fallen due: it answers `*due` 1 and the time `*now` when its
-     * clock has reached the deadline it armed, and the wrapper then hands the core that time with weivel_advance,
-     * drains and dispatches it as any call, and only then makes the call it was asked for. The advance the wrapper
-     * makes is not preceded by this question, so the check never recurses. May be NULL, and then no call is checked.
+     * Told the latest deadline drained: `set` 1 with the deadline `at`, or 0 when none is left. It is called after
+     * the call that drained the announcement let the layer lock go and before that call dispatches any event, never
+     * later at dispatch, because a dispatch can run after a newer announcement was drained. May be NULL.
+     *
+     * One thread calls it at a time, and what it is told last is always the latest announcement drained, whichever
+     * thread drained it: a thread that drains a newer one while another is in `follow` leaves it to that thread,
+     * which calls `follow` again before it goes on. That second thread may so begin dispatching before `follow` has
+     * returned for its announcement. Hooks set while a deadline is recorded are told it at once. A status other than
+     * WEIVEL_C_STATUS_OK is reported to the error sink.
      */
-    weivel_c_status (*is_due)(void *data, int64_t *now, uint32_t *due);
+    weivel_c_status (*follow)(void *data, int64_t at, uint32_t set);
     void *data;
 } weivel_c_deadline_hooks;
 
@@ -420,8 +432,12 @@ WEIVEL_C_API weivel_c_status weivel_c_core_create(const weivel_c_core_options *o
 
 /**
  * Destroys the core behind the object. Events drained and not yet dispatched are dropped, and steps still waiting
- * are dropped without being run, their structs the caller's again; from the moment this returns no listener call
- * and no step begins. An owner that wants them heard makes its last call, lets it return, and destroys then.
+ * are dropped without being run, their structs the caller's again. From the moment this returns no listener call
+ * and no step is taken from the queue; the one another thread's dispatch had already taken may begin just after.
+ * An owner that wants them heard makes its last call, lets it return, and destroys then.
+ *
+ * A dropped step is not handed back and not told: whoever defers steps that free something keeps its own list of
+ * what they would have freed, and frees it after destroying.
  *
  * The object itself stays until weivel_c_core_free, and every later call on it answers WEIVEL_C_STATUS_DESTROYED.
  * It may be called inside a listener or a step: the dispatch it runs in then ends with that listener or step.
@@ -455,9 +471,9 @@ WEIVEL_C_API weivel_c_status weivel_c_core_add_listener(weivel_c_core *core, con
                                                         uint64_t *registration);
 
 /**
- * Removes a listener. No call to it begins once this returns; one already begun on another thread may still be
- * running, so a listener whose `data` is about to be freed is removed from inside a dispatch, by a listener or a
- * step.
+ * Removes a listener. It is taken for no event once this returns; the one call another thread's dispatch had already
+ * taken it for may begin just after or still be running, so a listener whose `data` is about to be freed is removed
+ * from inside a dispatch, by a listener or a step.
  *
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE for NULL or a registration that names no listener;
  * WEIVEL_C_STATUS_DESTROYED.
@@ -470,7 +486,7 @@ WEIVEL_C_API weivel_c_status weivel_c_core_remove_listener(weivel_c_core *core, 
  *
  * @param hooks NULL removes them; read only during the call.
  * @return WEIVEL_C_STATUS_OK, WEIVEL_C_STATUS_MISUSE or WEIVEL_C_STATUS_DESTROYED.
- * Threading: any thread but from inside a hook.
+ * Threading: any thread. A hook another thread had already been handed may still be running when this returns.
  */
 WEIVEL_C_API weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *core,
                                                               const weivel_c_deadline_hooks *hooks);
@@ -484,11 +500,15 @@ WEIVEL_C_API weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *cor
  * events heard after the step returns and before this does.
  *
  * @param step an idle step, as WEIVEL_INIT or its last run leaves it. Required.
+ * @param dispatched_here receives 1 when the calling thread was the dispatcher, so the step has run, or a destroy
+ * made inside that dispatch dropped it, before this returned; and 0 when a dispatch already running will run it,
+ * possibly later, or the call answered anything but OK. May be NULL.
  * @return WEIVEL_C_STATUS_OK, whatever the step answers; WEIVEL_C_STATUS_MISUSE (NULL, a step smaller than its first
  * shape, without `run`, or already waiting); WEIVEL_C_STATUS_DESTROYED, the step never run.
  * Threading: any thread.
  */
-WEIVEL_C_API weivel_c_status weivel_c_core_defer(weivel_c_core *core, weivel_c_step *step);
+WEIVEL_C_API weivel_c_status weivel_c_core_defer(weivel_c_core *core, weivel_c_step *step,
+                                                 uint32_t *dispatched_here);
 
 /**
  * @name The core's calls, through the wrapper.
@@ -513,7 +533,10 @@ WEIVEL_C_API weivel_c_status weivel_c_core_defer(weivel_c_core *core, weivel_c_s
  * release.
  *
  * Threading: any thread. A call made while a dispatch runs returns once its events are drained, before they are
- * dispatched.
+ * dispatched. A call made while none runs dispatches its own events before it returns, so a listener can hear of a
+ * handle before the call that answered it has returned to its caller.
+ *
+ * weivel_c_core_advance hands the core a time itself, so it is not preceded by the check for a due deadline.
  */
 /**@{*/
 WEIVEL_C_API weivel_c_status weivel_c_core_next_deadline(weivel_c_core *core, int64_t *deadline,

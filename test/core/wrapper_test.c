@@ -465,8 +465,8 @@ static weivel_c_status defer_inside_a_listener(hearing *self, weivel_c_core *cor
     weivel_handle handle = 0;
     if (is_first_unregistration(event, more)) {
         more->entered = 1;
-        CHECK(weivel_c_core_defer(core, &more->step) == WEIVEL_C_STATUS_OK);
-        more->second_deferral = weivel_c_core_defer(core, &more->step);
+        CHECK(weivel_c_core_defer(core, &more->step, NULL) == WEIVEL_C_STATUS_OK);
+        more->second_deferral = weivel_c_core_defer(core, &more->step, NULL);
         CHECK(more->steps_run == 0);
         CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
     }
@@ -524,7 +524,7 @@ static void a_step_runs_as_the_dispatcher_so_a_call_inside_it_joins_the_end(void
     record.listener = &listener;
     step.run = register_inside_a_step;
     step.data = &record;
-    CHECK(weivel_c_core_defer(core, &step) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_defer(core, &step, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(record.runs == 1);
     CHECK(record.heard_when_the_call_returned == 0);
     CHECK(listener.count == 1 && listener.deepest == 1);
@@ -540,15 +540,15 @@ static void a_step_deferred_while_no_dispatch_runs_has_run_when_the_call_returns
     more.step.run = count_what_was_heard;
     more.step.data = &more;
     more.listener = &listener;
-    CHECK(weivel_c_core_defer(core, &more.step) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_defer(core, &more.step, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(more.steps_run == 1);
-    CHECK(weivel_c_core_defer(core, &more.step) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_defer(core, &more.step, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(more.steps_run == 2);
-    CHECK(weivel_c_core_defer(core, NULL) == WEIVEL_C_STATUS_MISUSE);
-    CHECK(weivel_c_core_defer(core, &small) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_core_defer(core, NULL, NULL) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_core_defer(core, &small, NULL) == WEIVEL_C_STATUS_MISUSE);
     small.run = count_what_was_heard;
     small.size -= 1;
-    CHECK(weivel_c_core_defer(core, &small) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_core_defer(core, &small, NULL) == WEIVEL_C_STATUS_MISUSE);
     CHECK(more.steps_run == 2);
     end_core(core);
 }
@@ -588,7 +588,7 @@ static void a_failing_listener_goes_to_the_sink_and_every_later_event_is_still_h
     CHECK(sink.items[0].failure.sequence != 0 && sink.items[0].failure.sequence < sink.items[1].failure.sequence);
     CHECK(failing.count == crossed.events && other.count == crossed.events);
     step.run = fail_as_out_of_memory;
-    CHECK(weivel_c_core_defer(core, &step) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_defer(core, &step, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(sink.count == 3);
     CHECK(sink.items[2].failure.kind == WEIVEL_C_FAILURE_STEP);
     CHECK(sink.items[2].failure.status == WEIVEL_C_STATUS_OUT_OF_MEMORY);
@@ -636,40 +636,46 @@ static void listeners_hear_in_the_order_added_until_removed(void) {
     end_core(core);
 }
 
-/** A timer's stand-in: it records each announcement and says a deadline is due as often as it is told to. */
+/** A timer's stand-in: a clock the test sets, and a record of each deadline it was told to follow. */
 typedef struct clockwork {
-    uint32_t announcements;
-    int64_t announced_at;
-    uint32_t announced_set;
-    uint32_t asked;
-    uint32_t due_answers_left;
+    uint32_t follows;
+    int64_t followed_at;
+    uint32_t followed_set;
+    uint32_t clock_reads;
     int64_t now;
     weivel_c_status answer;
+    /** When set, each hook takes this core's layer lock, which waits for ever if the hook already runs under it. */
+    weivel_c_core *locked_from_inside;
+    uint32_t locks_taken;
 } clockwork;
 
-static weivel_c_status announced(void *data, int64_t at, uint32_t set) {
+static void take_the_layer_lock(clockwork *self) {
+    if (self->locked_from_inside != NULL) {
+        CHECK(weivel_c_core_remove_listener(self->locked_from_inside, UINT64_MAX) == WEIVEL_C_STATUS_MISUSE);
+        self->locks_taken++;
+    }
+}
+
+static weivel_c_status follow(void *data, int64_t at, uint32_t set) {
     clockwork *self = data;
-    self->announcements++;
-    self->announced_at = at;
-    self->announced_set = set;
+    self->follows++;
+    self->followed_at = at;
+    self->followed_set = set;
+    take_the_layer_lock(self);
     return self->answer;
 }
 
-static weivel_c_status is_due(void *data, int64_t *now, uint32_t *due) {
+static int64_t read_clock(void *data) {
     clockwork *self = data;
-    self->asked++;
-    if (self->due_answers_left > 0) {
-        self->due_answers_left--;
-        *now = self->now;
-        *due = 1;
-    }
-    return self->answer;
+    self->clock_reads++;
+    take_the_layer_lock(self);
+    return self->now;
 }
 
 static weivel_c_deadline_hooks hooks_of(clockwork *self) {
     weivel_c_deadline_hooks hooks = WEIVEL_INIT(weivel_c_deadline_hooks);
-    hooks.announced = announced;
-    hooks.is_due = is_due;
+    hooks.now = read_clock;
+    hooks.follow = follow;
     hooks.data = self;
     return hooks;
 }
@@ -688,7 +694,7 @@ static weivel_handle want_for_a_hundred_milliseconds(weivel_c_core *core, weivel
 typedef struct drain_time {
     clockwork *clock;
     weivel_handle consumer;
-    uint32_t announcements_after_the_call;
+    uint32_t follows_after_the_call;
     uint32_t deadlines_heard_by_then;
     int wanted;
 } drain_time;
@@ -698,13 +704,13 @@ static weivel_c_status want_inside_a_listener(hearing *self, weivel_c_core *core
     if (event->kind == WEIVEL_EVENT_WATCH && !more->wanted) {
         more->wanted = 1;
         want_for_a_hundred_milliseconds(core, more->consumer);
-        more->announcements_after_the_call = more->clock->announcements;
+        more->follows_after_the_call = more->clock->follows;
         more->deadlines_heard_by_then = count_heard(self, WEIVEL_EVENT_DEADLINE);
     }
     return WEIVEL_C_STATUS_OK;
 }
 
-static void a_deadline_is_announced_as_it_is_drained_and_before_it_is_dispatched(void) {
+static void a_deadline_is_followed_after_its_drain_and_before_its_dispatch(void) {
     hearing listener = {0};
     clockwork clock = {0};
     drain_time more = {0};
@@ -718,11 +724,12 @@ static void a_deadline_is_announced_as_it_is_drained_and_before_it_is_dispatched
     listener.more = &more;
     CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(clock.follows == 0 && clock.clock_reads == 0);
     CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(more.wanted == 1);
-    CHECK(more.announcements_after_the_call == 1);
+    CHECK(more.follows_after_the_call == 1);
     CHECK(more.deadlines_heard_by_then == 0);
-    CHECK(clock.announced_set == 1 && clock.announced_at == 100);
+    CHECK(clock.followed_set == 1 && clock.followed_at == 100);
     CHECK(count_heard(&listener, WEIVEL_EVENT_DEADLINE) == 1);
     CHECK(weivel_c_core_set_deadline_hooks(core, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_core_unregister(core, handle, NULL) == WEIVEL_C_STATUS_OK);
@@ -731,10 +738,28 @@ static void a_deadline_is_announced_as_it_is_drained_and_before_it_is_dispatched
     end_core(core);
 }
 
+/** What a listener saw of the registration a due deadline came before. */
+typedef struct order_of_time {
+    weivel_c_status found_when_timed_out;
+    uint32_t timed_out;
+} order_of_time;
+
+static weivel_c_status look_for_the_service_on_a_time_out(hearing *self, weivel_c_core *core,
+                                                          const weivel_c_event *event) {
+    order_of_time *more = self->more;
+    weivel_handle found = 0;
+    if (event->kind == WEIVEL_EVENT_WANT_SETTLED && event->data.want.refusal.code == WEIVEL_REFUSAL_TIMED_OUT) {
+        more->timed_out++;
+        more->found_when_timed_out = weivel_c_core_get_service(core, WEIVEL_HOST, "p:a", &found, NULL);
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
 static void a_due_deadline_is_handed_to_the_core_before_the_call_and_never_checked_again(void) {
     static const char *const PROVIDED[] = {"p:a"};
     hearing listener = {0};
     clockwork clock = {0};
+    order_of_time more = {WEIVEL_C_STATUS_FAILED, 0};
     weivel_c_deadline_hooks hooks = hooks_of(&clock);
     weivel_service_want consumed = want_of("p:a");
     weivel_c_core *core = make_core(NULL, &listener, NULL);
@@ -743,18 +768,38 @@ static void a_due_deadline_is_handed_to_the_core_before_the_call_and_never_check
     weivel_handle handle = 0;
     CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
     want_for_a_hundred_milliseconds(core, consumer);
+    CHECK(clock.clock_reads == 0);
     listener.count = 0;
+    listener.react = look_for_the_service_on_a_time_out;
+    listener.more = &more;
     forget_crossings();
-    clock.asked = 0;
-    clock.due_answers_left = 3;
     clock.now = 150;
     CHECK(weivel_c_core_register_service(core, provider, "p:a", &handle, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(clock.asked == 1);
+    CHECK(clock.clock_reads == 1);
     CHECK(crossed.advance == 1 && crossed.advanced_to == 150);
     CHECK(count_heard(&listener, WEIVEL_EVENT_WANT_SETTLED) == 1);
     CHECK(listener.items[0].kind == WEIVEL_EVENT_WANT_SETTLED);
     CHECK(listener.items[0].code == WEIVEL_REFUSAL_TIMED_OUT && listener.items[0].implementation == 0);
-    CHECK(clock.announced_set == 0);
+    CHECK(more.timed_out == 1 && more.found_when_timed_out == WEIVEL_C_STATUS_NONE);
+    CHECK(clock.followed_set == 0);
+    CHECK(weivel_c_core_get_service(core, WEIVEL_HOST, "p:a", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(clock.clock_reads == 1);
+    end_core(core);
+}
+
+static void an_advance_the_caller_makes_is_not_preceded_by_the_check(void) {
+    clockwork clock = {0};
+    weivel_c_deadline_hooks hooks = hooks_of(&clock);
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    want_for_a_hundred_milliseconds(core, consumer);
+    forget_crossings();
+    clock.now = 150;
+    CHECK(weivel_c_core_advance(core, 50, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(clock.clock_reads == 0);
+    CHECK(crossed.advance == 1 && crossed.advanced_to == 50);
     end_core(core);
 }
 
@@ -770,13 +815,247 @@ static void a_failing_deadline_hook_goes_to_the_sink_and_the_call_is_still_made(
     clock.answer = WEIVEL_C_STATUS_FAILED;
     CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
     want = want_for_a_hundred_milliseconds(core, consumer);
-    CHECK(sink.count == 2);
+    CHECK(clock.follows == 1 && sink.count == 1);
     CHECK(sink.items[0].failure.kind == WEIVEL_C_FAILURE_DEADLINE_HOOK);
-    CHECK(sink.items[1].failure.kind == WEIVEL_C_FAILURE_DEADLINE_HOOK);
-    CHECK(sink.items[1].failure.status == WEIVEL_C_STATUS_FAILED);
+    CHECK(sink.items[0].failure.status == WEIVEL_C_STATUS_FAILED);
     CHECK(weivel_c_core_handle_state(core, want, &condition, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(condition == WEIVEL_HANDLE_WAITING);
     end_core(core);
+}
+
+static void the_deadline_hooks_run_outside_the_layer_lock(void) {
+    static const char *const PROVIDED[] = {"p:a"};
+    clockwork clock = {0};
+    weivel_c_deadline_hooks hooks = hooks_of(&clock);
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle provider = open_plugin(core, "p", PROVIDED, 1, NULL, 0);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    weivel_handle handle = 0;
+    clock.locked_from_inside = core;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    want_for_a_hundred_milliseconds(core, consumer);
+    CHECK(clock.follows == 1 && clock.locks_taken == 1);
+    clock.now = 150;
+    CHECK(weivel_c_core_register_service(core, provider, "p:a", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(clock.clock_reads == 1 && clock.follows == 2 && clock.locks_taken == 3);
+    end_core(core);
+}
+
+static void hooks_set_while_a_deadline_is_recorded_are_told_it_at_once(void) {
+    clockwork clock = {0};
+    clockwork later = {0};
+    weivel_c_deadline_hooks hooks = hooks_of(&clock);
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    CHECK(clock.follows == 0);
+    CHECK(weivel_c_core_set_deadline_hooks(core, NULL) == WEIVEL_C_STATUS_OK);
+    want_for_a_hundred_milliseconds(core, consumer);
+    CHECK(clock.follows == 0);
+    hooks = hooks_of(&later);
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    CHECK(later.follows == 1 && later.followed_set == 1 && later.followed_at == 100);
+    end_core(core);
+}
+
+static void bend_a_watch_to_an_unknown_kind(weivel_event *event) {
+    if (event->kind == WEIVEL_EVENT_WATCH && kind_before_bending == 0) {
+        kind_before_bending = event->kind;
+        event->kind = 4000;
+        bend_event = NULL;
+    }
+}
+
+static void an_event_of_a_kind_the_layer_does_not_know_is_released_and_never_heard(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    weivel_handle handle = 0;
+    uint32_t drained_by_the_unregistration;
+    weivel_c_core *core = make_core(NULL, &listener, &sink);
+    CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(listener.count == 1);
+    forget_crossings();
+    bend_event = bend_a_watch_to_an_unknown_kind;
+    CHECK(weivel_c_core_unregister(core, handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(crossed.events >= 1 && crossed.event_release == crossed.events && crossed.unreleased == 0);
+    CHECK(count_heard(&listener, 4000) == 0 && count_heard(&listener, WEIVEL_EVENT_WATCH) == 1);
+    CHECK(listener.count == crossed.events);
+    CHECK(sink.count == 0);
+    drained_by_the_unregistration = crossed.events;
+    CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(listener.items[listener.count - 1].kind == WEIVEL_EVENT_WATCH);
+    CHECK(listener.items[listener.count - 1].sequence ==
+          listener.items[0].sequence + 1 + drained_by_the_unregistration);
+    end_core(core);
+}
+
+static void each_defect_of_one_call_keeps_its_own_text(void) {
+    telling sink = {0};
+    weivel_c_core *core = make_core(NULL, NULL, &sink);
+    uint32_t condition = 0;
+    forget_crossings();
+    withhold_condition = 1;
+    fail_event_release = 1;
+    CHECK(weivel_c_core_handle_state(core, 0x123456789u, &condition, NULL) == WEIVEL_C_STATUS_LAYER_DEFECT);
+    fail_event_release = 0;
+    CHECK(sink.count == 2);
+    CHECK(sink.items[0].failure.kind == WEIVEL_C_FAILURE_LAYER_DEFECT);
+    CHECK(sink.items[1].failure.kind == WEIVEL_C_FAILURE_LAYER_DEFECT);
+    CHECK(strstr(sink.items[0].text, "release") != NULL && strstr(sink.items[0].text, "malformed") == NULL);
+    CHECK(strstr(sink.items[1].text, "malformed") != NULL);
+    end_core(core);
+}
+
+static void a_drain_the_core_refuses_midway_is_a_defect_and_the_rest_is_drained_by_the_next_call(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    weivel_c_core *core = make_core(NULL, &listener, &sink);
+    weivel_handle plugin = open_a_watched_provider(core);
+    weivel_handle watch = 0;
+    uint32_t heard_by_the_release;
+    listener.count = 0;
+    forget_crossings();
+    fail_next_event_at = 2;
+    CHECK(weivel_c_core_release_plugin(core, plugin, NULL) == WEIVEL_C_STATUS_OK);
+    heard_by_the_release = listener.count;
+    CHECK(heard_by_the_release == 1 && crossed.events == 1);
+    CHECK(sink.count == 1 && sink.items[0].failure.kind == WEIVEL_C_FAILURE_LAYER_DEFECT);
+    CHECK(strstr(sink.items[0].text, "not drained") != NULL);
+    CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "elsewhere", &watch, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(listener.count > heard_by_the_release && listener.count == crossed.events);
+    CHECK(count_heard(&listener, WEIVEL_EVENT_WATCH) == 2);
+    CHECK(sink.count == 1);
+    end_core(core);
+}
+
+static void set_an_unreadable_stride(weivel_event *event) {
+    static weivel_number unreadable;
+    if (event->kind == WEIVEL_EVENT_CAPACITY_WANTED) {
+        unreadable.size = 1;
+        event->data.capacity.constraints.items = &unreadable;
+        event->data.capacity.constraints.count = 1;
+    }
+}
+
+static weivel_c_status count_incomplete_questions(hearing *self, weivel_c_core *core, const weivel_c_event *event) {
+    uint32_t *found = self->more;
+    (void)core;
+    if (event->kind == WEIVEL_EVENT_CAPACITY_WANTED) {
+        CHECK(event->incomplete == 1);
+        CHECK(event->data.capacity.constraints.count == 0 && event->data.capacity.constraints.items == NULL);
+        CHECK(event->data.capacity.registration != 0);
+        *found += 1;
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void an_array_whose_stride_cannot_be_read_leaves_its_event_incomplete(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    uint32_t found = 0;
+    weivel_constraint_entry entry;
+    weivel_core_options core_options = options_with_a_speed_constraint(&entry);
+    weivel_c_core *core;
+    forget_crossings();
+    bend_event = set_an_unreadable_stride;
+    listener.react = count_incomplete_questions;
+    listener.more = &found;
+    core = make_core(&core_options, &listener, &sink);
+    ask_a_capacity_question(core);
+    CHECK(found == 1);
+    CHECK(sink.count == 1 && sink.items[0].failure.kind == WEIVEL_C_FAILURE_EVENT_INCOMPLETE);
+    CHECK(sink.items[0].failure.event_kind == WEIVEL_EVENT_CAPACITY_WANTED);
+    end_core(core);
+}
+
+/** What a listener that defers a step learned about where it would run. */
+typedef struct deferral {
+    weivel_c_step step;
+    uint32_t runs;
+    uint32_t dispatched_here_inside;
+    int deferred;
+} deferral;
+
+static weivel_c_status count_a_run(void *data, weivel_c_core *core) {
+    deferral *self = data;
+    (void)core;
+    self->runs++;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static weivel_c_status defer_once_inside_a_listener(hearing *self, weivel_c_core *core, const weivel_c_event *event) {
+    deferral *more = self->more;
+    (void)event;
+    if (!more->deferred) {
+        more->deferred = 1;
+        more->dispatched_here_inside = 7;
+        CHECK(weivel_c_core_defer(core, &more->step, &more->dispatched_here_inside) == WEIVEL_C_STATUS_OK);
+        CHECK(more->runs == 1);
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void a_deferral_says_whether_the_step_was_dispatched_before_it_returned(void) {
+    hearing listener = {0};
+    deferral more = {0};
+    uint32_t dispatched_here = 7;
+    weivel_handle handle = 0;
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    more.step = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
+    more.step.run = count_a_run;
+    more.step.data = &more;
+    CHECK(weivel_c_core_defer(core, &more.step, &dispatched_here) == WEIVEL_C_STATUS_OK);
+    CHECK(dispatched_here == 1 && more.runs == 1);
+    CHECK(weivel_c_core_defer(core, NULL, &dispatched_here) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(dispatched_here == 0);
+    listener.react = defer_once_inside_a_listener;
+    listener.more = &more;
+    CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(more.deferred == 1 && more.dispatched_here_inside == 0 && more.runs == 2);
+    end_core(core);
+}
+
+static weivel_c_status destroy_the_core(void *data, weivel_c_core *core) {
+    uint32_t *runs = data;
+    *runs += 1;
+    CHECK(weivel_c_core_destroy(core) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_MISUSE);
+    return WEIVEL_C_STATUS_OK;
+}
+
+static weivel_c_status defer_a_destroy_and_a_step_behind_it(hearing *self, weivel_c_core *core,
+                                                            const weivel_c_event *event) {
+    weivel_c_step *steps = self->more;
+    (void)event;
+    if (self->count == 1) {
+        CHECK(weivel_c_core_defer(core, &steps[0], NULL) == WEIVEL_C_STATUS_OK);
+        CHECK(weivel_c_core_defer(core, &steps[1], NULL) == WEIVEL_C_STATUS_OK);
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void destroy_inside_a_step_drops_the_steps_behind_it(void) {
+    hearing listener = {0};
+    weivel_c_step steps[2] = {WEIVEL_INIT(weivel_c_step), WEIVEL_INIT(weivel_c_step)};
+    uint32_t destroys = 0;
+    deferral behind = {0};
+    weivel_handle handle = 0;
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    steps[0].run = destroy_the_core;
+    steps[0].data = &destroys;
+    steps[1].run = count_a_run;
+    steps[1].data = &behind;
+    listener.react = defer_a_destroy_and_a_step_behind_it;
+    listener.more = steps;
+    CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(destroys == 1 && behind.runs == 0);
+    CHECK(steps[1].place.waiting == 0);
+    CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_OK);
 }
 
 /** What a listener that destroys its core tried afterwards. */
@@ -794,12 +1073,12 @@ static weivel_c_status destroy_on_the_first_event(hearing *self, weivel_c_core *
     uint32_t condition = 0;
     (void)event;
     if (self->count == 1) {
-        CHECK(weivel_c_core_defer(core, &more->waiting_step) == WEIVEL_C_STATUS_OK);
+        CHECK(weivel_c_core_defer(core, &more->waiting_step, NULL) == WEIVEL_C_STATUS_OK);
         CHECK(more->waiting_step.place.waiting != 0);
         more->destroyed = weivel_c_core_destroy(core);
         more->freed_inside = weivel_c_core_free(core);
         more->called_after = weivel_c_core_handle_state(core, 1, &condition, NULL);
-        more->deferred_after = weivel_c_core_defer(core, &more->waiting_step);
+        more->deferred_after = weivel_c_core_defer(core, &more->waiting_step, NULL);
     }
     return WEIVEL_C_STATUS_OK;
 }
@@ -1111,7 +1390,55 @@ static void a_listener_that_cannot_be_kept_is_answered_out_of_memory(void) {
     CHECK(memory.held == 0);
 }
 
+static void a_deadline_whose_copy_fails_is_still_followed(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    counting_memory memory = {0};
+    clockwork clock = {0};
+    weivel_c_deadline_hooks hooks = hooks_of(&clock);
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core_on(&memory, &listener, &sink);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    listener.count = 0;
+    memory.refuse_from_size = 1;
+    want_for_a_hundred_milliseconds(core, consumer);
+    memory.refuse_from_size = 0;
+    CHECK(count_heard(&listener, WEIVEL_EVENT_DEADLINE) == 0);
+    CHECK(count_told(&sink, WEIVEL_C_FAILURE_EVENT_NOT_COPIED, WEIVEL_EVENT_DEADLINE) == 1);
+    CHECK(clock.follows == 1 && clock.followed_set == 1 && clock.followed_at == 100);
+    end_core(core);
+    CHECK(memory.held == 0);
+}
+
+static void more_failures_than_one_call_keeps_are_counted_for_the_sink(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    counting_memory memory = {0};
+    weivel_c_core *core = make_core_on(&memory, &listener, &sink);
+    weivel_handle plugin = open_a_watched_provider(core);
+    weivel_handle watch = 0;
+    int index;
+    for (index = 0; index < 4; index++) {
+        CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "p:a", &watch, NULL) == WEIVEL_C_STATUS_OK);
+        CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "p:b", &watch, NULL) == WEIVEL_C_STATUS_OK);
+    }
+    forget_crossings();
+    memory.refuse_from_size = 1;
+    CHECK(weivel_c_core_release_plugin(core, plugin, NULL) == WEIVEL_C_STATUS_OK);
+    memory.refuse_from_size = 0;
+    CHECK(crossed.events > 8);
+    CHECK(sink.count == 9);
+    CHECK(sink.items[7].failure.kind == WEIVEL_C_FAILURE_EVENT_NOT_COPIED);
+    CHECK(sink.items[8].failure.kind == WEIVEL_C_FAILURE_NOT_TOLD);
+    CHECK(sink.items[8].failure.sequence == crossed.events - 8);
+    end_core(core);
+    CHECK(memory.held == 0);
+}
+
 static void run_the_tests_that_fail_an_allocation(void) {
+    a_deadline_whose_copy_fails_is_still_followed();
+    more_failures_than_one_call_keeps_are_counted_for_the_sink();
     an_event_that_cannot_be_copied_goes_to_the_sink_and_the_rest_are_still_drained();
     an_event_whose_texts_cannot_be_copied_is_still_heard_with_a_fixed_sentence();
     a_capacity_event_whose_constraints_cannot_be_copied_is_heard_marked_incomplete();
@@ -1151,9 +1478,18 @@ int main(int argument_count, char **arguments) {
     a_step_runs_as_the_dispatcher_so_a_call_inside_it_joins_the_end();
     a_failing_listener_goes_to_the_sink_and_every_later_event_is_still_heard();
     listeners_hear_in_the_order_added_until_removed();
-    a_deadline_is_announced_as_it_is_drained_and_before_it_is_dispatched();
+    a_deadline_is_followed_after_its_drain_and_before_its_dispatch();
     a_due_deadline_is_handed_to_the_core_before_the_call_and_never_checked_again();
+    an_advance_the_caller_makes_is_not_preceded_by_the_check();
     a_failing_deadline_hook_goes_to_the_sink_and_the_call_is_still_made();
+    the_deadline_hooks_run_outside_the_layer_lock();
+    hooks_set_while_a_deadline_is_recorded_are_told_it_at_once();
+    an_event_of_a_kind_the_layer_does_not_know_is_released_and_never_heard();
+    each_defect_of_one_call_keeps_its_own_text();
+    a_drain_the_core_refuses_midway_is_a_defect_and_the_rest_is_drained_by_the_next_call();
+    an_array_whose_stride_cannot_be_read_leaves_its_event_incomplete();
+    a_deferral_says_whether_the_step_was_dispatched_before_it_returned();
+    destroy_inside_a_step_drops_the_steps_behind_it();
     destroy_drops_what_was_not_dispatched_and_nothing_is_dispatched_after_it();
     a_core_that_is_not_destroyed_is_not_freed();
     refuses_a_misused_creation_and_creates_nothing();

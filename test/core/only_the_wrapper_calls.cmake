@@ -4,6 +4,12 @@
 # creates and destroys the core, drains it and makes the one advance of a due deadline, and src/core/calls.c holds one
 # function per other call, each naming one field of the table once, for the wrapper to call. Nothing may name a core
 # function directly at all, since the layer links no core.
+#
+# The first guard is structural and this check is the second: the `weivel_core *` a call needs never leaves
+# src/core/wrapper.c, which hands it only to the one function of src/core/calls.c it was given. So outside those two
+# files this fails on any mention of a member named like a function of the core, called or not, which is what catches
+# a table field copied into a variable or called through a dereference. A member of the layer's own structs is
+# therefore never named like a function of the core.
 
 cmake_minimum_required(VERSION 3.15)
 
@@ -41,6 +47,11 @@ foreach(source IN LISTS sources)
         string(REGEX MATCH "(^|[^a-z_])weivel_${name}[ ]*\\(" direct "${text}")
         if(direct)
             list(APPEND offenders "${source} names weivel_${name} directly")
+        endif()
+        string(REGEX MATCH "(->|\\.)[ \t\r\n]*${name}[^a-z_]" mentioned "${text}")
+        if(mentioned AND NOT source STREQUAL wrapper_file AND NOT source STREQUAL calls_file)
+            list(APPEND offenders "${source} mentions the table's ${name}, outside the wrapper")
+            continue()
         endif()
         if(times EQUAL 0)
             continue()
