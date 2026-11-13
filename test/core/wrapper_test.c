@@ -1,7 +1,7 @@
 #include "fixture.h"
 
 #if !defined(WEIVEL_C_USING_SHARED)
-#include "../../src/core/wrapper.h"
+#include "../../src/core/events.h"
 #endif
 
 static const char *const TWO_SERVICES[] = {"p:a", "p:b"};
@@ -882,17 +882,21 @@ static void refuses_a_misused_creation_and_creates_nothing(void) {
 
 #if !defined(WEIVEL_C_USING_SHARED)
 
-/** An allocator that counts what it holds and fails the allocation it is told to. */
+/**
+ * An allocator that counts what it holds and fails the allocation it is told to, and every allocation of
+ * `refuse_from_size` bytes or more while that is not 0.
+ */
 typedef struct counting_memory {
     uint32_t allocations;
     uint32_t fail_at;
     int32_t held;
+    size_t refuse_from_size;
 } counting_memory;
 
 static void *allocate_counted(void *data, size_t size) {
     counting_memory *self = data;
     self->allocations++;
-    if (self->allocations == self->fail_at) {
+    if (self->allocations == self->fail_at || (self->refuse_from_size != 0 && size >= self->refuse_from_size)) {
         return NULL;
     }
     self->held++;
@@ -905,14 +909,132 @@ static void release_counted(void *data, void *memory) {
     free(memory);
 }
 
-static weivel_c_core *make_core_on(counting_memory *memory, hearing *listener, telling *sink) {
+static weivel_c_core *make_core_with_options_on(counting_memory *memory, const weivel_core_options *core_options,
+                                                hearing *listener, telling *sink) {
     weivel_c_allocator allocator = {allocate_counted, release_counted, memory};
-    weivel_c_core *core = make_core(NULL, NULL, sink);
+    weivel_c_core *core = make_core(core_options, NULL, sink);
     weivel_c_listener heard_by = {hear, listener};
     uint64_t registration = 0;
     weivel_c_core_replace_allocator(core, &allocator);
     CHECK(weivel_c_core_add_listener(core, &heard_by, &registration) == WEIVEL_C_STATUS_OK);
     return core;
+}
+
+static weivel_c_core *make_core_on(counting_memory *memory, hearing *listener, telling *sink) {
+    return make_core_with_options_on(memory, NULL, listener, sink);
+}
+
+/** How many failures of `kind` about an event of `event_kind` a sink was told. */
+static uint32_t count_told(const telling *sink, uint32_t kind, uint32_t event_kind) {
+    uint32_t found = 0;
+    uint32_t index;
+    for (index = 0; index < sink->count && index < 16; index++) {
+        found += sink->items[index].failure.kind == kind && sink->items[index].failure.event_kind == event_kind;
+    }
+    return found;
+}
+
+/** What a listener saw of the one event its test starves of memory. */
+typedef struct starved {
+    weivel_handle want;
+    weivel_handle plugin;
+    uint32_t checked;
+} starved;
+
+static weivel_c_status check_a_settlement_without_its_texts(hearing *self, weivel_c_core *core,
+                                                            const weivel_c_event *event) {
+    starved *more = self->more;
+    (void)core;
+    if (event->kind == WEIVEL_EVENT_WANT_SETTLED) {
+        const weivel_want_event *settled = &event->data.want;
+        CHECK(event->incomplete == 1);
+        CHECK(settled->want == more->want && settled->plugin == more->plugin && settled->implementation == 0);
+        CHECK(settled->refusal.code == WEIVEL_REFUSAL_TIMED_OUT && settled->has_fix == 1);
+        check_text(settled->refusal.detail, WEIVEL_C_TEXT_NOT_COPIED, "a detail that could not be copied");
+        check_text(settled->refusal.fix, WEIVEL_C_TEXT_NOT_COPIED, "a fix that could not be copied");
+        check_text(settled->subject, WEIVEL_C_TEXT_NOT_COPIED, "a subject that could not be copied");
+        more->checked++;
+    } else {
+        CHECK(event->incomplete == 0);
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void an_event_whose_texts_cannot_be_copied_is_still_heard_with_a_fixed_sentence(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    counting_memory memory = {0};
+    starved more = {0};
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core_on(&memory, &listener, &sink);
+    more.plugin = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    more.want = want_for_a_hundred_milliseconds(core, more.plugin);
+    listener.react = check_a_settlement_without_its_texts;
+    listener.more = &more;
+    memory.refuse_from_size = sizeof(weivel_c_queued_event) + 1;
+    CHECK(weivel_c_core_advance(core, 100, NULL) == WEIVEL_C_STATUS_OK);
+    memory.refuse_from_size = 0;
+    CHECK(more.checked == 1);
+    CHECK(count_told(&sink, WEIVEL_C_FAILURE_EVENT_INCOMPLETE, WEIVEL_EVENT_WANT_SETTLED) == 1);
+    CHECK(count_told(&sink, WEIVEL_C_FAILURE_EVENT_NOT_COPIED, WEIVEL_EVENT_WANT_SETTLED) == 0);
+    end_core(core);
+    CHECK(memory.held == 0);
+}
+
+static weivel_c_status check_a_question_without_its_constraints(hearing *self, weivel_c_core *core,
+                                                                const weivel_c_event *event) {
+    starved *more = self->more;
+    (void)core;
+    if (event->kind == WEIVEL_EVENT_CAPACITY_WANTED) {
+        const weivel_capacity_event *asked = &event->data.capacity;
+        CHECK(event->incomplete == 1);
+        CHECK(asked->want != 0 && asked->plugin != 0 && asked->registration != 0);
+        CHECK(asked->question == WEIVEL_CAPACITY_ATTRIBUTES);
+        CHECK(asked->constraints.count == 0 && asked->constraints.items == NULL);
+        more->checked++;
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void a_capacity_event_whose_constraints_cannot_be_copied_is_heard_marked_incomplete(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    counting_memory memory = {0};
+    starved more = {0};
+    weivel_constraint_entry entry;
+    weivel_core_options core_options = options_with_a_speed_constraint(&entry);
+    weivel_c_core *core = make_core_with_options_on(&memory, &core_options, &listener, &sink);
+    listener.react = check_a_question_without_its_constraints;
+    listener.more = &more;
+    memory.refuse_from_size = sizeof(weivel_c_queued_event) + 1;
+    ask_a_capacity_question(core);
+    memory.refuse_from_size = 0;
+    CHECK(more.checked == 1);
+    CHECK(count_told(&sink, WEIVEL_C_FAILURE_EVENT_INCOMPLETE, WEIVEL_EVENT_CAPACITY_WANTED) == 1);
+    end_core(core);
+    CHECK(memory.held == 0);
+}
+
+static void an_event_with_no_memory_at_all_is_dropped_and_told_with_its_kind(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    counting_memory memory = {0};
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core_on(&memory, &listener, &sink);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    want_for_a_hundred_milliseconds(core, consumer);
+    listener.count = 0;
+    forget_crossings();
+    memory.refuse_from_size = 1;
+    CHECK(weivel_c_core_advance(core, 100, NULL) == WEIVEL_C_STATUS_OK);
+    memory.refuse_from_size = 0;
+    CHECK(crossed.events >= 2 && crossed.event_release == crossed.events);
+    CHECK(listener.count == 0);
+    CHECK(sink.count == crossed.events);
+    CHECK(count_told(&sink, WEIVEL_C_FAILURE_EVENT_NOT_COPIED, WEIVEL_EVENT_WANT_SETTLED) == 1);
+    CHECK(count_told(&sink, WEIVEL_C_FAILURE_EVENT_NOT_COPIED, WEIVEL_EVENT_DEADLINE) == 1);
+    end_core(core);
+    CHECK(memory.held == 0);
 }
 
 static void an_event_that_cannot_be_copied_goes_to_the_sink_and_the_rest_are_still_drained(void) {
@@ -937,7 +1059,7 @@ static void an_event_that_cannot_be_copied_goes_to_the_sink_and_the_rest_are_sti
     CHECK(memory.held == 0);
 }
 
-static void a_refusal_that_cannot_be_copied_leaves_the_caller_the_status_alone(void) {
+static void a_refusal_that_cannot_be_copied_is_answered_with_its_code_and_a_fixed_sentence(void) {
     hearing listener = {0};
     telling sink = {0};
     counting_memory memory = {0};
@@ -945,15 +1067,28 @@ static void a_refusal_that_cannot_be_copied_leaves_the_caller_the_status_alone(v
     weivel_c_core *core = make_core_on(&memory, &listener, &sink);
     weivel_handle plugin = open_plugin(core, "p", NULL, 0, NULL, 0);
     weivel_handle handle = 0;
+    uint32_t has_fix;
+    CHECK(weivel_c_core_register_service(core, plugin, "elsewhere:w", &handle, &refusal) ==
+          WEIVEL_C_STATUS_REFUSED);
+    has_fix = refusal.has_fix;
+    CHECK(has_fix == 1);
+    CHECK(weivel_c_refusal_release(&refusal) == WEIVEL_C_STATUS_OK);
     memory.fail_at = memory.allocations + 2;
     CHECK(weivel_c_core_register_service(core, plugin, "elsewhere:x", &handle, &refusal) ==
           WEIVEL_C_STATUS_REFUSED);
-    CHECK(is_empty_refusal(&refusal));
+    CHECK(refusal.code == WEIVEL_REFUSAL_OUTSIDE_NAMESPACE && refusal.has_fix == has_fix);
+    check_text(refusal.detail, WEIVEL_C_TEXT_NOT_COPIED, "a refusal's detail that could not be copied");
+    check_text(refusal.fix, WEIVEL_C_TEXT_NOT_COPIED, "a refusal's fix that could not be copied");
+    check_text(refusal.subject, WEIVEL_C_TEXT_NOT_COPIED, "a refusal's subject that could not be copied");
+    CHECK(refusal.storage == NULL);
     CHECK(sink.count == 1 && sink.items[0].failure.kind == WEIVEL_C_FAILURE_REFUSAL_NOT_COPIED);
-    CHECK(count_heard(&listener, WEIVEL_EVENT_REFUSAL) == 1);
+    CHECK(count_heard(&listener, WEIVEL_EVENT_REFUSAL) == 2);
+    CHECK(weivel_c_core_register_service(core, plugin, "p:fine", &handle, &refusal) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_refusal_release(&refusal) == WEIVEL_C_STATUS_OK);
+    CHECK(is_empty_refusal(&refusal));
     CHECK(weivel_c_core_register_service(core, plugin, "elsewhere:y", &handle, &refusal) ==
           WEIVEL_C_STATUS_REFUSED);
-    CHECK(refusal.code == WEIVEL_REFUSAL_OUTSIDE_NAMESPACE);
+    check_text(refusal.subject, "elsewhere:y", "a refusal copied once memory is back");
     end_core(core);
     CHECK(memory.held == 1);
     CHECK(weivel_c_refusal_release(&refusal) == WEIVEL_C_STATUS_OK);
@@ -978,7 +1113,10 @@ static void a_listener_that_cannot_be_kept_is_answered_out_of_memory(void) {
 
 static void run_the_tests_that_fail_an_allocation(void) {
     an_event_that_cannot_be_copied_goes_to_the_sink_and_the_rest_are_still_drained();
-    a_refusal_that_cannot_be_copied_leaves_the_caller_the_status_alone();
+    an_event_whose_texts_cannot_be_copied_is_still_heard_with_a_fixed_sentence();
+    a_capacity_event_whose_constraints_cannot_be_copied_is_heard_marked_incomplete();
+    an_event_with_no_memory_at_all_is_dropped_and_told_with_its_kind();
+    a_refusal_that_cannot_be_copied_is_answered_with_its_code_and_a_fixed_sentence();
     a_listener_that_cannot_be_kept_is_answered_out_of_memory();
 }
 

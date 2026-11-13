@@ -201,6 +201,12 @@ WEIVEL_C_API weivel_c_status weivel_c_core_unload(weivel_c_core_table *table);
 typedef struct weivel_c_core weivel_c_core;
 
 /**
+ * What stands in place of a text the layer had no memory to copy, in an event marked `incomplete` and in a refusal
+ * answered without its texts. A text the core left NULL stays NULL and an empty one stays empty.
+ */
+#define WEIVEL_C_TEXT_NOT_COPIED "the layer had no memory to copy this text"
+
+/**
  * The refusal the core queued for a refused call, as a value the caller owns. A call fills it only when it answers
  * WEIVEL_C_STATUS_REFUSED, or WEIVEL_C_STATUS_MISUSE for a struct of the caller's the core called malformed, and only
  * when the core queued a refusal for that call; otherwise it stays empty, `code` WEIVEL_REFUSAL_NONE and every text
@@ -208,6 +214,9 @@ typedef struct weivel_c_core weivel_c_core;
  *
  * The texts live in `storage`, private to the layer, until weivel_c_refusal_release. A call takes an empty refusal,
  * as WEIVEL_INIT or a release leaves it, or NULL when its caller wants the status alone.
+ *
+ * When memory runs out for the texts, the refusal is still answered: `code` and `has_fix` exact, each text the core
+ * gave replaced by WEIVEL_C_TEXT_NOT_COPIED, and `storage` NULL. It is released like any other.
  */
 typedef struct weivel_c_refusal {
     uint32_t size;
@@ -241,6 +250,11 @@ WEIVEL_C_API weivel_c_status weivel_c_refusal_release(weivel_c_refusal *refusal)
  * `sizeof(weivel_number)`.
  *
  * An event lives for the length of the listener call that hears it. A listener that keeps anything copies it.
+ *
+ * An event is heard even when memory ran out for what it carries beyond its fixed part, because a settlement or a
+ * revocation that went unheard would never be heard again. It is then marked `incomplete`: every handle, code, kind
+ * and number is exact, each text the core gave reads WEIVEL_C_TEXT_NOT_COPIED, and a capacity event carries no
+ * constraints at all.
  */
 typedef struct weivel_c_event {
     uint32_t size;
@@ -259,6 +273,12 @@ typedef struct weivel_c_event {
         weivel_deadline_event deadline;
         uint64_t reserved[WEIVEL_EVENT_PAYLOAD_WORDS];
     } data;
+    /**
+     * 1 when the texts or the constraints could not be copied, else 0. An incomplete WEIVEL_EVENT_CAPACITY_WANTED
+     * must be left unanswered, which the core reads as not served for now and asks again at its next poll: its
+     * constraints are missing, not empty, so answering it would answer a question the consumer never asked.
+     */
+    uint32_t incomplete;
 } weivel_c_event;
 
 /** What went wrong in code the layer calls, or in the layer itself. New kinds are only appended. */
@@ -267,16 +287,21 @@ typedef enum weivel_c_failure_kind {
     WEIVEL_C_FAILURE_LISTENER = 1,
     /** A deferred step answered a status other than WEIVEL_C_STATUS_OK. */
     WEIVEL_C_FAILURE_STEP = 2,
-    /** An event could not be copied, for want of memory, and was dropped; the events after it were still drained. */
+    /**
+     * There was no memory even for an event's fixed part, so it was dropped; `event_kind` says which kind was lost,
+     * and the events after it were still drained.
+     */
     WEIVEL_C_FAILURE_EVENT_NOT_COPIED = 3,
     /** The core called a call the layer built malformed. */
     WEIVEL_C_FAILURE_LAYER_DEFECT = 4,
     /** A deadline hook answered a status other than WEIVEL_C_STATUS_OK. */
     WEIVEL_C_FAILURE_DEADLINE_HOOK = 5,
-    /** A refused call's refusal could not be copied for its caller, who was answered the status alone. */
+    /** A refused call's refusal texts could not be copied for its caller, who was answered its code without them. */
     WEIVEL_C_FAILURE_REFUSAL_NOT_COPIED = 6,
     /** One call met more failures than the layer keeps for it; `sequence` holds how many were not told. */
-    WEIVEL_C_FAILURE_NOT_TOLD = 7
+    WEIVEL_C_FAILURE_NOT_TOLD = 7,
+    /** An event's texts or constraints could not be copied, so it was heard marked `incomplete`. */
+    WEIVEL_C_FAILURE_EVENT_INCOMPLETE = 8
 } weivel_c_failure_kind;
 
 /** One failure, as the error sink is told it. Everything in it lives for the length of the sink's call. */

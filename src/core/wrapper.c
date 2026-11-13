@@ -273,12 +273,17 @@ static void keep_copy(weivel_c_core *core, weivel_c_queued_event *copy, const we
     }
 }
 
-static void note_uncopied(weivel_c_core *core, call_notes *notes) {
-    weivel_c_event dropped;
-    dropped.kind = core->buffer.kind;
-    dropped.sequence = core->sequence;
-    note(notes, failure_of(WEIVEL_C_FAILURE_EVENT_NOT_COPIED, WEIVEL_C_STATUS_OUT_OF_MEMORY, &dropped,
-                           "an event could not be copied and was dropped"));
+static void note_uncopied(weivel_c_core *core, call_notes *notes, weivel_c_copied copied) {
+    weivel_c_event concerned;
+    concerned.kind = core->buffer.kind;
+    concerned.sequence = core->sequence;
+    if (copied == WEIVEL_C_COPY_FAILED) {
+        note(notes, failure_of(WEIVEL_C_FAILURE_EVENT_NOT_COPIED, WEIVEL_C_STATUS_OUT_OF_MEMORY, &concerned,
+                               "there was no memory for an event, which was dropped"));
+    } else if (copied == WEIVEL_C_COPIED_INCOMPLETE) {
+        note(notes, failure_of(WEIVEL_C_FAILURE_EVENT_INCOMPLETE, WEIVEL_C_STATUS_OUT_OF_MEMORY, &concerned,
+                               "an event's texts or constraints could not be copied, so it is heard without them"));
+    }
 }
 
 /** Drains one event: copied, announced when it is a deadline, and released whatever the copy did. */
@@ -299,13 +304,11 @@ static int drain_one(weivel_c_core *core, uint32_t *waiting, call_notes *notes, 
     core->sequence++;
     copied = weivel_c_event_copy(&core->allocator, &core->buffer, core->sequence, &copy);
     announce_deadline(core, notes);
-    if (copied == WEIVEL_C_COPY_FAILED) {
-        note_uncopied(core, notes);
-    }
+    note_uncopied(core, notes, copied);
     if (core->table.event_release(&core->buffer) != WEIVEL_STATUS_OK) {
         note_defect(notes, "the core refused to release an event the layer drained", "weivel_event_release failed");
     }
-    if (copied == WEIVEL_C_COPIED) {
+    if (copy != NULL) {
         keep_copy(core, copy, own_refusal);
     }
     return 1;
@@ -349,7 +352,7 @@ static void hand_refusal(weivel_c_core *core, const weivel_c_event *own_refusal,
     }
     if (!weivel_c_refusal_copy(&core->allocator, own_refusal, refusal)) {
         note(notes, failure_of(WEIVEL_C_FAILURE_REFUSAL_NOT_COPIED, WEIVEL_C_STATUS_OUT_OF_MEMORY, own_refusal,
-                               "a refusal could not be copied for the caller of the call it refused"));
+                               "a refusal's texts could not be copied for the caller of the call it refused"));
     }
 }
 
