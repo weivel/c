@@ -29,7 +29,7 @@ static const table_slot SLOTS[] = {WEIVEL_C_CORE_FUNCTIONS(SLOT)};
 WEIVEL_C_CORE_FUNCTIONS(SAME_TYPE_AS_THE_CORE)
 #undef SAME_TYPE_AS_THE_CORE
 
-_Static_assert(sizeof(weivel_c_binary_function) == sizeof(((weivel_c_core_table *)0)->core_create),
+_Static_assert(sizeof(weivel_c_binary_function) == sizeof(weivel_status (*)(weivel_core *)),
                "every function pointer must have one size");
 
 static size_t covered_size(const weivel_c_core_table *table) {
@@ -53,14 +53,18 @@ static const char *resolve_slots(void *binary, weivel_c_core_table *loaded, size
     return NULL;
 }
 
+static int is_writable(const weivel_c_core_load_failure *failure) {
+    return failure != NULL && failure->size >= FIRST_FAILURE_SIZE;
+}
+
 static int is_loadable(const char *path, const weivel_c_core_table *table,
                        const weivel_c_core_load_failure *failure) {
     return path != NULL && table != NULL && table->size >= FIRST_TABLE_SIZE && table->library == NULL &&
-           (failure == NULL || failure->size >= FIRST_FAILURE_SIZE);
+           (failure == NULL || is_writable(failure));
 }
 
 static void report_missing(weivel_c_core_load_failure *failure, const char *symbol) {
-    if (failure != NULL) {
+    if (is_writable(failure)) {
         failure->missing_symbol = symbol;
     }
 }
@@ -71,10 +75,10 @@ weivel_c_status weivel_c_core_load(const char *path, weivel_c_core_table *table,
     const char *missing;
     void *binary = NULL;
     weivel_c_status status;
+    report_missing(failure, NULL);
     if (!is_loadable(path, table, failure)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
-    report_missing(failure, NULL);
     status = path[0] == '\0' ? WEIVEL_C_STATUS_NOT_A_LIBRARY : weivel_c_binary_open(path, &binary);
     if (status != WEIVEL_C_STATUS_OK) {
         return status;

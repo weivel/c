@@ -22,6 +22,7 @@ typedef struct crossings {
     uint32_t next_event;
     uint32_t events;
     uint32_t event_release;
+    uint32_t next_deadline;
     uint32_t advance;
     uint32_t handle_state;
     uint32_t unreleased;
@@ -40,6 +41,12 @@ static void (*bend_event)(weivel_event *event);
 static uint32_t phantom_events;
 /** 1 makes weivel_handle_state a call no layer should build: its required `condition` is withheld. */
 static int withhold_condition;
+/** 1 makes weivel_event_release answer a failure once it has really released the event. */
+static int fail_event_release;
+/** The call of weivel_next_event, counted from 1 since the crossings were forgotten, that fails; 0 for none. */
+static uint32_t fail_next_event_at;
+/** The kind an event had before a test bent it to one the core never sends, put back before the core releases it. */
+static uint32_t kind_before_bending;
 
 static weivel_status counted_core_create(const weivel_core_options *options, weivel_core **core,
                                          uint32_t *pending_events) {
@@ -56,6 +63,9 @@ static weivel_status counted_next_event(weivel_core *core, weivel_event *event, 
     weivel_status status;
     crossed.next_event++;
     crossed.unsized_events += event->size != sizeof *event || event->kind != WEIVEL_EVENT_NONE;
+    if (crossed.next_event == fail_next_event_at) {
+        return WEIVEL_STATUS_MALFORMED;
+    }
     status = real_table.next_event(core, event, pending_events);
     if (status == WEIVEL_STATUS_OK) {
         crossed.events++;
@@ -70,9 +80,20 @@ static weivel_status counted_next_event(weivel_core *core, weivel_event *event, 
 }
 
 static weivel_status counted_event_release(weivel_event *event) {
+    weivel_status status;
     crossed.event_release++;
     crossed.unreleased--;
-    return real_table.event_release(event);
+    if (kind_before_bending != 0) {
+        event->kind = kind_before_bending;
+        kind_before_bending = 0;
+    }
+    status = real_table.event_release(event);
+    return fail_event_release ? WEIVEL_STATUS_MALFORMED : status;
+}
+
+static weivel_status counted_next_deadline(weivel_core *core, int64_t *deadline, uint32_t *pending_events) {
+    crossed.next_deadline++;
+    return real_table.next_deadline(core, deadline, pending_events);
 }
 
 static weivel_status counted_advance(weivel_core *core, int64_t now, uint32_t *pending_events) {
@@ -101,6 +122,7 @@ static inline int load_tables(const char *core_path) {
     counting_table.core_destroy = counted_core_destroy;
     counting_table.next_event = counted_next_event;
     counting_table.event_release = counted_event_release;
+    counting_table.next_deadline = counted_next_deadline;
     counting_table.advance = counted_advance;
     counting_table.handle_state = counted_handle_state;
     return 1;
@@ -111,6 +133,9 @@ static inline void forget_crossings(void) {
     bend_event = NULL;
     phantom_events = 0;
     withhold_condition = 0;
+    fail_event_release = 0;
+    fail_next_event_at = 0;
+    kind_before_bending = 0;
 }
 
 typedef struct heard {

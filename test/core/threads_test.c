@@ -9,13 +9,7 @@
  */
 
 #include "fixture.h"
-
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
-#include <pthread.h>
-#endif
+#include "threads.h"
 
 #define THREADS 4
 #define ROUNDS 400
@@ -83,49 +77,27 @@ static void work(worker *self) {
         self->failures +=
             weivel_c_core_register_service(self->core, WEIVEL_HOST, self->id, &registration, NULL) !=
             WEIVEL_C_STATUS_OK;
-        self->failures += weivel_c_core_defer(self->core, &self->steps[round]) != WEIVEL_C_STATUS_OK;
+        self->failures += weivel_c_core_defer(self->core, &self->steps[round], NULL) != WEIVEL_C_STATUS_OK;
         self->failures += weivel_c_core_unregister(self->core, registration, NULL) != WEIVEL_C_STATUS_OK;
         self->failures += !is_refused_as_stale(self->core, registration);
     }
 }
 
-#if defined(_WIN32)
-static DWORD WINAPI run_worker(LPVOID argument) {
+static void run_worker(void *argument) {
     work(argument);
-    return 0;
 }
 
 static void run_all(worker *workers) {
-    HANDLE threads[THREADS - 1];
+    test_thread threads[THREADS - 1];
     int index;
     for (index = 1; index < THREADS; index++) {
-        threads[index - 1] = CreateThread(NULL, 0, run_worker, &workers[index], 0, NULL);
-        CHECK(threads[index - 1] != NULL);
-    }
-    work(&workers[0]);
-    WaitForMultipleObjects(THREADS - 1, threads, TRUE, INFINITE);
-    for (index = 0; index < THREADS - 1; index++) {
-        CloseHandle(threads[index]);
-    }
-}
-#else
-static void *run_worker(void *argument) {
-    work(argument);
-    return NULL;
-}
-
-static void run_all(worker *workers) {
-    pthread_t threads[THREADS - 1];
-    int index;
-    for (index = 1; index < THREADS; index++) {
-        CHECK(pthread_create(&threads[index - 1], NULL, run_worker, &workers[index]) == 0);
+        CHECK(start_test_thread(&threads[index - 1], run_worker, &workers[index]));
     }
     work(&workers[0]);
     for (index = 0; index < THREADS - 1; index++) {
-        pthread_join(threads[index], NULL);
+        join_test_thread(&threads[index]);
     }
 }
-#endif
 
 static void watch_every_workers_service(weivel_c_core *core, worker *workers) {
     int index;
@@ -173,12 +145,205 @@ static void calls_from_several_threads_are_dispatched_once_in_drained_order_by_o
     free(workers);
 }
 
+/**
+ * What the `follow` hook was told, written unguarded: one thread in `follow` at a time, handed on under the layer
+ * lock, is what makes that safe.
+ */
+typedef struct followed {
+    uint32_t inside;
+    uint32_t overlaps;
+    uint32_t calls;
+    int64_t last_at;
+    uint32_t last_set;
+} followed;
+
+static weivel_c_status follow_and_linger(void *data, int64_t at, uint32_t set) {
+    followed *self = data;
+    self->overlaps += self->inside;
+    self->inside = 1;
+    self->calls++;
+    self->last_at = at;
+    self->last_set = set;
+    let_other_threads_run();
+    self->inside = 0;
+    return WEIVEL_C_STATUS_OK;
+}
+
+typedef struct deadline_mover {
+    weivel_c_core *core;
+    char id[16];
+    int64_t timeout;
+    uint32_t failures;
+} deadline_mover;
+
+static void move_the_deadline(void *argument) {
+    deadline_mover *self = argument;
+    uint32_t round;
+    for (round = 0; round < ROUNDS; round++) {
+        weivel_want_options options = WEIVEL_INIT(weivel_want_options);
+        weivel_handle want = 0;
+        options.timed = WEIVEL_CHOICE_YES;
+        options.timeout_millis = self->timeout + round;
+        self->failures +=
+            weivel_c_core_want_service(self->core, WEIVEL_HOST, self->id, &options, &want, NULL) != WEIVEL_C_STATUS_OK;
+        self->failures += weivel_c_core_unregister(self->core, want, NULL) != WEIVEL_C_STATUS_OK;
+    }
+}
+
+static void the_latest_deadline_is_followed_last_and_by_one_thread_at_a_time(void) {
+    static followed record_of_following;
+    weivel_c_deadline_hooks hooks = WEIVEL_INIT(weivel_c_deadline_hooks);
+    deadline_mover movers[THREADS];
+    test_thread threads[THREADS];
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle want = 0;
+    weivel_want_options options = WEIVEL_INIT(weivel_want_options);
+    uint32_t failures = 0;
+    int index;
+    hooks.follow = follow_and_linger;
+    hooks.data = &record_of_following;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    for (index = 0; index < THREADS; index++) {
+        movers[index].core = core;
+        movers[index].timeout = 1000 * (index + 1);
+        movers[index].failures = 0;
+        snprintf(movers[index].id, sizeof movers[index].id, "m%d", index);
+        CHECK(start_test_thread(&threads[index], move_the_deadline, &movers[index]));
+    }
+    for (index = 0; index < THREADS; index++) {
+        join_test_thread(&threads[index]);
+        failures += movers[index].failures;
+    }
+    CHECK(failures == 0);
+    CHECK(record_of_following.overlaps == 0);
+    CHECK(record_of_following.calls >= 2);
+    CHECK(record_of_following.last_set == 0);
+    options.timed = WEIVEL_CHOICE_YES;
+    options.timeout_millis = 77;
+    CHECK(weivel_c_core_want_service(core, WEIVEL_HOST, "last", &options, &want, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(record_of_following.last_set == 1 && record_of_following.last_at == 77);
+    end_core(core);
+}
+
+typedef struct caller_until_destroyed {
+    weivel_c_core *core;
+    char id[16];
+    uint32_t rounds;
+    uint32_t unexpected;
+} caller_until_destroyed;
+
+static void call_until_destroyed(void *argument) {
+    caller_until_destroyed *self = argument;
+    weivel_c_status status = WEIVEL_C_STATUS_OK;
+    while (status != WEIVEL_C_STATUS_DESTROYED) {
+        weivel_handle registration = 0;
+        status = weivel_c_core_register_service(self->core, WEIVEL_HOST, self->id, &registration, NULL);
+        if (status == WEIVEL_C_STATUS_OK) {
+            status = weivel_c_core_unregister(self->core, registration, NULL);
+        }
+        self->unexpected += status != WEIVEL_C_STATUS_OK && status != WEIVEL_C_STATUS_DESTROYED;
+        self->rounds++;
+    }
+}
+
+static weivel_c_status hear_and_count(void *data, weivel_c_core *core, const weivel_c_event *event) {
+    uint32_t *heard = data;
+    (void)core;
+    (void)event;
+    *heard += 1;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void a_destroy_from_another_thread_ends_the_calls_of_the_rest(void) {
+    static uint32_t heard_by_the_dispatcher;
+    weivel_c_listener listener = {hear_and_count, &heard_by_the_dispatcher};
+    caller_until_destroyed callers[THREADS];
+    test_thread threads[THREADS];
+    uint64_t registration = 0;
+    uint32_t condition = 0;
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    int index;
+    CHECK(weivel_c_core_add_listener(core, &listener, &registration) == WEIVEL_C_STATUS_OK);
+    for (index = 0; index < THREADS; index++) {
+        weivel_handle watch = 0;
+        callers[index] = (caller_until_destroyed){core, "", 0, 0};
+        snprintf(callers[index].id, sizeof callers[index].id, "d%d", index);
+        CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, callers[index].id, &watch, NULL) ==
+              WEIVEL_C_STATUS_OK);
+    }
+    for (index = 0; index < THREADS; index++) {
+        CHECK(start_test_thread(&threads[index], call_until_destroyed, &callers[index]));
+    }
+    for (index = 0; index < 200; index++) {
+        CHECK(weivel_c_core_handle_state(core, 1, &condition, NULL) != WEIVEL_C_STATUS_DESTROYED);
+    }
+    CHECK(weivel_c_core_destroy(core) == WEIVEL_C_STATUS_OK);
+    for (index = 0; index < THREADS; index++) {
+        join_test_thread(&threads[index]);
+        CHECK(callers[index].unexpected == 0 && callers[index].rounds >= 1);
+    }
+    CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_OK);
+}
+
+typedef struct listener_churn {
+    weivel_c_core *core;
+    uint32_t heard;
+    uint32_t failures;
+} listener_churn;
+
+static weivel_c_status hear_for_the_churn(void *data, weivel_c_core *core, const weivel_c_event *event) {
+    (void)data;
+    (void)core;
+    (void)event;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void add_and_remove_listeners(void *argument) {
+    listener_churn *self = argument;
+    weivel_c_listener listener = {hear_for_the_churn, self};
+    uint32_t round;
+    for (round = 0; round < ROUNDS; round++) {
+        uint64_t registration = 0;
+        self->failures += weivel_c_core_add_listener(self->core, &listener, &registration) != WEIVEL_C_STATUS_OK;
+        let_other_threads_run();
+        self->failures += weivel_c_core_remove_listener(self->core, registration) != WEIVEL_C_STATUS_OK;
+    }
+}
+
+static void listeners_come_and_go_on_another_thread_while_events_are_dispatched(void) {
+    static uint32_t heard_throughout;
+    weivel_c_listener constant = {hear_and_count, &heard_throughout};
+    listener_churn churn = {NULL, 0, 0};
+    test_thread thread;
+    uint64_t registration = 0;
+    weivel_handle watch = 0;
+    uint32_t round;
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    churn.core = core;
+    CHECK(weivel_c_core_add_listener(core, &constant, &registration) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "c", &watch, NULL) == WEIVEL_C_STATUS_OK);
+    forget_crossings();
+    CHECK(start_test_thread(&thread, add_and_remove_listeners, &churn));
+    for (round = 0; round < ROUNDS; round++) {
+        weivel_handle service = 0;
+        CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "c", &service, NULL) == WEIVEL_C_STATUS_OK);
+        CHECK(weivel_c_core_unregister(core, service, NULL) == WEIVEL_C_STATUS_OK);
+    }
+    join_test_thread(&thread);
+    CHECK(churn.failures == 0);
+    CHECK(heard_throughout == crossed.events);
+    end_core(core);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 2 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: threads_test <core-library>\n");
         return 2;
     }
     calls_from_several_threads_are_dispatched_once_in_drained_order_by_one_thread();
+    the_latest_deadline_is_followed_last_and_by_one_thread_at_a_time();
+    a_destroy_from_another_thread_ends_the_calls_of_the_rest();
+    listeners_come_and_go_on_another_thread_while_events_are_dispatched();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("core threads");
 }

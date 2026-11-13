@@ -23,6 +23,9 @@ typedef struct refusal_parts {
     uint32_t has_fix;
 } refusal_parts;
 
+static const char TEXT_NOT_COPIED[] = WEIVEL_C_TEXT_NOT_COPIED;
+static const char EMPTY_TEXT[] = "";
+
 static int is_known(uint32_t kind) {
     return kind >= WEIVEL_EVENT_LOG && kind <= WEIVEL_EVENT_DEADLINE;
 }
@@ -40,6 +43,14 @@ static const char *keep_text(char **cursor, const char *text) {
     memcpy(kept, text, size);
     *cursor += size;
     return kept;
+}
+
+/** What a text reads as when there is no memory to copy it: nothing is still nothing, and empty is still empty. */
+static const char *stand_in_for(const char *text) {
+    if (text == NULL) {
+        return NULL;
+    }
+    return text[0] == '\0' ? EMPTY_TEXT : TEXT_NOT_COPIED;
 }
 
 static uint32_t texts_of(weivel_c_event *event, const char **texts[MAXIMUM_TEXTS]) {
@@ -136,37 +147,83 @@ static weivel_c_event read_event(const weivel_event *source, uint64_t sequence) 
     return event;
 }
 
+static void replace_texts(weivel_c_event *event) {
+    const char **texts[MAXIMUM_TEXTS];
+    uint32_t count = texts_of(event, texts);
+    uint32_t index;
+    for (index = 0; index < count; index++) {
+        *texts[index] = stand_in_for(*texts[index]);
+    }
+}
+
+static size_t beyond_the_fixed_part(weivel_c_event *event) {
+    weivel_numbers *numbers = numbers_of(event);
+    size_t numbers_bytes = numbers == NULL ? 0 : numbers->count * sizeof(weivel_number);
+    return numbers_bytes + names_size(numbers) + texts_size(event);
+}
+
+static weivel_c_queued_event *allocate_block(const weivel_c_allocator *allocator, const weivel_c_event *event,
+                                             size_t beyond) {
+    weivel_c_queued_event *block = allocator->allocate(allocator->data, sizeof *block + beyond);
+    if (block != NULL) {
+        memset(&block->place, 0, sizeof block->place);
+        block->event = *event;
+    }
+    return block;
+}
+
+static void keep_what_lies_beyond(weivel_c_queued_event *block) {
+    weivel_numbers *numbers = numbers_of(&block->event);
+    size_t numbers_bytes = numbers == NULL ? 0 : numbers->count * sizeof(weivel_number);
+    char *cursor = (char *)(block + 1) + numbers_bytes;
+    if (numbers != NULL) {
+        keep_numbers(numbers, (weivel_number *)(void *)(block + 1), &cursor);
+    }
+    keep_texts(&block->event, &cursor);
+}
+
+static void leave_out_what_lies_beyond(weivel_c_queued_event *block) {
+    weivel_numbers *numbers = numbers_of(&block->event);
+    if (numbers != NULL) {
+        numbers->items = NULL;
+        numbers->count = 0;
+    }
+    replace_texts(&block->event);
+    block->event.incomplete = 1;
+}
+
+/**
+ * @implNote An event with nothing beyond its fixed part is never tried a second time: the second allocation would be
+ * the first one again.
+ */
 weivel_c_copied weivel_c_event_copy(const weivel_c_allocator *allocator, const weivel_event *source,
                                     uint64_t sequence, weivel_c_queued_event **copy) {
     weivel_c_event event;
-    weivel_numbers *numbers;
-    weivel_c_queued_event *block;
-    size_t numbers_bytes;
-    char *cursor;
+    int readable;
+    size_t beyond;
     *copy = NULL;
     if (!is_known(source->kind)) {
         return WEIVEL_C_COPY_SKIPPED;
     }
     event = read_event(source, sequence);
-    numbers = numbers_of(&event);
-    if (!numbers_are_readable(numbers)) {
+    readable = numbers_are_readable(numbers_of(&event));
+    beyond = readable ? beyond_the_fixed_part(&event) : 0;
+    if (readable) {
+        *copy = allocate_block(allocator, &event, beyond);
+    }
+    if (*copy != NULL) {
+        keep_what_lies_beyond(*copy);
+        return WEIVEL_C_COPIED;
+    }
+    if (readable && beyond == 0) {
         return WEIVEL_C_COPY_FAILED;
     }
-    numbers_bytes = numbers == NULL ? 0 : numbers->count * sizeof(weivel_number);
-    block = allocator->allocate(allocator->data,
-                                sizeof *block + numbers_bytes + names_size(numbers) + texts_size(&event));
-    if (block == NULL) {
+    *copy = allocate_block(allocator, &event, 0);
+    if (*copy == NULL) {
         return WEIVEL_C_COPY_FAILED;
     }
-    memset(&block->place, 0, sizeof block->place);
-    block->event = event;
-    cursor = (char *)(block + 1) + numbers_bytes;
-    if (numbers != NULL) {
-        keep_numbers(numbers_of(&block->event), (weivel_number *)(void *)(block + 1), &cursor);
-    }
-    keep_texts(&block->event, &cursor);
-    *copy = block;
-    return WEIVEL_C_COPIED;
+    leave_out_what_lies_beyond(*copy);
+    return WEIVEL_C_COPIED_INCOMPLETE;
 }
 
 static int parts_of(const weivel_c_event *event, refusal_parts *parts) {
@@ -196,7 +253,8 @@ const char *weivel_c_event_refusal_detail(const weivel_c_event *event) {
 }
 
 int weivel_c_refusal_is_ready(const weivel_c_refusal *refusal) {
-    return refusal == NULL || (refusal->size >= FIRST_REFUSAL_SIZE && refusal->storage == NULL);
+    return refusal == NULL || (refusal->size >= FIRST_REFUSAL_SIZE && refusal->storage == NULL &&
+                               refusal->code == WEIVEL_REFUSAL_NONE && refusal->detail == NULL);
 }
 
 int weivel_c_refusal_copy(const weivel_c_allocator *allocator, const weivel_c_event *event,
@@ -209,16 +267,19 @@ int weivel_c_refusal_copy(const weivel_c_allocator *allocator, const weivel_c_ev
     }
     storage = allocator->allocate(allocator->data, sizeof *storage + text_size(parts.detail) + text_size(parts.fix) +
                                                        text_size(parts.subject));
+    refusal->code = parts.code;
+    refusal->has_fix = parts.has_fix;
     if (storage == NULL) {
+        refusal->detail = stand_in_for(parts.detail);
+        refusal->fix = stand_in_for(parts.fix);
+        refusal->subject = stand_in_for(parts.subject);
         return 0;
     }
     storage->allocator = *allocator;
     cursor = (char *)(storage + 1);
-    refusal->code = parts.code;
     refusal->detail = keep_text(&cursor, parts.detail);
     refusal->fix = keep_text(&cursor, parts.fix);
     refusal->subject = keep_text(&cursor, parts.subject);
-    refusal->has_fix = parts.has_fix;
     refusal->storage = storage;
     return 1;
 }
