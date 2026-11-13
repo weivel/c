@@ -168,11 +168,30 @@ static void widen_constraints(weivel_event *event) {
     }
 }
 
-static weivel_c_status keep_constraints(hearing *self, weivel_c_core *core, const weivel_c_event *event) {
+/** Where the core's own constraints lay in the last capacity event it handed the layer. */
+static weivel_numbers core_constraints;
+
+static void remember_constraints(weivel_event *event) {
+    if (event->kind == WEIVEL_EVENT_CAPACITY_WANTED) {
+        core_constraints = event->data.capacity.constraints;
+    }
+}
+
+static weivel_c_status check_constraints_are_copies(hearing *self, weivel_c_core *core,
+                                                    const weivel_c_event *event) {
     (void)core;
     if (event->kind == WEIVEL_EVENT_CAPACITY_WANTED && self->more != NULL) {
-        weivel_capacity_event *kept = self->more;
-        *kept = event->data.capacity;
+        const weivel_numbers *constraints = &event->data.capacity.constraints;
+        uint32_t *checked = self->more;
+        CHECK(event->data.capacity.question == WEIVEL_CAPACITY_ATTRIBUTES);
+        CHECK(constraints->count == 1 && core_constraints.count == 1);
+        if (constraints->count == 1) {
+            CHECK(constraints->items != core_constraints.items);
+            CHECK(constraints->items[0].size == sizeof(weivel_number));
+            check_text(constraints->items[0].name, "speed", "the constraint's name");
+            CHECK(constraints->items[0].value == 5.0);
+        }
+        *checked += 1;
         self->more = NULL;
     }
     return WEIVEL_C_STATUS_OK;
@@ -211,19 +230,18 @@ static weivel_core_options options_with_a_speed_constraint(weivel_constraint_ent
 
 static void a_capacity_events_constraints_are_the_layers_own_copies(void) {
     hearing listener = {0};
-    weivel_capacity_event kept;
+    uint32_t checked = 0;
     weivel_constraint_entry entry;
     weivel_core_options core_options = options_with_a_speed_constraint(&entry);
     weivel_c_core *core;
     forget_crossings();
-    memset(&kept, 0, sizeof kept);
-    listener.react = keep_constraints;
-    listener.more = &kept;
+    memset(&core_constraints, 0, sizeof core_constraints);
+    bend_event = remember_constraints;
+    listener.react = check_constraints_are_copies;
+    listener.more = &checked;
     core = make_core(&core_options, &listener, NULL);
     ask_a_capacity_question(core);
-    CHECK(count_heard(&listener, WEIVEL_EVENT_CAPACITY_WANTED) >= 1);
-    CHECK(kept.question == WEIVEL_CAPACITY_ATTRIBUTES);
-    CHECK(kept.constraints.count == 1);
+    CHECK(checked == 1);
     end_core(core);
 }
 
@@ -480,7 +498,40 @@ static void a_deferred_step_runs_in_queue_order_behind_what_was_already_drained(
     end_core(core);
 }
 
-static void a_step_deferred_while_no_dispatch_runs_is_run_at_once(void) {
+/** What a step that calls back in saw of its own call's events. */
+typedef struct calling_step {
+    const hearing *listener;
+    uint32_t heard_when_the_call_returned;
+    uint32_t runs;
+} calling_step;
+
+static weivel_c_status register_inside_a_step(void *data, weivel_c_core *core) {
+    calling_step *self = data;
+    weivel_handle handle = 0;
+    CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    self->heard_when_the_call_returned = self->listener->count;
+    self->runs++;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void a_step_runs_as_the_dispatcher_so_a_call_inside_it_joins_the_end(void) {
+    hearing listener = {0};
+    calling_step record = {0};
+    weivel_c_step step = WEIVEL_INIT(weivel_c_step);
+    weivel_handle handle = 0;
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "c", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    record.listener = &listener;
+    step.run = register_inside_a_step;
+    step.data = &record;
+    CHECK(weivel_c_core_defer(core, &step) == WEIVEL_C_STATUS_OK);
+    CHECK(record.runs == 1);
+    CHECK(record.heard_when_the_call_returned == 0);
+    CHECK(listener.count == 1 && listener.deepest == 1);
+    end_core(core);
+}
+
+static void a_step_deferred_while_no_dispatch_runs_has_run_when_the_call_returns(void) {
     hearing listener = {0};
     reentry more = {0};
     weivel_c_step small = WEIVEL_INIT(weivel_c_step);
@@ -958,7 +1009,8 @@ int main(int argument_count, char **arguments) {
     malformed_for_a_struct_the_caller_built_is_the_callers_mistake();
     a_call_inside_a_listener_joins_the_end_and_never_re_enters_the_dispatcher();
     a_deferred_step_runs_in_queue_order_behind_what_was_already_drained();
-    a_step_deferred_while_no_dispatch_runs_is_run_at_once();
+    a_step_deferred_while_no_dispatch_runs_has_run_when_the_call_returns();
+    a_step_runs_as_the_dispatcher_so_a_call_inside_it_joins_the_end();
     a_failing_listener_goes_to_the_sink_and_every_later_event_is_still_heard();
     listeners_hear_in_the_order_added_until_removed();
     a_deadline_is_announced_as_it_is_drained_and_before_it_is_dispatched();
