@@ -162,10 +162,19 @@ typedef struct weivel_c_core_load_failure {
  * Loads the core's shared binary from `path` and fills `table` with every function of the core the table has room
  * for. The layer chooses no path and no file name: both are the caller's.
  *
- * @param path the binary, as the platform's loader takes it. Required; read only during the call.
+ * A path that holds no directory separator is not opened where the caller stands: the platform's loader searches for
+ * it, in the places its own rules and the process's environment name, so what is loaded is then decided outside the
+ * caller. Give an absolute path to load exactly one file.
+ *
+ * A table larger than the layer's own, built against a newer header, is filled only as far as this layer knows it:
+ * what lies past that is left as the caller set it, and a function there is not resolved.
+ *
+ * @param path the binary, as the platform's loader takes it. Required; read only during the call. On Windows a path
+ * that is not UTF-8 answers WEIVEL_C_STATUS_NOT_A_LIBRARY.
  * @param table an empty table (see weivel_c_core_table), filled only when the call answers OK. Required. The caller
  * owns it and hands it to weivel_c_core_unload once no core created through it is left.
- * @param failure receives what a status alone cannot say; may be NULL.
+ * @param failure receives what a status alone cannot say; may be NULL. When it is given and large enough it is
+ * cleared first, whatever the call answers, a WEIVEL_C_STATUS_MISUSE for another argument included.
  * @return WEIVEL_C_STATUS_OK, or WEIVEL_C_STATUS_MISUSE (no `path`, no `table`, a `table` or `failure` smaller than
  * its first shape, or a `table` that already holds a library), WEIVEL_C_STATUS_NOT_A_LIBRARY,
  * WEIVEL_C_STATUS_MISSING_SYMBOL or WEIVEL_C_STATUS_OUT_OF_MEMORY.

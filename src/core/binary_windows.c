@@ -18,11 +18,14 @@ static weivel_c_status to_wide_path(const char *path, wchar_t **wide) {
     return WEIVEL_C_STATUS_OK;
 }
 
-/** @implNote The error mode is narrowed for the call: Windows otherwise answers a damaged image with a dialog. */
+/**
+ * @implNote The thread's error mode gains one flag for the call, and loses none its owner set: Windows otherwise
+ * answers a damaged image with a dialog.
+ */
 static HMODULE load_without_a_dialog(const wchar_t *path) {
     DWORD previous_mode = 0;
     HMODULE module;
-    SetThreadErrorMode(SEM_FAILCRITICALERRORS, &previous_mode);
+    SetThreadErrorMode(GetThreadErrorMode() | SEM_FAILCRITICALERRORS, &previous_mode);
     module = LoadLibraryW(path);
     SetThreadErrorMode(previous_mode, NULL);
     return module;

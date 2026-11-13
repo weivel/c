@@ -22,7 +22,8 @@ endfunction()
 
 foreach(variant "" _shared)
     weivel_c_test(core_load_test${variant} core/load_test.c weivel_c${variant}
-        $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:partial_core> ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
+        $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:partial_core> ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+        ${CMAKE_CURRENT_BINARY_DIR}/core_load_test${variant})
     add_dependencies(core_load_test${variant} weivel_core_shared partial_core)
     foreach(suite wrapper calls threads)
         weivel_c_test(core_${suite}_test${variant} core/${suite}_test.c weivel_c${variant}
