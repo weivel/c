@@ -23,16 +23,19 @@ function(weivel_c_strict_warnings target)
     endif()
 endfunction()
 
-set(WEIVEL_C_SOURCES src/core/load.c)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
+set(WEIVEL_C_SOURCES src/core/load.c src/core/events.c src/core/wrapper.c src/core/calls.c)
 if(WIN32)
-    list(APPEND WEIVEL_C_SOURCES src/core/binary_windows.c)
+    list(APPEND WEIVEL_C_SOURCES src/core/binary_windows.c src/core/mutex_windows.c)
 else()
-    list(APPEND WEIVEL_C_SOURCES src/core/binary_posix.c)
+    list(APPEND WEIVEL_C_SOURCES src/core/binary_posix.c src/core/mutex_posix.c)
 endif()
 
 function(weivel_c_target target)
     target_include_directories(${target} PUBLIC include ${WEIVEL_C_CORE_INCLUDE_DIRECTORY})
-    target_link_libraries(${target} PUBLIC ${CMAKE_DL_LIBS})
+    target_link_libraries(${target} PUBLIC ${CMAKE_DL_LIBS} Threads::Threads)
     weivel_c_strict_warnings(${target})
 endfunction()
 

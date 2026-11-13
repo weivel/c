@@ -24,9 +24,22 @@ foreach(variant "" _shared)
     weivel_c_test(core_load_test${variant} core/load_test.c weivel_c${variant}
         $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:partial_core> ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
     add_dependencies(core_load_test${variant} weivel_core_shared partial_core)
+    foreach(suite wrapper calls threads)
+        weivel_c_test(core_${suite}_test${variant} core/${suite}_test.c weivel_c${variant}
+            $<TARGET_FILE:weivel_core_shared>)
+        add_dependencies(core_${suite}_test${variant} weivel_core_shared)
+    endforeach()
+    weivel_c_test(core_sink_test${variant} core/sink_test.c weivel_c${variant}
+        $<TARGET_FILE:weivel_core_shared> ${CMAKE_CURRENT_BINARY_DIR}/core_sink_test${variant}.standard_error)
+    add_dependencies(core_sink_test${variant} weivel_core_shared)
 endforeach()
 
 add_test(NAME core_table_covers_the_core
     COMMAND ${CMAKE_COMMAND} -DCORE_HEADER=${WEIVEL_C_CORE_INCLUDE_DIRECTORY}/weivel/core.h
         -DFUNCTIONS=${PROJECT_SOURCE_DIR}/src/core/functions.h
         -P ${CMAKE_CURRENT_SOURCE_DIR}/core/table_covers_the_core.cmake)
+
+add_test(NAME core_only_the_wrapper_calls
+    COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
+        -DFUNCTIONS=${PROJECT_SOURCE_DIR}/src/core/functions.h
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/core/only_the_wrapper_calls.cmake)

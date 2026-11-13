@@ -22,10 +22,26 @@ public name begins with `weivel_c_`, every public struct begins with its `size`,
 
 ## What is built
 
-Only the loader of the `core` module. `weivel_c_core_load` opens the core's shared binary with the platform's loader
-and fills one table, `weivel_c_core_table`, with every function the core exports; a path that is no library and a
-library that lacks a function are each answered as a status, the second naming the function.
-`weivel_c_core_unload` closes it. The other seven modules hold only a header saying what they are for.
+The `core` module. The other seven modules hold only a header saying what they are for.
+
+`weivel_c_core_load` opens the core's shared binary with the platform's loader and fills one table,
+`weivel_c_core_table`, with every function the core exports; a path that is no library and a library that lacks a
+function are each answered as a status, the second naming the function. `weivel_c_core_unload` closes it.
+
+`weivel_c_core_create` makes a core through a loaded table and the one wrapper every call into it goes through, and
+each call of the core has a `weivel_c_core_` function of the same name that goes through that wrapper:
+
+- a call is made under one lock and its events are drained under the same hold, each copied into the layer's own
+  `weivel_c_event` and released in the core before the next is drained;
+- a refused call is answered with the refusal the core queued for it, as a `weivel_c_refusal` its caller releases, and
+  with the status alone where the core queued none;
+- events are dispatched to the listeners first in, first out, outside the lock, by one thread at a time; a call made
+  while a dispatch runs, from a listener or from another thread, joins the end of the queue, and `weivel_c_core_defer`
+  puts a step there;
+- what a listener, a step or a hook answers as a failure goes to the `weivel_c_error_sink` given at creation, which
+  writes a line to standard error when none is given;
+- `weivel_c_core_set_deadline_hooks` is where the `timer` module will hear each deadline as it is drained and say
+  when one has fallen due.
 
 ## Building
 
