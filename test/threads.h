@@ -3,7 +3,7 @@
 
 /**
  * @file
- * A thread a test starts and joins, on the platform's own threads.
+ * A thread a test starts and joins and a mutex a test's own fixture guards itself with, on the platform's own.
  */
 
 #if defined(_WIN32)
@@ -25,6 +25,20 @@ typedef struct test_thread {
 } test_thread;
 
 #if defined(_WIN32)
+
+typedef SRWLOCK test_mutex;
+
+static inline void start_test_mutex(test_mutex *mutex) {
+    InitializeSRWLock(mutex);
+}
+
+static inline void lock_test_mutex(test_mutex *mutex) {
+    AcquireSRWLockExclusive(mutex);
+}
+
+static inline void unlock_test_mutex(test_mutex *mutex) {
+    ReleaseSRWLockExclusive(mutex);
+}
 
 static DWORD WINAPI run_test_thread(LPVOID argument) {
     test_thread *thread = argument;
@@ -49,6 +63,20 @@ static inline void let_other_threads_run(void) {
 }
 
 #else
+
+typedef pthread_mutex_t test_mutex;
+
+static inline void start_test_mutex(test_mutex *mutex) {
+    pthread_mutex_init(mutex, NULL);
+}
+
+static inline void lock_test_mutex(test_mutex *mutex) {
+    pthread_mutex_lock(mutex);
+}
+
+static inline void unlock_test_mutex(test_mutex *mutex) {
+    pthread_mutex_unlock(mutex);
+}
 
 static void *run_test_thread(void *argument) {
     test_thread *thread = argument;
