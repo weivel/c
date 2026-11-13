@@ -4,6 +4,8 @@
  * when a test moves time over the time it was scheduled for, at that time, and never on its own.
  */
 
+#include <stddef.h>
+
 #include "core/fixture.h"
 #include "threads.h"
 
