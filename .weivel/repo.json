@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "importName": "c",
+  "description": "The C language implementation of weivel: it loads the C core its caller names and runs plugins written in C, deciding nothing itself.",
+  "topics": [
+    "weivel"
+  ],
+  "dependencies": [
+    {
+      "id": "github:1455223370",
+      "importName": "core",
+      "commit": "c10c363db2ed529816adc5876f077eb071ac707b"
+    },
+    {
+      "id": "github:1456093642",
+      "importName": "standard",
+      "commit": "9601b7b6635a9363c47e72f902980fe35dd35b50"
+    },
+    {
+      "id": "github:1426141679",
+      "importName": "conformance",
+      "commit": "ea6bbc92d8603f544a708e2d08efa7aa03c7dc2b"
+    }
+  ]
+}
