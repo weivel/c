@@ -168,11 +168,30 @@ static void widen_constraints(weivel_event *event) {
     }
 }
 
-static weivel_c_status keep_constraints(hearing *self, weivel_c_core *core, const weivel_c_event *event) {
+/** Where the core's own constraints lay in the last capacity event it handed the layer. */
+static weivel_numbers core_constraints;
+
+static void remember_constraints(weivel_event *event) {
+    if (event->kind == WEIVEL_EVENT_CAPACITY_WANTED) {
+        core_constraints = event->data.capacity.constraints;
+    }
+}
+
+static weivel_c_status check_constraints_are_copies(hearing *self, weivel_c_core *core,
+                                                    const weivel_c_event *event) {
     (void)core;
     if (event->kind == WEIVEL_EVENT_CAPACITY_WANTED && self->more != NULL) {
-        weivel_capacity_event *kept = self->more;
-        *kept = event->data.capacity;
+        const weivel_numbers *constraints = &event->data.capacity.constraints;
+        uint32_t *checked = self->more;
+        CHECK(event->data.capacity.question == WEIVEL_CAPACITY_ATTRIBUTES);
+        CHECK(constraints->count == 1 && core_constraints.count == 1);
+        if (constraints->count == 1) {
+            CHECK(constraints->items != core_constraints.items);
+            CHECK(constraints->items[0].size == sizeof(weivel_number));
+            check_text(constraints->items[0].name, "speed", "the constraint's name");
+            CHECK(constraints->items[0].value == 5.0);
+        }
+        *checked += 1;
         self->more = NULL;
     }
     return WEIVEL_C_STATUS_OK;
@@ -211,19 +230,18 @@ static weivel_core_options options_with_a_speed_constraint(weivel_constraint_ent
 
 static void a_capacity_events_constraints_are_the_layers_own_copies(void) {
     hearing listener = {0};
-    weivel_capacity_event kept;
+    uint32_t checked = 0;
     weivel_constraint_entry entry;
     weivel_core_options core_options = options_with_a_speed_constraint(&entry);
     weivel_c_core *core;
     forget_crossings();
-    memset(&kept, 0, sizeof kept);
-    listener.react = keep_constraints;
-    listener.more = &kept;
+    memset(&core_constraints, 0, sizeof core_constraints);
+    bend_event = remember_constraints;
+    listener.react = check_constraints_are_copies;
+    listener.more = &checked;
     core = make_core(&core_options, &listener, NULL);
     ask_a_capacity_question(core);
-    CHECK(count_heard(&listener, WEIVEL_EVENT_CAPACITY_WANTED) >= 1);
-    CHECK(kept.question == WEIVEL_CAPACITY_ATTRIBUTES);
-    CHECK(kept.constraints.count == 1);
+    CHECK(checked == 1);
     end_core(core);
 }
 

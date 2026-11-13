@@ -1,7 +1,8 @@
 /**
  * @file
  * Calls from several threads on one core: every event is dispatched exactly once, in the order it was drained, by one
- * thread at a time, and every deferred step runs exactly once.
+ * thread at a time, every deferred step runs exactly once, and a refused call is answered its own refusal, which it
+ * can only be while no other thread's call lands between a call and its drain.
  *
  * @implNote The listener's record is deliberately unguarded. One dispatcher at a time, handed on under the layer
  * lock, is what makes that safe, so a second dispatcher is a data race the thread sanitizer names.
@@ -56,6 +57,14 @@ static weivel_c_status mark_run(void *data, weivel_c_core *core) {
     return WEIVEL_C_STATUS_OK;
 }
 
+static int is_refused_as_stale(weivel_c_core *core, weivel_handle registration) {
+    weivel_c_refusal refusal = WEIVEL_INIT(weivel_c_refusal);
+    weivel_c_status status = weivel_c_core_unregister(core, registration, &refusal);
+    int stale = status == WEIVEL_C_STATUS_REFUSED && refusal.code == WEIVEL_REFUSAL_STALE_HANDLE;
+    weivel_c_refusal_release(&refusal);
+    return stale;
+}
+
 static void work(worker *self) {
     uint32_t round;
     for (round = 0; round < ROUNDS; round++) {
@@ -68,6 +77,7 @@ static void work(worker *self) {
             WEIVEL_C_STATUS_OK;
         self->failures += weivel_c_core_defer(self->core, &self->steps[round]) != WEIVEL_C_STATUS_OK;
         self->failures += weivel_c_core_unregister(self->core, registration, NULL) != WEIVEL_C_STATUS_OK;
+        self->failures += !is_refused_as_stale(self->core, registration);
     }
 }
 
@@ -146,7 +156,7 @@ static void calls_from_several_threads_are_dispatched_once_in_drained_order_by_o
     forget_crossings();
     run_all(workers);
     check_every_step_ran_once(workers);
-    CHECK(crossed.events >= (uint32_t)(THREADS * ROUNDS * 2));
+    CHECK(crossed.events >= (uint32_t)(THREADS * ROUNDS * 3));
     CHECK(record.heard == crossed.events);
     CHECK(record.out_of_order == 0);
     CHECK(record.overlaps == 0);
