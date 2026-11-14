@@ -157,6 +157,156 @@ static void an_activation_racing_a_destroy_leaves_no_plugin_activated_past_it(vo
     CHECK(weivel_c_host_free(contested.in.host) == WEIVEL_C_STATUS_OK);
 }
 
+/** Finishes every activation of the crowd on several threads while the main thread destroys the host. */
+static void a_destroy_running_while_activates_settle_tells_each_plugin_once(void) {
+    uint32_t index;
+    uint32_t finished = 0;
+    memset(&everyone, 0, sizeof everyone);
+    begin_host_world(&everyone.in);
+    open_everyone();
+    for (index = 0; index < FINISHERS; index++) {
+        CHECK(start_test_thread(&everyone.finishers[index], finish_every_third, (void *)(size_t)index));
+    }
+    CHECK(weivel_c_host_destroy(everyone.in.host, &finished) == WEIVEL_C_STATUS_OK);
+    for (index = 0; index < FINISHERS; index++) {
+        join_test_thread(&everyone.finishers[index]);
+    }
+    CHECK(weivel_c_host_destroy(everyone.in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
+    for (index = 0; index < PLUGINS; index++) {
+        uint32_t kind = 0;
+        weivel_c_status settled = everyone.finished_as[index];
+        CHECK(outcomes_of(&everyone.in.told, everyone.plugins[index].handle, &kind) == 1);
+        CHECK(settled == WEIVEL_C_STATUS_OK || settled == WEIVEL_C_STATUS_NONE || settled == WEIVEL_C_STATUS_DESTROYED);
+    }
+    CHECK(sink_count(&everyone.in) == 0);
+    CHECK(weivel_c_host_free(everyone.in.host) == WEIVEL_C_STATUS_OK);
+}
+
+/** A thread that keeps a dispatch running, step after step, until it is told to stop. */
+typedef struct busy_dispatcher {
+    host_world *in;
+    weivel_c_step step;
+    test_mutex mutex;
+    /** Guarded by `mutex`. */
+    int stopping;
+    /** Guarded by `mutex`. */
+    uint32_t runs;
+} busy_dispatcher;
+
+static busy_dispatcher busy;
+
+static int is_stopping(busy_dispatcher *self) {
+    int stopping;
+    lock_test_mutex(&self->mutex);
+    stopping = self->stopping;
+    unlock_test_mutex(&self->mutex);
+    return stopping;
+}
+
+static weivel_c_status run_again_until_stopped(void *data, weivel_c_core *core) {
+    busy_dispatcher *self = data;
+    lock_test_mutex(&self->mutex);
+    self->runs++;
+    unlock_test_mutex(&self->mutex);
+    let_other_threads_run();
+    if (!is_stopping(self)) {
+        CHECK(weivel_c_core_defer(core, &self->step, NULL) == WEIVEL_C_STATUS_OK);
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void keep_dispatching(void *argument) {
+    busy_dispatcher *self = argument;
+    weivel_c_core *core = NULL;
+    CHECK(weivel_c_host_core(self->in->host, &core) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_defer(core, &self->step, NULL) == WEIVEL_C_STATUS_OK);
+}
+
+/** Waits until the busy thread's step has run once: from then on that thread holds the dispatch until stopped. */
+static void wait_until_dispatching(busy_dispatcher *self) {
+    uint32_t runs = 0;
+    while (runs == 0) {
+        lock_test_mutex(&self->mutex);
+        runs = self->runs;
+        unlock_test_mutex(&self->mutex);
+        let_other_threads_run();
+    }
+}
+
+static void activations_alongside_another_threads_dispatch_start_each_plugin_once(void) {
+    test_thread dispatcher;
+    test_plugin *one[1];
+    uint32_t index;
+    memset(&everyone, 0, sizeof everyone);
+    memset(&busy, 0, sizeof busy);
+    begin_host_world(&everyone.in);
+    start_test_mutex(&busy.mutex);
+    busy.in = &everyone.in;
+    busy.step = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
+    busy.step.run = run_again_until_stopped;
+    busy.step.data = &busy;
+    CHECK(start_test_thread(&dispatcher, keep_dispatching, &busy));
+    wait_until_dispatching(&busy);
+    for (index = 0; index < PLUGINS; index++) {
+        snprintf(everyone.names[index], sizeof everyone.names[index], "p%u", (unsigned)index);
+        name_acting_plugin(&everyone.plugins[index], &everyone.in, everyone.names[index], activate_and_answer_done,
+                           NULL);
+        register_test_plugin(&everyone.plugins[index]);
+        one[0] = &everyone.plugins[index];
+        CHECK(activate_in_order(&everyone.in, one, 1, WEIVEL_EDGES_CAPABILITIES));
+        CHECK(everyone.in.heard.count >= index + 1);
+    }
+    lock_test_mutex(&busy.mutex);
+    busy.stopping = 1;
+    unlock_test_mutex(&busy.mutex);
+    join_test_thread(&dispatcher);
+    for (index = 0; index < PLUGINS; index++) {
+        uint32_t kind = 0;
+        CHECK(outcomes_of(&everyone.in.told, everyone.plugins[index].handle, &kind) == 1 &&
+              kind == WEIVEL_C_OUTCOME_ACTIVE);
+    }
+    CHECK(everyone.in.heard.count == 2 * PLUGINS && sink_count(&everyone.in) == 0);
+    end_host_world(&everyone.in);
+}
+
+/** Two threads releasing one plugin, and what each was answered. */
+typedef struct twin_release {
+    host_world in;
+    test_plugin plugin;
+    test_thread releasers[2];
+    weivel_c_status answered[2];
+} twin_release;
+
+static twin_release twins;
+
+static void release_the_one_plugin(void *argument) {
+    uint32_t which = (uint32_t)(size_t)argument;
+    twins.answered[which] = weivel_c_host_release(twins.in.host, twins.plugin.handle, NULL);
+}
+
+static void two_releases_of_one_plugin_racing_release_it_once(void) {
+    test_plugin *only[1];
+    uint32_t index;
+    memset(&twins, 0, sizeof twins);
+    begin_host_world(&twins.in);
+    name_acting_plugin(&twins.plugin, &twins.in, "agenda", activate_and_answer_done, NULL);
+    twins.plugin.entry.deactivate = deactivate_and_answer_done;
+    register_test_plugin(&twins.plugin);
+    only[0] = &twins.plugin;
+    CHECK(activate_in_order(&twins.in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    for (index = 0; index < 2; index++) {
+        CHECK(start_test_thread(&twins.releasers[index], release_the_one_plugin, (void *)(size_t)index));
+    }
+    for (index = 0; index < 2; index++) {
+        join_test_thread(&twins.releasers[index]);
+    }
+    CHECK((twins.answered[0] == WEIVEL_C_STATUS_OK) + (twins.answered[1] == WEIVEL_C_STATUS_OK) == 1);
+    CHECK(twins.answered[0] == WEIVEL_C_STATUS_NONE || twins.answered[1] == WEIVEL_C_STATUS_NONE);
+    CHECK(place_of(&twins.in.heard, "deactivate agenda") >= 0 && twins.in.heard.count == 3);
+    CHECK(state_of(&twins.in, &twins.plugin) == 0 && sink_count(&twins.in) == 0);
+    end_host_world(&twins.in);
+}
+
 int main(int argument_count, char **arguments) {
     uint32_t round;
     if (argument_count != 2 || !load_tables(arguments[1])) {
@@ -169,6 +319,14 @@ int main(int argument_count, char **arguments) {
     for (round = 0; round < 200; round++) {
         an_activation_racing_a_destroy_leaves_no_plugin_activated_past_it();
     }
+    for (round = 0; round < 20; round++) {
+        a_destroy_running_while_activates_settle_tells_each_plugin_once();
+        activations_alongside_another_threads_dispatch_start_each_plugin_once();
+    }
+    for (round = 0; round < 200; round++) {
+        two_releases_of_one_plugin_racing_release_it_once();
+    }
+
 
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host threads");
