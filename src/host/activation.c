@@ -388,6 +388,9 @@ weivel_c_status weivel_c_host_verify(weivel_c_host *host, weivel_handle plugin, 
 /**
  * Under the host's lock: takes the settling of an activation. An activation whose plugin's release has begun, or
  * whose host is being destroyed, is left to that release, which answers it `released`.
+ *
+ * @implNote A settling taken is counted until its outcome is queued: the plugin's release no longer answers it, so a
+ * destroy that ended meanwhile would destroy the core before that outcome could be queued, and it would be lost.
  */
 static weivel_c_status take_the_settling(weivel_c_completion *activation) {
     weivel_c_host *host = activation->host;
@@ -403,6 +406,7 @@ static weivel_c_status take_the_settling(weivel_c_completion *activation) {
         return WEIVEL_C_STATUS_NONE;
     }
     plugin->activating = NULL;
+    host->settles_in_flight++;
     return WEIVEL_C_STATUS_OK;
 }
 
@@ -435,9 +439,36 @@ static weivel_quarantine_reason reason_of_a_failed_activate(host_outcome *outcom
     return reason;
 }
 
+/** Ends a settling taken while the host ran, once its outcome is queued, and lets a waiting destroy end. */
+static void end_the_settling(weivel_c_host *host) {
+    int destroy_may_end;
+    weivel_c_mutex_lock(&host->lock);
+    host->settles_in_flight--;
+    destroy_may_end = weivel_c_host_destroy_may_end(host);
+    weivel_c_mutex_unlock(&host->lock);
+    if (destroy_may_end) {
+        weivel_c_host_end_the_destroy(host);
+    }
+}
+
+/** Verifies or quarantines the plugin of a settling taken, and queues its outcome. */
+static void settle_what_was_taken(weivel_c_completion *activation, uint32_t answer, const char *reason) {
+    host_plugin *plugin = activation->plugin;
+    if (answer == WEIVEL_C_ENTRY_DONE) {
+        weivel_c_status verified = weivel_c_host_verify_plugin(&activation->ending, &activation->outcome.refusal);
+        tell_unless_told(activation, verified == WEIVEL_C_STATUS_OK ? WEIVEL_C_OUTCOME_ACTIVE
+                                                                     : WEIVEL_C_OUTCOME_QUARANTINED);
+        return;
+    }
+    if (set_state_unless_released(plugin, WEIVEL_C_PLUGIN_QUARANTINED)) {
+        weivel_quarantine_reason quarantined = reason_of_a_failed_activate(&activation->outcome, reason);
+        weivel_c_host_quarantine(&activation->ending, &quarantined);
+    }
+    tell_unless_told(activation, WEIVEL_C_OUTCOME_QUARANTINED);
+}
+
 weivel_c_status weivel_c_host_settle_activation(weivel_c_completion *activation, uint32_t answer, const char *reason) {
     weivel_c_host *host = activation->host;
-    host_plugin *plugin = activation->plugin;
     weivel_c_status taken;
     weivel_c_mutex_lock(&host->lock);
     taken = take_the_settling(activation);
@@ -445,16 +476,7 @@ weivel_c_status weivel_c_host_settle_activation(weivel_c_completion *activation,
     if (taken != WEIVEL_C_STATUS_OK) {
         return taken;
     }
-    if (answer == WEIVEL_C_ENTRY_DONE) {
-        weivel_c_status verified = weivel_c_host_verify_plugin(&activation->ending, &activation->outcome.refusal);
-        tell_unless_told(activation, verified == WEIVEL_C_STATUS_OK ? WEIVEL_C_OUTCOME_ACTIVE
-                                                                     : WEIVEL_C_OUTCOME_QUARANTINED);
-        return WEIVEL_C_STATUS_OK;
-    }
-    if (set_state_unless_released(plugin, WEIVEL_C_PLUGIN_QUARANTINED)) {
-        weivel_quarantine_reason quarantined = reason_of_a_failed_activate(&activation->outcome, reason);
-        weivel_c_host_quarantine(&activation->ending, &quarantined);
-    }
-    tell_unless_told(activation, WEIVEL_C_OUTCOME_QUARANTINED);
+    settle_what_was_taken(activation, answer, reason);
+    end_the_settling(host);
     return WEIVEL_C_STATUS_OK;
 }
