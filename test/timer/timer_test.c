@@ -653,6 +653,22 @@ static void a_timer_without_a_scheduler_leaves_the_hooks_of_the_core_alone(void)
     end_rig(&tested);
 }
 
+static void an_advance_the_core_does_not_take_from_the_task_goes_to_the_sink(void) {
+    rig tested;
+    weivel_c_scheduler scheduler = scheduler_of(&tested.time);
+    begin_rig(&tested, &scheduler);
+    want_within(&tested, tested.consumer, "accounts", 1000);
+    advance_answers = WEIVEL_STATUS_OUT_OF_MEMORY;
+    run_rig_to(&tested, 1000);
+    advance_answers = WEIVEL_STATUS_OK;
+    CHECK(tested.time.fired_count == 1 && crossed.advance == 1 && !timed_out(&tested));
+    CHECK(tested.sink.count == 1 && tested.sink.items[0].failure.kind == WEIVEL_C_FAILURE_DEADLINE_HOOK);
+    CHECK(tested.sink.items[0].failure.status == WEIVEL_C_STATUS_OUT_OF_MEMORY);
+    register_accounts(&tested);
+    CHECK(crossed.advance == 2 && timed_out(&tested) && tested.sink.count == 1);
+    end_rig(&tested);
+}
+
 static void a_misused_creation_makes_no_timer(void) {
     owned_scheduler time;
     weivel_c_scheduler scheduler = scheduler_of(&time);
@@ -998,6 +1014,7 @@ int main(int argument_count, char **arguments) {
     a_second_timer_that_keeps_time_is_refused_and_the_first_still_follows();
     a_destroyed_timer_takes_only_its_own_hooks_off_the_core();
     a_timer_without_a_scheduler_leaves_the_hooks_of_the_core_alone();
+    an_advance_the_core_does_not_take_from_the_task_goes_to_the_sink();
     a_misused_creation_makes_no_timer();
     a_timed_want_arms_the_timer_at_its_deadline();
     a_settled_want_disarms_the_timer();
