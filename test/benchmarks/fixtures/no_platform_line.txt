@@ -1,0 +1,4 @@
+ratio-margin 1.5
+quiet-noise 0.05
+worst-noise 0.5
+noise-margin 2.5

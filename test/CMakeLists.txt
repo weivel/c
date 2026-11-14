@@ -342,3 +342,42 @@ weivel_c_evasion(pointer_copied_in_the_wrapper src/core/wrapper.c
     "src/core/wrapper.c names the table's unregister 1 times where 0 are due")
 weivel_c_evasion(pointer_copied_in_the_calls src/core/calls.c
     "src/core/calls.c names the table's release_plugin 2 times where 1 are due")
+
+set(WEIVEL_C_KIT_BENCHMARKS ${WEIVEL_C_KIT_DIRECTORY}/benchmarks)
+add_executable(benchmarks_benchmark benchmarks/benchmark.c)
+target_link_libraries(benchmarks_benchmark PRIVATE weivel_c_benchmarks)
+weivel_c_strict_warnings(benchmarks_benchmark)
+add_dependencies(benchmarks_benchmark weivel_core_shared echo_library)
+
+# Runs one mode of the benchmarks against the real core, holding it to `expected_exit` and, when given, `must_match`.
+function(weivel_c_benchmark name expected_exit must_match)
+    string(JOIN "|" arguments ${ARGN})
+    add_test(NAME benchmarks_${name}
+        COMMAND ${CMAKE_COMMAND} -DPROGRAM=$<TARGET_FILE:benchmarks_benchmark>
+            "-DARGUMENTS=${arguments}" -DEXPECTED_EXIT=${expected_exit} -DCONFIG=$<CONFIG>
+            "-DMUST_MATCH=${must_match}" ${WEIVEL_C_BENCHMARK_RELEASE_ONLY}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/run.cmake)
+    set_tests_properties(benchmarks_${name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+endfunction()
+
+set(benchmark_core $<TARGET_FILE:weivel_core_shared>)
+set(benchmark_library $<TARGET_FILE:echo_library>)
+set(benchmark_fixtures ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/fixtures)
+weivel_c_benchmark(identity_hands_the_consumer_the_providers_own_object 0 "crossed into the core 0 times"
+    identity ${benchmark_core})
+weivel_c_benchmark(identity_refuses_a_copy_of_the_providers_object 1 "not the provider's own object"
+    identity-copied ${benchmark_core})
+weivel_c_benchmark(control_budget_refuses_a_call_over_it 1 "is over the budget of 1.00 ns"
+    control-budget ${benchmark_core} ${benchmark_fixtures}/one_nanosecond.txt brief)
+weivel_c_benchmark(control_ratio_fails_on_a_platform_the_budget_gives_no_line 1 "gives no line for control-call on"
+    control-ratio ${benchmark_core} ${benchmark_fixtures}/no_platform_line.txt brief)
+weivel_c_benchmark(library_ratio_fails_on_a_platform_the_budget_gives_no_line 1 "gives no line for library-call on"
+    library-ratio ${benchmark_core} ${benchmark_library} ${benchmark_fixtures}/no_platform_line.txt brief)
+
+set(WEIVEL_C_BENCHMARK_RELEASE_ONLY -DRELEASE_ONLY=ON)
+weivel_c_benchmark(measure_prints_every_measurement 0 "weivel-c-benchmark same-language platform=[a-z]+ repetition=10 "
+    measure ${benchmark_core} ${benchmark_library} 10)
+weivel_c_benchmark(control_call_holds_the_cores_budget 0 "control-call-budget median_ns="
+    control-budget ${benchmark_core} ${WEIVEL_C_KIT_BENCHMARKS}/budget.txt)
+set_tests_properties(benchmarks_measure_prints_every_measurement benchmarks_control_call_holds_the_cores_budget
+    PROPERTIES LABELS release-benchmark)
