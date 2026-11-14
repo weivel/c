@@ -236,6 +236,9 @@ weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_host_test_l
 weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_pragma_linking_it
     "pragma_link.c links the standard by #pragma comment"
     -DEVASION=${standard_evasions}/pragma_link.c)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_the_library_named_in_a_string
+    "library_named_in_a_string.c spells weivel_standard, the start of the standard's names, in a string"
+    -DEVASION=${standard_evasions}/library_named_in_a_string.c)
 weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_name_in_characters
     "name_in_characters.c spells the standard's function weivel_standard_read_library in a string"
     -DEVASION=${standard_evasions}/name_in_characters.c)
