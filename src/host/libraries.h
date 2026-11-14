@@ -71,15 +71,18 @@ void weivel_c_host_drop_library_reference(weivel_c_library *library);
 const char *weivel_c_host_repeated_id(const weivel_standard_library *declaration);
 
 /**
- * Finds a declared id that a registration under the host holds now, whoever owns it, by a get as WEIVEL_HOST, which
- * reaches every id: `*held` is the declaration's own text, or NULL when none is held.
+ * The first declared id a registration under the host's core stands for now, whoever owns it, the declaration's own
+ * text; NULL when none does.
  *
- * @implNote A get that finds an id leaves the host holding that registration, as any get does; the load is refused
- * then, so a load that goes on leaves nothing held.
- * @return WEIVEL_C_STATUS_OK, whether or not one is held; any other status the get answered.
+ * @implNote It reads the layer's records of every context rather than getting the id as WEIVEL_HOST: the host holds
+ * what a get hands it, so a get would leave it holding the registration it found and hearing it revoked later.
+ * Every registration under the core is made through a context, so the records see each one; a registration whose
+ * ending the layer has not yet taken in reads as standing, which refuses a load the core would have taken.
  */
-weivel_c_status weivel_c_host_find_held_id(weivel_c_host *host, const weivel_standard_library *declaration,
-                                           const char **held);
+const char *weivel_c_host_find_registered_id(weivel_c_host *host, const weivel_standard_library *declaration);
+
+/** Under the host's lock, taken here: 1 when a library the host loaded and has not unloaded declares `id`. */
+int weivel_c_host_a_live_library_declares(weivel_c_host *host, const char *id);
 
 /**
  * Under the host's lock: the service of `library` whose id another library on the host's list, not yet unloaded,

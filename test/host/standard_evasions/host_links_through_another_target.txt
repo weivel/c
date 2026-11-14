@@ -1,2 +1,2 @@
-weivel_c helping
-helping Threads::Threads,weivel_standard
+own weivel_c helping
+own helping Threads::Threads,weivel_standard

@@ -173,8 +173,13 @@ answer. A consumer that resolves the service is answered that very object.
   when it has a function of another kind (named), no service or a service of no function, an id it lists twice, or an
   id a registration under the host already holds, a plugin's, another live library's or the host's own (the id
   named): registering under `WEIVEL_HOST` replaces a registration, so loading it would silently take that service
-  over. A library that is none, or lacks its release symbol or a function's, is answered as a value naming what is
-  missing.
+  over. The id is looked for in the layer's own records of every registration, never by a get, so a refused load
+  leaves the host holding nothing it would later hear revoked. The refusal holds against every registration made
+  before the load call; a plugin registering the same id on another thread while the load runs can still be
+  replaced, and closing that window needs a register-if-absent call for `WEIVEL_HOST` in the core, which it does not
+  have. The other way round is closed in the layer: `weivel_c_host_register_service` refuses, `WEIVEL_C_STATUS_MISUSE`,
+  an id a live library declares. A library that is none, or lacks its release symbol or a function's, is answered as
+  a value naming what is missing.
 - The library's record is kept on the host's list before any service is registered, so a load that does not finish
   once one is (the destroy begun meanwhile, or a later service's registration refused) is undone as an unload is: an
   object a consumer was told of meanwhile answers `WEIVEL_C_STATUS_UNLOADED`, nothing stays registered, and the binary
@@ -190,10 +195,19 @@ answer. A consumer that resolves the service is answered that very object.
   nobody.
 
 The host includes the standard's `weivel/library.h` for its types and never links, loads or calls the standard's
-binary. A test reads every source outside the `standard` module as tokens, adjacent string literals joined, and fails
-on a name of a function the standard exports, a string spelling one or the start of the standard's names, or a token
-pasted onto a name of weivel's; and it reads the link graph the build writes and fails when any target reaches the
-standard but those it names exactly: the `standard` and `conformance` modules' libraries and their tests.
+binary, and three tests read that from three sides. One reads every source outside the `standard` and `conformance`
+modules as the strings the compiler would make of it, adjacent literals joined, an identifier stringized onto them and
+a run of character literals read as one string, and fails on a name of a function the standard exports (also without
+its `weivel_`), a string spelling one, the stem `weivel_standard`, the start of that stem at a string's end, the end of
+a function's name at a string's start, a name of weivel's around a format conversion, a `#pragma comment(lib, ...)`
+naming the standard, or a token pasted onto a name of weivel's. One reads the link graph the build writes once the
+whole project is configured, every directory at any depth and imported targets included, and fails when a target of
+this repository reaches a link item that names the standard, read part by part with generator expressions, paths and
+extensions taken off, but for those it names exactly: the `standard` and `conformance` modules' libraries and their
+tests. One reads the imports of every host binary built, the shared library and each host test executable, and fails
+when one imports the standard's library or the module's, or a function of either. A name assembled at run time from
+pieces none of which these readings recognise, and the standard linked statically by a path no link item shows, are
+held by review alone. The tests need CMake 3.21 or later.
 
 ### The `standard` module, optional and its own library
 
@@ -218,9 +232,11 @@ parsing and ordering. The module adds what joins the standard's answers to the h
   holds that very object.
 - `weivel_c_standard_status` translates a status of the standard's into the layer's.
 
-The module holds no default of its own: a test reads its sources and header and fails on any string literal, on a
-service id or placeholder macro of the standard's that would compile one of its values into this binary, and on a
-call that reads the environment or opens a file.
+The module holds no default of its own: a test reads its sources and header and fails on any string, a literal, an
+identifier stringized or a character literal; on a service id or placeholder macro of the standard's that would
+compile one of its values into this binary; on a name that reads the environment or opens a file, the platform's
+macro forms and the environment block among them; on a header named in quotes that leaves `src/standard`; and on a
+definition the build gives the module's targets that carries a value.
 
 ### The `conformance` module: the layer suite's driver
 

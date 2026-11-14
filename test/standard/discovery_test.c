@@ -4,14 +4,17 @@
  * module: each found plugin is registered with its manifest, the identity its identity file gives, and the entry read
  * from the file its manifest names by the symbol the caller names; a plugin whose entry is not there, or that names
  * none, opens nothing; the discovery may be released once its plugins are registered; and the identity the standard
- * takes apart compares as the standard orders identities.
+ * takes apart compares as the standard orders identities; an entry loaded for a registration the host refuses is
+ * closed again.
  *
  * @implNote MSVC calls the standard `fopen` unsafe unless told not to before any header is read, and a POSIX system
- * declares `mkdir` and `rmdir` under C11 only when asked for POSIX.
+ * declares `mkdir` and `rmdir` under C11 only when asked for POSIX; macOS hides `RTLD_NOLOAD` once POSIX is asked for
+ * unless Darwin's own names are asked for too.
  */
 
 #define _CRT_SECURE_NO_WARNINGS
 #define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE
 
 #include <weivel/c/standard.h>
 #include <weivel/identity.h>
@@ -19,6 +22,33 @@
 #include "disk.h"
 #include "host/entry_library.h"
 #include "host/plugins.h"
+
+#if defined(_WIN32)
+#include <windows.h>
+
+/** 1 while the process has the library at `path` loaded, as the platform's loader answers. */
+static int library_is_loaded(const char *path) {
+    char native[DISK_PATH];
+    size_t at;
+    snprintf(native, sizeof native, "%s", path);
+    for (at = 0; native[at] != '\0'; at++) {
+        native[at] = native[at] == '/' ? '\\' : native[at];
+    }
+    return GetModuleHandleA(native) != NULL;
+}
+#else
+#include <dlfcn.h>
+
+/** 1 while the process has the library at `path` loaded, as the platform's loader answers. */
+static int library_is_loaded(const char *path) {
+    void *handle = dlopen(path, RTLD_LAZY | RTLD_NOLOAD);
+    if (handle == NULL) {
+        return 0;
+    }
+    dlclose(handle);
+    return 1;
+}
+#endif
 
 static const char *entry_library_path;
 static char directory[DISK_PATH];
@@ -142,6 +172,46 @@ static void a_discovered_manifest_is_filled_within_the_callers_size(void) {
     weivel_standard_discovery_release(&discovery);
 }
 
+static void a_discovered_manifest_leaves_the_rest_of_a_larger_struct_zero(void) {
+    weivel_standard_discovery discovery = WEIVEL_INIT(weivel_standard_discovery);
+    union {
+        weivel_manifest manifest;
+        unsigned char bytes[sizeof(weivel_manifest) + 16];
+    } larger;
+    size_t at;
+    uint32_t left_over = 0;
+    memset(&larger, 0xAB, sizeof larger);
+    larger.manifest.size = (uint32_t)sizeof larger;
+    CHECK(weivel_standard_discover(directory, NULL, &discovery) == WEIVEL_STATUS_OK);
+    CHECK(weivel_c_standard_discovered_manifest(found_named(&discovery, "bare"), &larger.manifest) ==
+          WEIVEL_C_STATUS_OK);
+    for (at = sizeof(weivel_manifest); at < sizeof larger; at++) {
+        left_over += larger.bytes[at] != 0;
+    }
+    CHECK(larger.manifest.size == sizeof larger && left_over == 0 && larger.manifest.identity == NULL);
+    check_text(larger.manifest.import_name, "bare", "the bare plugin's import name");
+    weivel_standard_discovery_release(&discovery);
+}
+
+static void a_refused_registration_closes_the_entry_it_loaded(void) {
+    host_world in;
+    weivel_standard_discovery discovery = WEIVEL_INIT(weivel_standard_discovery);
+    const weivel_standard_discovered_plugin *found;
+    weivel_handle plugin = 9;
+    begin_host_world(&in);
+    CHECK(weivel_standard_discover(directory, NULL, &discovery) == WEIVEL_STATUS_OK);
+    found = found_named(&discovery, "probe");
+    CHECK(found != NULL && found->entry_path != NULL && !library_is_loaded(found->entry_path));
+    CHECK(weivel_c_host_destroy(in.host, NULL) == WEIVEL_C_STATUS_OK);
+    if (found != NULL && found->entry_path != NULL) {
+        CHECK(weivel_c_standard_register_discovered(in.host, found, "test_plugin_entry", &plugin, NULL, NULL) ==
+              WEIVEL_C_STATUS_DESTROYED);
+        CHECK(plugin == 0 && !library_is_loaded(found->entry_path));
+    }
+    CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_OK);
+    weivel_standard_discovery_release(&discovery);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 4 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: standard_discovery_test <core-library> <entry-library> <work-directory>\n");
@@ -153,6 +223,8 @@ int main(int argument_count, char **arguments) {
     CHECK(lay_out_the_plugins());
     a_discovered_plugin_is_registered_with_its_identity_and_the_entry_its_manifest_names();
     a_discovered_manifest_is_filled_within_the_callers_size();
+    a_discovered_manifest_leaves_the_rest_of_a_larger_struct_zero();
+    a_refused_registration_closes_the_entry_it_loaded();
     remove_the_plugins();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("standard discovery");

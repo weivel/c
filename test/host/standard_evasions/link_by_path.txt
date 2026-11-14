@@ -1,0 +1,1 @@
+own weivel_c C:/build/standard/Debug/weivel_standard.lib

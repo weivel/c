@@ -144,7 +144,9 @@ WEIVEL_C_API weivel_c_status weivel_c_host_register(weivel_c_host *host, const w
  * Registers a service of the host's own under WEIVEL_HOST: offered to every activation plan as provided by the host,
  * and answered to a plugin as the very pointer given, as any provider's is.
  *
- * @return as weivel_c_context_register_service answers; WEIVEL_C_STATUS_DESTROYED.
+ * @return as weivel_c_context_register_service answers; WEIVEL_C_STATUS_DESTROYED; WEIVEL_C_STATUS_MISUSE, with
+ * nothing asked of the core, for an id a C library the host loaded and has not unloaded declares
+ * (weivel_c_host_load_library), since registering it under WEIVEL_HOST would replace that library's registration.
  */
 WEIVEL_C_API weivel_c_status weivel_c_host_register_service(weivel_c_host *host, const char *id, void *service,
                                                             const weivel_c_capacity_answerer *answerer,

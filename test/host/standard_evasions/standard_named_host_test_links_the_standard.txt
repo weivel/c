@@ -1,1 +1,1 @@
-standard_sneaking_test weivel_c_testing,weivel_standard_shared
+own standard_sneaking_test weivel_c_testing,weivel_standard_shared

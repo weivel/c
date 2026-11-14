@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "../context/contexts.h"
+
 static int is_listed_before(const weivel_standard_library *declaration, size_t count, const char *id) {
     size_t at;
     for (at = 0; at < count; at++) {
@@ -23,23 +25,14 @@ const char *weivel_c_host_repeated_id(const weivel_standard_library *declaration
     return NULL;
 }
 
-weivel_c_status weivel_c_host_find_held_id(weivel_c_host *host, const weivel_standard_library *declaration,
-                                           const char **held) {
+const char *weivel_c_host_find_registered_id(weivel_c_host *host, const weivel_standard_library *declaration) {
     size_t at;
-    *held = NULL;
     for (at = 0; at < declaration->service_count; at++) {
-        void *service = NULL;
-        weivel_c_status status = weivel_c_context_get_service(host->own_context, declaration->services[at].id,
-                                                              &service, NULL);
-        if (status == WEIVEL_C_STATUS_OK) {
-            *held = declaration->services[at].id;
-            return WEIVEL_C_STATUS_OK;
-        }
-        if (status != WEIVEL_C_STATUS_NONE) {
-            return status;
+        if (weivel_c_contexts_have_registered(host->contexts, declaration->services[at].id)) {
+            return declaration->services[at].id;
         }
     }
-    return WEIVEL_C_STATUS_OK;
+    return NULL;
 }
 
 static int declares_id(const weivel_c_library *library, const char *id) {
@@ -60,6 +53,14 @@ static int another_library_declares(weivel_c_host *host, const weivel_c_library 
         }
     }
     return 0;
+}
+
+int weivel_c_host_a_live_library_declares(weivel_c_host *host, const char *id) {
+    int declared;
+    weivel_c_mutex_lock(&host->lock);
+    declared = another_library_declares(host, NULL, id);
+    weivel_c_mutex_unlock(&host->lock);
+    return declared;
 }
 
 const library_service *weivel_c_host_service_another_library_declares(weivel_c_host *host,

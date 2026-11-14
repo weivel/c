@@ -1,4 +1,5 @@
 #include "host.h"
+#include "libraries.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -249,6 +250,18 @@ static void keep_service(weivel_c_host *host, host_service *kept) {
 weivel_c_status weivel_c_host_register_service(weivel_c_host *host, const char *id, void *service,
                                                const weivel_c_capacity_answerer *answerer,
                                                weivel_handle *registration, weivel_c_refusal *refusal) {
+    if (registration != NULL) {
+        *registration = 0;
+    }
+    if (host != NULL && id != NULL && weivel_c_host_a_live_library_declares(host, id)) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    return weivel_c_host_register_kept_service(host, id, service, answerer, registration, refusal);
+}
+
+weivel_c_status weivel_c_host_register_kept_service(weivel_c_host *host, const char *id, void *service,
+                                                    const weivel_c_capacity_answerer *answerer,
+                                                    weivel_handle *registration, weivel_c_refusal *refusal) {
     host_service *kept;
     weivel_c_status status;
     if (registration != NULL) {

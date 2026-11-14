@@ -312,6 +312,26 @@ void weivel_c_records_end(weivel_c_context *context, int freeing) {
     weivel_c_records_free(freed);
 }
 
+static int lists_a_standing_registration(const weivel_c_record *record, const char *id) {
+    for (; record != NULL; record = record->next) {
+        if (record->kind == WEIVEL_C_RECORD_SERVICE && !record->ended && strcmp(record->id, id) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int weivel_c_contexts_have_registered(weivel_c_contexts *contexts, const char *id) {
+    const weivel_c_context *context;
+    int found = 0;
+    weivel_c_mutex_lock(&contexts->lock);
+    for (context = contexts->first; context != NULL && !found; context = context->next) {
+        found = lists_a_standing_registration(context->records, id);
+    }
+    weivel_c_mutex_unlock(&contexts->lock);
+    return found;
+}
+
 void weivel_c_records_free(weivel_c_record *first) {
     while (first != NULL) {
         weivel_c_record *next = first->next;

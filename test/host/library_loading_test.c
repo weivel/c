@@ -4,8 +4,9 @@
  * undone once a service is registered goes through the unload path, so an object a consumer was told of stays
  * readable and answers unloaded, and nothing stays registered; an id the declaration lists twice, or one a
  * registration under the host holds already, a plugin's, another library's or the host's own, is the caller's
- * mistake, refused with the id named before anything is registered; and a declaration of no service or a service of
- * no function is refused as the standard's reader refuses it.
+ * mistake, refused with the id named before anything is registered and without the host holding what it found; the
+ * host registering an id a live library declares is refused the same way; and a declaration of no service or a
+ * service of no function is refused as the standard's reader refuses it.
  */
 
 #include "libraries.h"
@@ -235,6 +236,87 @@ static void a_declaration_of_no_service_or_a_service_of_no_function_is_refused(v
     end_host_world(&in);
 }
 
+static uint32_t revocations_heard;
+
+static weivel_c_status count_revocation(void *data, const weivel_c_plugin_event *event) {
+    (void)data;
+    if (event->kind == WEIVEL_C_PLUGIN_EVENT_REVOKED) {
+        revocations_heard++;
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void listen_as_the_host(host_world *in) {
+    weivel_c_context *context = NULL;
+    weivel_c_plugin_listener listener;
+    uint64_t listening = 0;
+    listener.hear = count_revocation;
+    listener.data = NULL;
+    revocations_heard = 0;
+    CHECK(weivel_c_host_context(in->host, &context) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_add_listener(context, &listener, &listening) == WEIVEL_C_STATUS_OK);
+}
+
+static void a_refused_load_leaves_the_host_holding_nothing_it_is_later_revoked(void) {
+    host_world in;
+    declared first, second;
+    weivel_c_library *library;
+    weivel_handle own_registration = 0;
+    int own = 0;
+    begin_host_world(&in);
+    listen_as_the_host(&in);
+    declare_probe(&first, "probe");
+    library = load_declared(&in, library_path_of_probe, &first);
+    declare_echo(&second);
+    second.service.id = "probe";
+    refused_naming(&in, library_path_of_echo, &second, "probe");
+    CHECK(weivel_c_host_unload_library(in.host, library) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_host_register_service(in.host, "own", &own, NULL, &own_registration, NULL) == WEIVEL_C_STATUS_OK);
+    declare_probe(&first, "own");
+    refused_naming(&in, library_path_of_probe, &first, "own");
+    CHECK(weivel_c_host_unregister_service(in.host, own_registration, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(revocations_heard == 0 && sink_count(&in) == 0);
+    end_host_world(&in);
+}
+
+static void the_host_registering_an_id_a_live_library_declares_is_refused(void) {
+    host_world in;
+    declared probe;
+    weivel_c_library *library;
+    weivel_handle registration = 7;
+    int own = 0;
+    begin_host_world(&in);
+    declare_probe(&probe, "probe");
+    library = load_declared(&in, library_path_of_probe, &probe);
+    CHECK(weivel_c_host_register_service(in.host, "probe", &own, NULL, &registration, NULL) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(registration == 0 && service_of(&in, "probe") != (const void *)&own);
+    CHECK(weivel_c_host_unload_library(in.host, library) == WEIVEL_C_STATUS_OK);
+    CHECK(sink_count(&in) == 0);
+    CHECK(weivel_c_host_register_service(in.host, "probe", &own, NULL, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(service_of(&in, "probe") == (const void *)&own);
+    end_host_world(&in);
+}
+
+static void a_failure_given_again_no_longer_names_the_id_it_named(void) {
+    host_world in;
+    declared probe;
+    weivel_standard_library_service two[2];
+    weivel_c_library *library = NULL;
+    weivel_c_library_load_failure failure = WEIVEL_INIT(weivel_c_library_load_failure);
+    begin_host_world(&in);
+    declare_two(&probe, two, "twice", "twice");
+    CHECK(weivel_c_host_load_library(in.host, library_path_of_probe, &probe.library, &library, &failure, NULL) ==
+          WEIVEL_C_STATUS_MISUSE);
+    check_text(failure.taken_id, "twice", "the id listed twice");
+    declare_probe(&probe, "probe");
+    probe.functions[PROBE_ANSWER].symbol = "no_such_symbol";
+    CHECK(weivel_c_host_load_library(in.host, library_path_of_probe, &probe.library, &library, &failure, NULL) ==
+          WEIVEL_C_STATUS_MISSING_SYMBOL);
+    check_text(failure.missing_symbol, "no_such_symbol", "the symbol the library lacks");
+    CHECK(failure.taken_id == NULL && failure.wrong_kind == NULL && library == NULL);
+    end_host_world(&in);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 4 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: host_library_loading_test <core-library> <service-library> <echo-library>\n");
@@ -249,6 +331,9 @@ int main(int argument_count, char **arguments) {
     an_id_the_declaration_lists_twice_is_refused_before_anything_opens();
     an_id_a_plugin_or_the_host_holds_is_refused_and_keeps_its_registration();
     a_declaration_of_no_service_or_a_service_of_no_function_is_refused();
+    a_refused_load_leaves_the_host_holding_nothing_it_is_later_revoked();
+    the_host_registering_an_id_a_live_library_declares_is_refused();
+    a_failure_given_again_no_longer_names_the_id_it_named();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host library loading");
 }

@@ -105,15 +105,18 @@ static weivel_c_status check_declaration(const weivel_standard_library *declarat
 
 static weivel_c_status check_before_opening(weivel_c_host *host, const weivel_standard_library *declaration,
                                             weivel_c_library_load_failure *failure) {
-    const char *held = NULL;
+    const char *registered;
     weivel_c_status status = check_declaration(declaration, failure);
     status = status == WEIVEL_C_STATUS_OK && !weivel_c_host_is_running(host) ? WEIVEL_C_STATUS_DESTROYED : status;
-    status = status == WEIVEL_C_STATUS_OK ? weivel_c_host_find_held_id(host, declaration, &held) : status;
-    if (status == WEIVEL_C_STATUS_OK && held != NULL) {
-        tell_taken_id(failure, held);
+    if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    registered = weivel_c_host_find_registered_id(host, declaration);
+    if (registered != NULL) {
+        tell_taken_id(failure, registered);
         return WEIVEL_C_STATUS_MISUSE;
     }
-    return status;
+    return WEIVEL_C_STATUS_OK;
 }
 
 static weivel_c_status find_symbol(void *binary, const char *symbol, weivel_c_binary_function *found,
@@ -219,8 +222,8 @@ static weivel_c_status register_one(library_service *service, weivel_c_refusal *
     if (is_refused_for_testing()) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
-    status = weivel_c_host_register_service(service->library->host, service->id, &service->object, NULL,
-                                            &service->registration, refusal);
+    status = weivel_c_host_register_kept_service(service->library->host, service->id, &service->object, NULL,
+                                                 &service->registration, refusal);
     service->registered = status == WEIVEL_C_STATUS_OK;
     return status;
 }
