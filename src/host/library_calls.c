@@ -11,10 +11,13 @@
 #define FIRST_ANSWER_SIZE END_OF(weivel_c_library_answer, body)
 
 #if defined(WEIVEL_C_TESTING)
+#define WEIVEL_C_TESTING_CLOSES_KEPT 16
 /** How many of the next closes of a library's binary are refused as the platform would, leaving it open. */
 uint32_t weivel_c_testing_closes_to_refuse;
 /** How many closes of a library's binary were made, refused ones included. */
 uint32_t weivel_c_testing_closes_made;
+/** The C library loaded as host services each of the first closes made closed, in order; NULL for an entry's. */
+const weivel_c_library *weivel_c_testing_closed_libraries[WEIVEL_C_TESTING_CLOSES_KEPT];
 #endif
 
 int weivel_c_host_close_library_binary(void *binary) {
@@ -28,10 +31,28 @@ int weivel_c_host_close_library_binary(void *binary) {
     return weivel_c_binary_close(binary);
 }
 
+int weivel_c_host_close_service_library(weivel_c_library *library) {
+#if defined(WEIVEL_C_TESTING)
+    if (weivel_c_testing_closes_made < WEIVEL_C_TESTING_CLOSES_KEPT) {
+        weivel_c_testing_closed_libraries[weivel_c_testing_closes_made] = library;
+    }
+#endif
+    return weivel_c_host_close_library_binary(library->binary);
+}
+
+void weivel_c_host_report_unclosed(weivel_c_host *host, const char *text) {
+    int destroyed;
+    weivel_c_mutex_lock(&host->lock);
+    destroyed = host->state == HOST_DESTROYED;
+    weivel_c_mutex_unlock(&host->lock);
+    if (!destroyed) {
+        weivel_c_host_report(host, WEIVEL_C_FAILURE_UNLOAD, WEIVEL_C_STATUS_NOT_UNLOADED, text);
+    }
+}
+
 void weivel_c_host_drop_library_reference(weivel_c_library *library) {
-    if (weivel_c_references_drop(&library->references) && !weivel_c_host_close_library_binary(library->binary)) {
-        weivel_c_host_report(library->host, WEIVEL_C_FAILURE_UNLOAD, WEIVEL_C_STATUS_NOT_UNLOADED,
-                             "a C library loaded as host services could not be closed");
+    if (weivel_c_references_drop(&library->references) && !weivel_c_host_close_service_library(library)) {
+        weivel_c_host_report_unclosed(library->host, "a C library loaded as host services could not be closed");
     }
 }
 
@@ -85,9 +106,12 @@ static uint32_t is_utf8(const uint8_t *bytes, size_t length) {
     return 1;
 }
 
+static int body_is_usable(const weivel_c_bytes *body) {
+    return (body->size == 0 || body->size >= FIRST_BYTES_SIZE) && body->owner == NULL;
+}
+
 static int answer_is_usable(const weivel_c_library_answer *answer) {
-    return answer != NULL && answer->size >= FIRST_ANSWER_SIZE && answer->body.size >= FIRST_BYTES_SIZE &&
-           answer->body.owner == NULL;
+    return answer != NULL && answer->size >= FIRST_ANSWER_SIZE && body_is_usable(&answer->body);
 }
 
 static int call_is_usable(const weivel_c_library_service *service, uint32_t function, const uint8_t *input,
@@ -97,6 +121,9 @@ static int call_is_usable(const weivel_c_library_service *service, uint32_t func
 }
 
 static void empty_the_body(weivel_c_bytes *body) {
+    if (body->size == 0) {
+        body->size = (uint32_t)sizeof *body;
+    }
     body->data = NULL;
     body->length = 0;
     body->owner = NULL;
@@ -129,7 +156,12 @@ weivel_c_status weivel_c_host_call_library(const weivel_c_library_service *servi
     answer->status = 0;
     answer->body_is_utf8 = 0;
     empty_the_body(&answer->body);
-    if (!weivel_c_references_take(&called->library->references)) {
+    switch (weivel_c_references_take(&called->library->references)) {
+    case WEIVEL_C_REFERENCE_TAKEN:
+        break;
+    case WEIVEL_C_REFERENCE_FULL:
+        return WEIVEL_C_STATUS_OUT_OF_MEMORY;
+    default:
         return WEIVEL_C_STATUS_UNLOADED;
     }
     status = called->functions[function](input, input_length, &output, &output_length);

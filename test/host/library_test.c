@@ -3,7 +3,8 @@
  * C libraries as host services: a declaration value loads a library and registers its services under WEIVEL_HOST,
  * input crosses borrowed, output is answered in place and released once through the declared release symbol, a
  * non-zero status answers its status and body, unloading unregisters and refuses, a declaration of another kind is
- * the caller's mistake, and the destroy unloads every library, telling the sink of one that does not close.
+ * the caller's mistake, the destroy unloads every library, the last loaded first, telling the sink of one that does
+ * not close, and a close refused after the destroy is told to nobody.
  */
 
 #include "libraries.h"
@@ -144,6 +145,9 @@ static void a_status_other_than_zero_answers_the_status_and_its_body_read_as_utf
     const uint8_t bytes[] = {5, 0xFF, 0xFE}, overlong[] = {6, 0xC0, 0x80}, surrogate[] = {7, 0xED, 0xA0, 0x80};
     const uint8_t cut[] = {8, 'a', 0xE2, 0x82}, result[] = {0, 0xFF}, long_three[] = {10, 0xE0, 0x9F, 0xBF};
     const uint8_t long_four[] = {11, 0xF0, 0x8F, 0xBF, 0xBF}, beyond[] = {12, 0xF4, 0x90, 0x80, 0x80};
+    const uint8_t last[] = {13, 0xF4, 0x8F, 0xBF, 0xBF}, lead_f5[] = {14, 0xF5, 0x80, 0x80, 0x80};
+    const uint8_t lead_f6[] = {15, 0xF6, 0x80, 0x80, 0x80}, lead_f7[] = {16, 0xF7, 0xBF, 0xBF, 0xBF};
+    const uint8_t text_result[] = {0, 'o', 'k'};
     begin_host_world(&in);
     declare_probe(&probe, "probe");
     load_declared(&in, library_path_of_probe, &probe);
@@ -158,7 +162,12 @@ static void a_status_other_than_zero_answers_the_status_and_its_body_read_as_utf
     answers(service, long_three, sizeof long_three, WEIVEL_C_STATUS_FAILED, 10, 0);
     answers(service, long_four, sizeof long_four, WEIVEL_C_STATUS_FAILED, 11, 0);
     answers(service, beyond, sizeof beyond, WEIVEL_C_STATUS_FAILED, 12, 0);
+    answers(service, last, sizeof last, WEIVEL_C_STATUS_FAILED, 13, 1);
+    answers(service, lead_f5, sizeof lead_f5, WEIVEL_C_STATUS_FAILED, 14, 0);
+    answers(service, lead_f6, sizeof lead_f6, WEIVEL_C_STATUS_FAILED, 15, 0);
+    answers(service, lead_f7, sizeof lead_f7, WEIVEL_C_STATUS_FAILED, 16, 0);
     answers(service, result, sizeof result, WEIVEL_C_STATUS_OK, 0, 0);
+    answers(service, text_result, sizeof text_result, WEIVEL_C_STATUS_OK, 0, 0);
     CHECK(sink_count(&in) == 0);
     end_host_world(&in);
 }
@@ -310,24 +319,27 @@ static void a_library_that_is_none_or_lacks_a_symbol_is_answered_as_a_value(void
     end_host_world(&in);
 }
 
-static void the_destroy_unloads_every_library_after_every_release_telling_the_sink_of_one_that_does_not_close(void) {
+static void the_destroy_unloads_every_library_the_last_loaded_first_telling_the_sink_of_one_that_does_not_close(void) {
     host_world in;
     declared probe, echo;
     test_plugin consumer;
     resolving wanted = {"probe", NULL, WEIVEL_C_STATUS_FAILED};
     weivel_c_library_answer after;
+    weivel_c_library *probe_library, *echo_library;
     uint32_t finished = 0, closes;
     begin_host_world(&in);
     declare_probe(&probe, "probe");
     declare_echo(&echo);
-    load_declared(&in, library_path_of_probe, &probe);
-    load_declared(&in, library_path_of_echo, &echo);
+    probe_library = load_declared(&in, library_path_of_probe, &probe);
+    echo_library = load_declared(&in, library_path_of_echo, &echo);
     start_a_consumer(&in, &consumer, &wanted, deactivate_and_call);
     closes = weivel_c_testing_closes_made;
     weivel_c_testing_closes_to_refuse = 1;
     CHECK(weivel_c_host_destroy(in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
     CHECK(wanted.called == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_testing_closes_made == closes + 2 && weivel_c_testing_closes_to_refuse == 0);
+    CHECK(weivel_c_testing_closed_libraries[closes] == echo_library);
+    CHECK(weivel_c_testing_closed_libraries[closes + 1] == probe_library);
     CHECK(sink_count(&in) == 1 && in.sink.items[0].failure.kind == WEIVEL_C_FAILURE_UNLOAD);
     CHECK(call_with(wanted.service, PROBE_ANSWER, NULL, 0, &after) == WEIVEL_C_STATUS_UNLOADED);
     CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_OK);
@@ -353,6 +365,96 @@ static void the_host_is_not_freed_while_bytes_its_libraries_answered_are_held(vo
     CHECK(sink_count(&in) == 0);
 }
 
+static void an_answer_still_holding_a_body_is_refused_and_keeps_it(void) {
+    host_world in;
+    declared probe;
+    const weivel_c_library_service *service;
+    weivel_c_library_answer held;
+    const uint8_t kept[] = {0, 'k', 'e', 'p', 't'};
+    const uint8_t *data;
+    begin_host_world(&in);
+    declare_probe(&probe, "probe");
+    load_declared(&in, library_path_of_probe, &probe);
+    service = service_of(&in, "probe");
+    probe_releases = 0;
+    attach_counter(service, &probe_releases);
+    CHECK(call_with(service, PROBE_ANSWER, kept, sizeof kept, &held) == WEIVEL_C_STATUS_OK);
+    data = held.body.data;
+    CHECK(service->call(service, PROBE_ANSWER, kept, sizeof kept, &held) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(held.body.data == data && body_is(&held.body, "kept") && probe_releases == 0);
+    CHECK(weivel_c_bytes_release(&held.body) == WEIVEL_C_STATUS_OK && probe_releases == 1);
+    end_host_world(&in);
+}
+
+static void an_answer_made_by_weivel_init_alone_is_taken_as_the_layers_own(void) {
+    host_world in;
+    declared probe;
+    const weivel_c_library_service *service;
+    weivel_c_library_answer answer = WEIVEL_INIT(weivel_c_library_answer);
+    const uint8_t input[] = {0, 'o', 'k'};
+    begin_host_world(&in);
+    declare_probe(&probe, "probe");
+    load_declared(&in, library_path_of_probe, &probe);
+    service = service_of(&in, "probe");
+    CHECK(answer.body.size == 0);
+    CHECK(service->call(service, PROBE_ANSWER, input, sizeof input, &answer) == WEIVEL_C_STATUS_OK);
+    CHECK(answer.body.size == sizeof answer.body && body_is(&answer.body, "ok"));
+    CHECK(weivel_c_bytes_release(&answer.body) == WEIVEL_C_STATUS_OK && answer.body.data == NULL);
+    end_host_world(&in);
+}
+
+static void an_unload_whose_close_is_refused_answers_not_unloaded(void) {
+    host_world in;
+    declared probe;
+    weivel_c_library *library;
+    begin_host_world(&in);
+    declare_probe(&probe, "probe");
+    library = load_declared(&in, library_path_of_probe, &probe);
+    weivel_c_testing_closes_to_refuse = 1;
+    CHECK(weivel_c_host_unload_library(in.host, library) == WEIVEL_C_STATUS_NOT_UNLOADED);
+    CHECK(weivel_c_testing_closes_to_refuse == 0 && service_of(&in, "probe") == NULL && sink_count(&in) == 0);
+    end_host_world(&in);
+}
+
+/** Loads the probe, holds a body it answered, and unloads it when asked to. */
+static void hold_a_body(host_world *in, declared *probe, weivel_c_library_answer *held, int unload) {
+    weivel_c_library *library;
+    const uint8_t kept[] = {0, 'k'};
+    declare_probe(probe, "probe");
+    library = load_declared(in, library_path_of_probe, probe);
+    CHECK(call_with(service_of(in, "probe"), PROBE_ANSWER, kept, sizeof kept, held) == WEIVEL_C_STATUS_OK);
+    if (unload) {
+        CHECK(weivel_c_host_unload_library(in->host, library) == WEIVEL_C_STATUS_OK);
+    }
+}
+
+static void a_refused_close_on_the_last_release_is_told_to_the_sink(void) {
+    host_world in;
+    declared probe;
+    weivel_c_library_answer held;
+    begin_host_world(&in);
+    hold_a_body(&in, &probe, &held, 1);
+    CHECK(sink_count(&in) == 0);
+    weivel_c_testing_closes_to_refuse = 1;
+    CHECK(weivel_c_bytes_release(&held.body) == WEIVEL_C_STATUS_OK && weivel_c_testing_closes_to_refuse == 0);
+    CHECK(sink_count(&in) == 1 && in.sink.items[0].failure.kind == WEIVEL_C_FAILURE_UNLOAD);
+    end_host_world(&in);
+}
+
+static void a_refused_close_after_the_destroy_is_told_to_nobody(void) {
+    host_world in;
+    declared probe;
+    weivel_c_library_answer held;
+    uint32_t finished = 0;
+    begin_host_world(&in);
+    hold_a_body(&in, &probe, &held, 0);
+    CHECK(weivel_c_host_destroy(in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
+    weivel_c_testing_closes_to_refuse = 1;
+    CHECK(weivel_c_bytes_release(&held.body) == WEIVEL_C_STATUS_OK && weivel_c_testing_closes_to_refuse == 0);
+    CHECK(sink_count(&in) == 0);
+    CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_OK);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 5 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: host_library_test <core-library> <service-library> <echo-library> <no-library>\n");
@@ -370,8 +472,13 @@ int main(int argument_count, char **arguments) {
     a_call_running_as_its_library_is_unloaded_finishes_before_the_library_closes();
     a_declaration_of_another_kind_is_the_callers_mistake_told_to_nobody_else();
     a_library_that_is_none_or_lacks_a_symbol_is_answered_as_a_value();
-    the_destroy_unloads_every_library_after_every_release_telling_the_sink_of_one_that_does_not_close();
+    the_destroy_unloads_every_library_the_last_loaded_first_telling_the_sink_of_one_that_does_not_close();
     the_host_is_not_freed_while_bytes_its_libraries_answered_are_held();
+    an_answer_still_holding_a_body_is_refused_and_keeps_it();
+    an_answer_made_by_weivel_init_alone_is_taken_as_the_layers_own();
+    an_unload_whose_close_is_refused_answers_not_unloaded();
+    a_refused_close_on_the_last_release_is_told_to_the_sink();
+    a_refused_close_after_the_destroy_is_told_to_nobody();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host library");
 }

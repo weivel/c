@@ -166,20 +166,32 @@ answer. A consumer that resolves the service is answered that very object.
   the layer's, hands it to the library's release symbol once and empties it; releasing the emptied struct again does
   nothing.
 - A status other than 0 answers `WEIVEL_C_STATUS_FAILED` with the status and the body, and `body_is_utf8` says
-  whether the body is well-formed UTF-8, so it reads as the text saying why.
-- A declaration the caller built with a function of another kind is the caller's mistake, `WEIVEL_C_STATUS_MISUSE`
-  naming the function, and told to nobody else. A library that is none, or lacks its release symbol or a function's,
-  is answered as a value naming what is missing.
+  whether the body is well-formed UTF-8, so it reads as the text saying why; an empty body counts as UTF-8.
+- A declaration the caller built is refused as the caller's mistake, `WEIVEL_C_STATUS_MISUSE` told to nobody else,
+  when it has a function of another kind (named), no service or a service of no function, an id it lists twice, or an
+  id a registration under the host already holds, a plugin's, another live library's or the host's own (the id
+  named): registering under `WEIVEL_HOST` replaces a registration, so loading it would silently take that service
+  over. A library that is none, or lacks its release symbol or a function's, is answered as a value naming what is
+  missing.
+- The library's record is kept on the host's list before any service is registered, so a load that does not finish
+  once one is (the destroy begun meanwhile, or a later service's registration refused) is undone as an unload is: an
+  object a consumer was told of meanwhile answers `WEIVEL_C_STATUS_UNLOADED`, nothing stays registered, and the binary
+  closes once nothing holds it.
 - `weivel_c_host_unload_library` unregisters every service of the library, and every later call through an object a
   consumer still holds answers `WEIVEL_C_STATUS_UNLOADED`. Its binary closes only once no call runs in it and no bytes
   it answered are held, on whichever of them ends last, so nothing ever calls into a closed library and bytes still
   held stay readable. A call and each held body count themselves on one atomic word per library, which is also how
   an unload is seen; the host's own lock guards only its list of libraries.
-- The destroy unloads every library after every plugin release and its events and steps, before the core is
-  destroyed, and `weivel_c_host_free` refuses while bytes a library answered are still held.
+- The destroy unloads every library, the last loaded first, after every plugin release and its events and steps,
+  before the core is destroyed, and `weivel_c_host_free` refuses while bytes a library answered are still held. A
+  close refused once the host is destroyed, when the last body held across the destroy is released, is told to
+  nobody.
 
 The host includes the standard's `weivel/library.h` for its types and never links, loads or calls the standard's
-binary; a test reads the standard's headers and fails when any source of the layer names one of its functions.
+binary. A test reads every source outside the `standard` module as tokens, adjacent string literals joined, and fails
+on a name of a function the standard exports, a string spelling one or the start of the standard's names, or a token
+pasted onto a name of weivel's; and it reads the link graph the build writes and fails when any target but the
+`standard` module's library and tests reaches the standard.
 
 ## Building
 

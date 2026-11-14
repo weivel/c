@@ -79,6 +79,10 @@ weivel_c_test(host_library_test host/library_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library> $<TARGET_FILE:echo_library>
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
 add_dependencies(host_library_test weivel_core_shared service_library echo_library)
+weivel_c_test(host_library_loading_test host/library_loading_test.c weivel_c_testing
+    $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library> $<TARGET_FILE:echo_library>)
+add_dependencies(host_library_loading_test weivel_core_shared service_library echo_library)
+weivel_c_test(host_references_test host/references_test.c weivel_c_testing)
 weivel_c_test(host_library_threads_test host/library_threads_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library>)
 add_dependencies(host_library_threads_test weivel_core_shared service_library)
@@ -86,10 +90,65 @@ weivel_c_test(host_entry_closing_test host/entry_closing_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:entry_library>)
 add_dependencies(host_entry_closing_test weivel_core_shared entry_library)
 
-add_test(NAME host_calls_nothing_of_the_standard
-    COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
-        -DSTANDARD_INCLUDE=${WEIVEL_C_STANDARD_INCLUDE_DIRECTORY}
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/host/calls_nothing_of_the_standard.cmake)
+# Writes each target of this repository and what it links, one line each, `<target> <link>,<link>`, for the check that
+# no target but the standard module's reaches the standard.
+function(weivel_c_write_link_graph file)
+    set(lines "")
+    foreach(directory ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+        get_property(targets DIRECTORY ${directory} PROPERTY BUILDSYSTEM_TARGETS)
+        foreach(target IN LISTS targets)
+            get_target_property(links ${target} LINK_LIBRARIES)
+            get_target_property(interface_links ${target} INTERFACE_LINK_LIBRARIES)
+            set(all_links "")
+            foreach(link IN LISTS links interface_links)
+                if(link AND NOT link MATCHES "-NOTFOUND$")
+                    list(APPEND all_links "${link}")
+                endif()
+            endforeach()
+            string(REPLACE ";" "," all_links "${all_links}")
+            string(APPEND lines "${target} ${all_links}\n")
+        endforeach()
+    endforeach()
+    file(WRITE ${file} "${lines}")
+endfunction()
+
+
+function(weivel_c_standard_check name expected)
+    add_test(NAME ${name}
+        COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
+            -DSTANDARD_INCLUDE=${WEIVEL_C_STANDARD_INCLUDE_DIRECTORY}
+            -DLINK_GRAPH=${CMAKE_CURRENT_BINARY_DIR}/links.txt
+            ${ARGN} -P ${CMAKE_CURRENT_SOURCE_DIR}/host/calls_nothing_of_the_standard.cmake)
+    if(NOT expected STREQUAL "")
+        set_tests_properties(${name} PROPERTIES
+            PASS_REGULAR_EXPRESSION "${expected}"
+            FAIL_REGULAR_EXPRESSION "the host names none of the standard's")
+    endif()
+endfunction()
+
+weivel_c_standard_check(host_calls_nothing_of_the_standard "")
+set(standard_evasions ${CMAKE_CURRENT_SOURCE_DIR}/host/standard_evasions)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_name_called
+    "names the standard's function weivel_standard_library_release"
+    -DEVASION=${standard_evasions}/name_called.c)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_name_split_across_literals
+    "spells the standard's function weivel_standard_read_library in a string"
+    -DEVASION=${standard_evasions}/name_split_across_literals.c)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_the_json_reader
+    "names the standard's function weivel_json_parse"
+    -DEVASION=${standard_evasions}/json_reader.c)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_name_assembled_at_run_time
+    "spells weivel_json_, the start of the standard's names, in a string"
+    -DEVASION=${standard_evasions}/name_assembled_at_run_time.c)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_pasted_name
+    "pastes tokens together onto a name of weivel"
+    -DEVASION=${standard_evasions}/pasted_name.c)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_host_test_linking_the_standard
+    "host_sneaking_test links the standard's weivel_standard_shared through host_sneaking_test"
+    -DLINK_EVASION=${standard_evasions}/host_test_links_the_standard.txt)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_the_host_linking_through_another_target
+    "weivel_c links the standard's weivel_standard through helping"
+    -DLINK_EVASION=${standard_evasions}/host_links_through_another_target.txt)
 
 add_test(NAME core_table_covers_the_core
     COMMAND ${CMAKE_COMMAND} -DCORE_HEADER=${WEIVEL_C_CORE_INCLUDE_DIRECTORY}/weivel/core.h
@@ -122,3 +181,5 @@ weivel_c_evasion(pointer_copied_in_the_wrapper src/core/wrapper.c
     "src/core/wrapper.c names the table's unregister 1 times where 0 are due")
 weivel_c_evasion(pointer_copied_in_the_calls src/core/calls.c
     "src/core/calls.c names the table's release_plugin 2 times where 1 are due")
+
+weivel_c_write_link_graph(${CMAKE_CURRENT_BINARY_DIR}/links.txt)

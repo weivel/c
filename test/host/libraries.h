@@ -17,6 +17,10 @@
 extern uint32_t weivel_c_testing_closes_to_refuse;
 /** The testing build's: how many closes of a library's binary were made, refused ones included. */
 extern uint32_t weivel_c_testing_closes_made;
+/** The testing build's: the library of each of the first 16 closes made, in order. */
+extern const weivel_c_library *weivel_c_testing_closed_libraries[16];
+/** The testing build's: when not 0, how many registrations of a library's services from now is refused, 1 the next. */
+extern uint32_t weivel_c_testing_registration_to_refuse;
 
 enum { PROBE_INPUT_ADDRESS, PROBE_OWN_ADDRESS, PROBE_ATTACH, PROBE_ANSWER, PROBE_CALL_BACK, PROBE_FUNCTIONS };
 enum { ECHO_ECHO, ECHO_FAIL, ECHO_GARBAGE, ECHO_FUNCTIONS };
