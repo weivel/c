@@ -7,7 +7,7 @@
  * through a host that has a clock, so a question met without one was asked around the contexts. A status of NONE is
  * an answer that came after its question closed, which is no failure.
  */
-static void report_capacity(weivel_c_contexts *contexts, const weivel_c_event *event,
+static void send_the_answer(weivel_c_contexts *contexts, const weivel_c_event *event,
                             const weivel_capacity *capacity) {
     const weivel_capacity_event *asked = &event->data.capacity;
     weivel_c_status status = WEIVEL_C_STATUS_MISUSE;
@@ -61,5 +61,5 @@ void weivel_c_contexts_answer_capacity(weivel_c_contexts *contexts, const weivel
     if (registration.answerer.answer != NULL && !ask_the_answerer(contexts, event, &registration, &capacity)) {
         return;
     }
-    report_capacity(contexts, event, &capacity);
+    send_the_answer(contexts, event, &capacity);
 }
