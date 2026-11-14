@@ -227,6 +227,17 @@ weivel_c_status weivel_c_host_core(weivel_c_host *host, weivel_c_core **core) {
     return WEIVEL_C_STATUS_OK;
 }
 
+weivel_c_status weivel_c_host_timer(weivel_c_host *host, weivel_c_timer **timer) {
+    if (host == NULL || timer == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    if (!weivel_c_host_is_running(host)) {
+        return WEIVEL_C_STATUS_DESTROYED;
+    }
+    *timer = host->timer;
+    return WEIVEL_C_STATUS_OK;
+}
+
 static void keep_service(weivel_c_host *host, host_service *kept) {
     weivel_c_mutex_lock(&host->lock);
     kept->live = 1;
