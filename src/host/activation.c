@@ -146,6 +146,7 @@ static int mark_activating(host_plugin *plugin, weivel_c_completion *activation)
         plugin->state = WEIVEL_C_PLUGIN_ACTIVATING;
         plugin->activating = activation;
         plugin->activate_called = 1;
+        plugin->activations++;
         weivel_c_host_join_opened(plugin);
     } else {
         plugin->state = WEIVEL_C_PLUGIN_RELEASING;
@@ -177,16 +178,10 @@ static void answer_an_open_not_taken(host_plugin *plugin, weivel_c_completion *a
 }
 
 /** Opens one plugin of the plan, builds nothing it could fail to build afterwards, and calls its activate. */
-static void start_plugin(weivel_c_host *host, const weivel_c_outcome_listener *listener, weivel_handle handle) {
-    host_plugin *plugin = weivel_c_host_plugin_of(host, handle);
-    weivel_c_completion *activation = weivel_c_host_make_completion(host, plugin, handle);
+static void start_plugin(weivel_c_completion *activation) {
+    weivel_c_host *host = activation->host;
+    host_plugin *plugin = activation->plugin;
     weivel_c_status opened;
-    if (activation == NULL) {
-        weivel_c_host_report(host, WEIVEL_C_FAILURE_OPEN, WEIVEL_C_STATUS_OUT_OF_MEMORY,
-                             "there was no memory to start a plugin of a plan, nor to tell its outcome");
-        return;
-    }
-    activation->outcome.listener = *listener;
     if (!take_the_open(host)) {
         tell_at_once(activation, WEIVEL_C_OUTCOME_RELEASED);
         return;
@@ -202,78 +197,66 @@ static void start_plugin(weivel_c_host *host, const weivel_c_outcome_listener *l
     }
 }
 
-static int claim_the_start(host_start *start) {
-    weivel_c_host *host = start->host;
-    int claimed;
-    weivel_c_mutex_lock(&host->lock);
-    claimed = !start->claimed;
-    start->claimed = 1;
-    weivel_c_mutex_unlock(&host->lock);
-    return claimed;
-}
+/**
+ * One activation's starting of its plan's plugins, run as a step so every activate is called inside a dispatch: what
+ * an activate's own calls queue is then heard once it returns, as everywhere else in a dispatch. It lives on the
+ * activating thread's stack, since the step runs before the activation returns or not at all.
+ */
+typedef struct host_start {
+    weivel_c_step step;
+    /** One per plugin of the plan's order, in that order, each made before the first open. */
+    weivel_c_completion **activations;
+    uint32_t count;
+} host_start;
 
-static void start_every_plugin(host_start *start) {
-    uint32_t index;
-    for (index = 0; index < start->count; index++) {
-        start_plugin(start->host, &start->listener, start->order[index]);
-    }
-}
-
-static weivel_c_status run_the_start(void *data, weivel_c_core *core) {
+static weivel_c_status start_every_plugin(void *data, weivel_c_core *core) {
     host_start *start = data;
+    uint32_t index;
     (void)core;
-    if (claim_the_start(start)) {
-        start_every_plugin(start);
+    for (index = 0; index < start->count; index++) {
+        start_plugin(start->activations[index]);
     }
     return WEIVEL_C_STATUS_OK;
-}
-
-static host_start *make_the_start(weivel_c_host *host, const weivel_c_outcome_listener *listener,
-                                  const weivel_activation_plan *plan) {
-    host_start *start = calloc(1, sizeof *start + plan->order_count * sizeof start->order[0]);
-    uint32_t index;
-    if (start == NULL) {
-        return NULL;
-    }
-    start->step = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
-    start->step.run = run_the_start;
-    start->step.data = start;
-    start->host = host;
-    start->listener = *listener;
-    start->count = plan->order_count;
-    for (index = 0; index < plan->order_count; index++) {
-        start->order[index] = plan->order[index];
-    }
-    weivel_c_mutex_lock(&host->lock);
-    start->next = host->starts;
-    host->starts = start;
-    weivel_c_mutex_unlock(&host->lock);
-    return start;
 }
 
 /**
  * Starts the plan's plugins inside a dispatch, and before this returns.
  *
- * @implNote Where no dispatch runs, the defer makes this thread the dispatcher and the start has run when it returns.
- * Where one runs, here or on another thread, the start would wait in its queue; this thread then takes it from the
- * step and starts the plugins itself, as a call made while that dispatch runs, so the activation still returns only
- * once every activate has been started. The step finds the start taken and does nothing.
+ * @implNote Where no dispatch runs, this thread becomes the dispatcher and runs the start at once. Where one runs, here
+ * or on another thread, nothing is queued and this thread starts the plugins itself, as a call made while that
+ * dispatch runs: so the plugins are started exactly once, on this thread, before the activation returns, and never
+ * by a step another dispatch could take first.
  */
-static void start_in_a_dispatch(host_start *start) {
-    uint32_t here = 0;
-    if (weivel_c_core_defer(start->host->core, &start->step, &here) == WEIVEL_C_STATUS_OK && here) {
-        return;
+static void start_in_a_dispatch(weivel_c_host *host, weivel_c_completion **activations, uint32_t count) {
+    host_start start;
+    uint32_t ran = 0;
+    start.step = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
+    start.step.run = start_every_plugin;
+    start.step.data = &start;
+    start.activations = activations;
+    start.count = count;
+    if (weivel_c_core_run_as_the_dispatcher(host->core, &start.step, &ran) != WEIVEL_C_STATUS_OK || !ran) {
+        start_every_plugin(&start, host->core);
     }
-    if (claim_the_start(start)) {
-        start_every_plugin(start);
+}
+
+/** Starts the plugins of a plan the core answered, or answers OUT_OF_MEMORY, starting none and releasing the plan. */
+static weivel_c_status start_the_plan(weivel_c_host *host, const weivel_c_outcome_listener *listener,
+                                      weivel_activation_plan *plan) {
+    weivel_c_completion **activations = weivel_c_host_make_completions(host, plan->order, plan->order_count, listener);
+    if (activations == NULL) {
+        weivel_c_core_activation_plan_release(host->core, plan);
+        return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
+    start_in_a_dispatch(host, activations, plan->order_count);
+    host->allocator.release(host->allocator.data, activations);
+    return WEIVEL_C_STATUS_OK;
 }
 
 weivel_c_status weivel_c_host_activate(weivel_c_host *host, const weivel_c_activation *activation,
                                        weivel_activation_plan *plan, weivel_c_refusal *refusal) {
     weivel_strings provided = {NULL, 0};
     const char **ids;
-    host_start *start;
     weivel_c_status status;
     if (host == NULL || plan == NULL || !activation_is_usable(activation)) {
         return WEIVEL_C_STATUS_MISUSE;
@@ -292,13 +275,7 @@ weivel_c_status weivel_c_host_activate(weivel_c_host *host, const weivel_c_activ
     if (status != WEIVEL_C_STATUS_OK) {
         return status;
     }
-    start = make_the_start(host, &activation->listener, plan);
-    if (start == NULL) {
-        weivel_c_core_activation_plan_release(host->core, plan);
-        return WEIVEL_C_STATUS_OUT_OF_MEMORY;
-    }
-    start_in_a_dispatch(start);
-    return WEIVEL_C_STATUS_OK;
+    return start_the_plan(host, &activation->listener, plan);
 }
 
 weivel_c_status weivel_c_host_plan_release(weivel_c_host *host, weivel_activation_plan *plan) {
@@ -326,22 +303,38 @@ static int set_state_unless_released(host_plugin *plugin, uint32_t state) {
 }
 
 weivel_c_status weivel_c_host_end_quarantined_entries(void *data, weivel_c_core *core) {
-    host_plugin *plugin = data;
+    host_ending *ending = data;
+    weivel_c_host *host = ending->plugin->host;
+    int current;
     (void)core;
-    return weivel_c_context_end_entries(plugin->context);
+    weivel_c_mutex_lock(&host->lock);
+    current = ending->plugin->activations == ending->activation;
+    weivel_c_mutex_unlock(&host->lock);
+    return current ? weivel_c_context_end_entries(ending->plugin->context) : WEIVEL_C_STATUS_OK;
 }
 
-weivel_c_status weivel_c_host_quarantine(host_plugin *plugin, const weivel_quarantine_reason *reason) {
+static void stamp_the_ending(host_ending *ending) {
+    weivel_c_host *host = ending->plugin->host;
+    weivel_c_mutex_lock(&host->lock);
+    ending->activation = ending->plugin->activations;
+    weivel_c_mutex_unlock(&host->lock);
+}
+
+weivel_c_status weivel_c_host_quarantine(host_ending *ending, const weivel_quarantine_reason *reason) {
+    host_plugin *plugin = ending->plugin;
     weivel_c_host *host = plugin->host;
-    weivel_c_status status = weivel_c_core_quarantine_plugin(host->core, plugin->handle, reason, NULL);
+    weivel_c_status status;
+    stamp_the_ending(ending);
+    status = weivel_c_core_quarantine_plugin(host->core, plugin->handle, reason, NULL);
     weivel_c_host_report_call(host, status, "the core did not quarantine a plugin the host quarantined");
     if (status == WEIVEL_C_STATUS_OK) {
-        weivel_c_core_defer(host->core, &plugin->quarantine_ending, NULL);
+        weivel_c_core_defer(host->core, &ending->step, NULL);
     }
     return status;
 }
 
-weivel_c_status weivel_c_host_verify_plugin(host_plugin *plugin, weivel_c_refusal *refusal) {
+weivel_c_status weivel_c_host_verify_plugin(host_ending *ending, weivel_c_refusal *refusal) {
+    host_plugin *plugin = ending->plugin;
     weivel_c_host *host = plugin->host;
     weivel_c_status verified = weivel_c_core_verify_activation(host->core, plugin->handle, refusal);
     if (verified == WEIVEL_C_STATUS_OK) {
@@ -355,7 +348,7 @@ weivel_c_status weivel_c_host_verify_plugin(host_plugin *plugin, weivel_c_refusa
         weivel_c_host_report_call(host, verified, "the core could not verify a plugin, which the host quarantined");
     }
     if (set_state_unless_released(plugin, WEIVEL_C_PLUGIN_QUARANTINED)) {
-        weivel_c_host_quarantine(plugin, NULL);
+        weivel_c_host_quarantine(ending, NULL);
     }
     return verified;
 }
@@ -372,7 +365,7 @@ weivel_c_status weivel_c_host_verify(weivel_c_host *host, weivel_handle plugin, 
     if (found == NULL) {
         return WEIVEL_C_STATUS_NONE;
     }
-    return weivel_c_host_verify_plugin(found, refusal);
+    return weivel_c_host_verify_plugin(&found->verify_ending, refusal);
 }
 
 /**
@@ -436,14 +429,14 @@ weivel_c_status weivel_c_host_settle_activation(weivel_c_completion *activation,
         return taken;
     }
     if (answer == WEIVEL_C_ENTRY_DONE) {
-        weivel_c_status verified = weivel_c_host_verify_plugin(plugin, &activation->outcome.refusal);
+        weivel_c_status verified = weivel_c_host_verify_plugin(&activation->ending, &activation->outcome.refusal);
         tell_unless_told(activation, verified == WEIVEL_C_STATUS_OK ? WEIVEL_C_OUTCOME_ACTIVE
                                                                      : WEIVEL_C_OUTCOME_QUARANTINED);
         return WEIVEL_C_STATUS_OK;
     }
     if (set_state_unless_released(plugin, WEIVEL_C_PLUGIN_QUARANTINED)) {
         weivel_quarantine_reason quarantined = reason_of_a_failed_activate(&activation->outcome, reason);
-        weivel_c_host_quarantine(plugin, &quarantined);
+        weivel_c_host_quarantine(&activation->ending, &quarantined);
     }
     tell_unless_told(activation, WEIVEL_C_OUTCOME_QUARANTINED);
     return WEIVEL_C_STATUS_OK;

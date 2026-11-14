@@ -28,21 +28,66 @@ static void ready_the_outcome(host_outcome *outcome, weivel_c_completion *activa
     outcome->plugin = plugin;
 }
 
-weivel_c_completion *weivel_c_host_make_completion(weivel_c_host *host, host_plugin *plugin, weivel_handle handle) {
-    weivel_c_completion *made = calloc(1, sizeof *made);
+void weivel_c_host_ready_ending(host_ending *ending, host_plugin *plugin) {
+    ending->step = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
+    ending->step.run = weivel_c_host_end_quarantined_entries;
+    ending->step.data = ending;
+    ending->plugin = plugin;
+    ending->activation = 0;
+}
+
+static weivel_c_completion *make_unlisted(weivel_c_host *host, weivel_handle handle,
+                                          const weivel_c_outcome_listener *listener) {
+    weivel_c_completion *made = host->allocator.allocate(host->allocator.data, sizeof *made);
     if (made == NULL) {
         return NULL;
     }
+    memset(made, 0, sizeof *made);
     made->host = host;
-    made->plugin = plugin;
+    made->plugin = weivel_c_host_plugin_of(host, handle);
     made->purpose = COMPLETION_OF_AN_ACTIVATE;
     ready_the_outcome(&made->outcome, made, handle);
-    weivel_c_mutex_lock(&host->lock);
-    made->next = host->completions;
-    host->completions = made;
-    weivel_c_mutex_unlock(&host->lock);
+    made->outcome.listener = *listener;
+    weivel_c_host_ready_ending(&made->ending, made->plugin);
     return made;
 }
+
+static void release_made(weivel_c_host *host, weivel_c_completion **made, uint32_t count) {
+    uint32_t index;
+    for (index = 0; index < count; index++) {
+        host->allocator.release(host->allocator.data, made[index]);
+    }
+    host->allocator.release(host->allocator.data, made);
+}
+
+static void list_made(weivel_c_host *host, weivel_c_completion **made, uint32_t count) {
+    uint32_t index;
+    weivel_c_mutex_lock(&host->lock);
+    for (index = 0; index < count; index++) {
+        made[index]->next = host->completions;
+        host->completions = made[index];
+    }
+    weivel_c_mutex_unlock(&host->lock);
+}
+
+weivel_c_completion **weivel_c_host_make_completions(weivel_c_host *host, const weivel_handle *order, uint32_t count,
+                                                     const weivel_c_outcome_listener *listener) {
+    weivel_c_completion **made = host->allocator.allocate(host->allocator.data, (count == 0 ? 1 : count) * sizeof *made);
+    uint32_t index;
+    if (made == NULL) {
+        return NULL;
+    }
+    for (index = 0; index < count; index++) {
+        made[index] = make_unlisted(host, order[index], listener);
+        if (made[index] == NULL) {
+            release_made(host, made, index);
+            return NULL;
+        }
+    }
+    list_made(host, made, count);
+    return made;
+}
+
 
 int weivel_c_host_choose_outcome(weivel_c_completion *activation, uint32_t kind) {
     if (activation->outcome.kind != 0) {

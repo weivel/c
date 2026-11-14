@@ -1649,9 +1649,60 @@ static void run_the_tests_that_fail_an_allocation(void) {
     an_empty_text_stays_empty_and_a_missing_one_missing_in_an_incomplete_event();
 }
 
+/** A step run as the dispatcher from inside another step, and what that answered. */
+typedef struct running_now {
+    weivel_c_step inner;
+    uint32_t inner_runs;
+    uint32_t ran_inside;
+    weivel_c_status answered_inside;
+} running_now;
+
+static weivel_c_status count_a_step_run(void *data, weivel_c_core *core) {
+    uint32_t *runs = data;
+    (void)core;
+    (*runs)++;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static weivel_c_status try_to_run_inside_a_dispatch(void *data, weivel_c_core *core) {
+    running_now *self = data;
+    self->answered_inside = weivel_c_core_run_as_the_dispatcher(core, &self->inner, &self->ran_inside);
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void a_step_run_as_the_dispatcher_runs_at_once_where_none_runs_and_nowhere_inside_one(void) {
+    hearing listener = {0};
+    running_now self;
+    weivel_c_step outer = WEIVEL_INIT(weivel_c_step);
+    uint32_t ran = 9;
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    memset(&self, 0, sizeof self);
+    self.inner = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
+    self.inner.run = count_a_step_run;
+    self.inner.data = &self.inner_runs;
+    CHECK(weivel_c_core_run_as_the_dispatcher(core, &self.inner, &ran) == WEIVEL_C_STATUS_OK && ran == 1);
+    CHECK(self.inner_runs == 1);
+    outer.run = try_to_run_inside_a_dispatch;
+    outer.data = &self;
+    self.ran_inside = 9;
+    CHECK(weivel_c_core_defer(core, &outer, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(self.answered_inside == WEIVEL_C_STATUS_OK && self.ran_inside == 0 && self.inner_runs == 1);
+    CHECK(self.inner.place.waiting == 0);
+    CHECK(weivel_c_core_run_as_the_dispatcher(core, NULL, &ran) == WEIVEL_C_STATUS_MISUSE && ran == 0);
+    CHECK(weivel_c_core_run_as_the_dispatcher(core, &self.inner, NULL) == WEIVEL_C_STATUS_MISUSE);
+    end_core(core);
+}
+
+static void run_the_tests_of_the_layers_own_steps(void) {
+    a_step_run_as_the_dispatcher_runs_at_once_where_none_runs_and_nowhere_inside_one();
+}
+
 #else
 
 static void run_the_tests_that_fail_an_allocation(void) {
+}
+
+static void run_the_tests_of_the_layers_own_steps(void) {
 }
 
 #endif
@@ -1717,6 +1768,8 @@ int main(int argument_count, char **arguments) {
     run_the_tests_of_deadlines();
     run_the_tests_of_defects_and_endings();
     run_the_tests_that_fail_an_allocation();
+    run_the_tests_of_the_layers_own_steps();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
+
     return check_summary("core wrapper");
 }

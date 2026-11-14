@@ -232,6 +232,91 @@ static void a_free_while_another_thread_is_still_inside_the_layer_frees_nothing(
     CHECK(weivel_c_host_free(racing.in.host) == WEIVEL_C_STATUS_OK);
 }
 
+/** How many times `line` was traced. */
+static uint32_t times_traced(trace *self, const char *line) {
+    uint32_t found = 0;
+    uint32_t index;
+    lock_test_mutex(&self->mutex);
+    for (index = 0; index < self->count && index < HOST_WORLD_LINES; index++) {
+        found += strcmp(self->lines[index], line) == 0;
+    }
+    unlock_test_mutex(&self->mutex);
+    return found;
+}
+
+static void hold_another_threads_dispatch(race *self) {
+    CHECK(start_test_thread(&self->dispatcher, dispatch_and_hold, self));
+    pass_gate(&self->dispatch_held);
+}
+
+static void let_the_held_dispatch_go(race *self) {
+    open_gate(&self->dispatch_free);
+    join_test_thread(&self->dispatcher);
+}
+
+static void destroy_and_finish(race *self) {
+    uint32_t finished = 9;
+    CHECK(weivel_c_host_destroy(self->in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 0);
+    finish_the_destroy(self);
+}
+
+static void an_activation_alongside_another_threads_dispatch_starts_its_plugin_once_before_it_returns(void) {
+    test_plugin *only[1];
+    uint32_t kind = 0;
+    begin_the_race(&racing);
+    register_test_plugin(&racing.late);
+    hold_another_threads_dispatch(&racing);
+    only[0] = &racing.late;
+    CHECK(activate_in_order(&racing.in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    CHECK(times_traced(&racing.in.heard, "activate late") == 1);
+    let_the_held_dispatch_go(&racing);
+    CHECK(times_traced(&racing.in.heard, "activate late") == 1);
+    CHECK(outcomes_of(&racing.in.told, racing.late.handle, &kind) == 1 && kind == WEIVEL_C_OUTCOME_ACTIVE);
+    destroy_and_finish(&racing);
+}
+
+/** Fails its first activate, and registers `flaky:service` in every later one. */
+static uint32_t fail_then_register(void *data, weivel_c_context *context, weivel_c_completion *completion,
+                                   const char **reason) {
+    test_plugin *self = data;
+    weivel_handle *registration = self->more;
+    (void)completion;
+    self->context = context;
+    trace_line(&self->in->heard, "activate", self->manifest.import_name, "");
+    if (*registration == 0) {
+        *registration = 1;
+        *reason = "the first try fails";
+        return WEIVEL_C_ENTRY_FAILED;
+    }
+    CHECK(weivel_c_context_register_service(context, "flaky:service", &registered_object, NULL, registration, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    return WEIVEL_C_ENTRY_DONE;
+}
+
+/**
+ * Quarantines a plugin and activates it again while another thread's dispatch is held, so the ending of the
+ * quarantine's entries still waits in that dispatch when the second activate has registered its service.
+ */
+static void the_ending_of_a_quarantine_ends_no_entry_of_a_later_activation(void) {
+    test_plugin flaky;
+    test_plugin *only[1];
+    weivel_handle registration = 0;
+    begin_the_race(&racing);
+    name_acting_plugin(&flaky, &racing.in, "flaky", fail_then_register, NULL);
+    flaky.more = &registration;
+    offers_service(&flaky, "flaky:service");
+    register_test_plugin(&flaky);
+    hold_another_threads_dispatch(&racing);
+    only[0] = &flaky;
+    CHECK(activate_in_order(&racing.in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    CHECK(state_of(&racing.in, &flaky) == WEIVEL_C_PLUGIN_QUARANTINED);
+    CHECK(activate_in_order(&racing.in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    CHECK(state_of(&racing.in, &flaky) == WEIVEL_C_PLUGIN_ACTIVE && registration > 1);
+    let_the_held_dispatch_go(&racing);
+    CHECK(weivel_c_context_unregister_service(flaky.context, registration, NULL) == WEIVEL_C_STATUS_OK);
+    destroy_and_finish(&racing);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 2 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: host_races_test <core-library>\n");
@@ -240,6 +325,9 @@ int main(int argument_count, char **arguments) {
     an_activation_whose_open_races_the_destroys_first_step_releases_its_plugin_without_its_activate();
     a_registration_that_races_the_destroy_answers_destroyed_and_keeps_nothing();
     a_free_while_another_thread_is_still_inside_the_layer_frees_nothing();
+    an_activation_alongside_another_threads_dispatch_starts_its_plugin_once_before_it_returns();
+    the_ending_of_a_quarantine_ends_no_entry_of_a_later_activation();
+
 
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host races");
