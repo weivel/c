@@ -665,20 +665,27 @@ weivel_c_status weivel_c_core_remove_listener(weivel_c_core *core, uint64_t regi
     return status;
 }
 
+static int hooks_are_usable(const weivel_c_deadline_hooks *hooks) {
+    return hooks == NULL || hooks->size >= FIRST_HOOKS_SIZE;
+}
+
+static int has_hooks(const weivel_c_core *core) {
+    return core->hooks.now != NULL || core->hooks.follow != NULL;
+}
+
+static int has_these_hooks(const weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+    return has_hooks(core) && core->hooks.now == hooks->now && core->hooks.follow == hooks->follow &&
+           core->hooks.data == hooks->data;
+}
+
 /**
+ * Entered with the lock held and left without it: puts `hooks` in place, none for NULL.
+ *
  * @implNote Hooks set while a deadline is recorded are told it at once: the serial moves, so this call's own `leave`
  * takes the turn, or the thread that holds it goes round once more with the new hooks.
  */
-weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+static void put_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
     call_notes notes;
-    weivel_c_status status;
-    if (core == NULL || (hooks != NULL && hooks->size < FIRST_HOOKS_SIZE)) {
-        return WEIVEL_C_STATUS_MISUSE;
-    }
-    status = enter(core);
-    if (status != WEIVEL_C_STATUS_OK) {
-        return status;
-    }
     memset(&core->hooks, 0, sizeof core->hooks);
     if (hooks != NULL) {
         core->hooks = *hooks;
@@ -686,6 +693,43 @@ weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *core, const weiv
     core->deadline_serial += core->deadline_serial != 0;
     begin_notes(&notes);
     leave(core, &notes);
+}
+
+weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+    weivel_c_status status = core == NULL || !hooks_are_usable(hooks) ? WEIVEL_C_STATUS_MISUSE : enter(core);
+    if (status == WEIVEL_C_STATUS_OK) {
+        put_hooks(core, hooks);
+    }
+    return status;
+}
+
+weivel_c_status weivel_c_core_install_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+    weivel_c_status status;
+    if (core == NULL || hooks == NULL || !hooks_are_usable(hooks)) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    status = enter(core);
+    if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    if (has_hooks(core)) {
+        weivel_c_mutex_unlock(&core->lock);
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    put_hooks(core, hooks);
+    return WEIVEL_C_STATUS_OK;
+}
+
+weivel_c_status weivel_c_core_remove_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+    weivel_c_status status = core == NULL || hooks == NULL ? WEIVEL_C_STATUS_MISUSE : enter(core);
+    if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    if (!has_these_hooks(core, hooks)) {
+        weivel_c_mutex_unlock(&core->lock);
+        return WEIVEL_C_STATUS_NONE;
+    }
+    put_hooks(core, NULL);
     return WEIVEL_C_STATUS_OK;
 }
 

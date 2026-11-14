@@ -75,6 +75,20 @@ weivel_c_status weivel_c_core_invoke_handing_time(weivel_c_core *core, weivel_c_
  */
 weivel_c_status weivel_c_core_follow_deadline_again(weivel_c_core *core);
 
+/**
+ * weivel_c_core_set_deadline_hooks for an owner that may not displace another's: it sets `hooks` only on a core that
+ * has none. Answers WEIVEL_C_STATUS_MISUSE, the hooks in place untouched, for a core that has; otherwise as
+ * weivel_c_core_set_deadline_hooks answers.
+ */
+weivel_c_status weivel_c_core_install_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks);
+
+/**
+ * Takes a core's deadline hooks off when they are still `hooks`, each function and the `data` alike. Answers
+ * WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_NONE, nothing changed, when the core has other hooks or none;
+ * WEIVEL_C_STATUS_MISUSE or WEIVEL_C_STATUS_DESTROYED.
+ */
+weivel_c_status weivel_c_core_remove_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks);
+
 /** 1 once the core behind the object is destroyed, so that no listener and no step of it will be taken again. */
 int weivel_c_core_is_destroyed(weivel_c_core *core);
 

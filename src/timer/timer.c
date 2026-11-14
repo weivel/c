@@ -265,12 +265,12 @@ static void adopt_scheduler(weivel_c_timer *timer, const weivel_c_scheduler *sch
     timer->keeps_time = 1;
 }
 
-static weivel_c_status install(weivel_c_timer *timer) {
+static weivel_c_deadline_hooks hooks_of(weivel_c_timer *timer) {
     weivel_c_deadline_hooks hooks = WEIVEL_INIT(weivel_c_deadline_hooks);
     hooks.now = read_the_clock;
     hooks.follow = follow;
     hooks.data = timer;
-    return weivel_c_core_set_deadline_hooks(timer->core, &hooks);
+    return hooks;
 }
 
 static void discard(weivel_c_timer *timer) {
@@ -302,8 +302,9 @@ weivel_c_status weivel_c_timer_create(weivel_c_core *core, const weivel_c_schedu
     }
     created->core = core;
     if (scheduler != NULL) {
+        weivel_c_deadline_hooks hooks = hooks_of(created);
         adopt_scheduler(created, scheduler);
-        status = install(created);
+        status = weivel_c_core_install_deadline_hooks(core, &hooks);
     }
     if (status != WEIVEL_C_STATUS_OK) {
         discard(created);
@@ -328,7 +329,8 @@ weivel_c_status weivel_c_timer_destroy(weivel_c_timer *timer) {
     }
     weivel_c_mutex_unlock(&timer->lock);
     if (first && timer->keeps_time) {
-        weivel_c_core_set_deadline_hooks(timer->core, NULL);
+        weivel_c_deadline_hooks hooks = hooks_of(timer);
+        weivel_c_core_remove_deadline_hooks(timer->core, &hooks);
         cancel_task(timer, stopped);
     }
     return WEIVEL_C_STATUS_OK;
