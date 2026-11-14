@@ -9,6 +9,7 @@
  * another thread's feet is a race the thread sanitizer names, and a call into a closed library is a crash.
  */
 
+#include "gates.h"
 #include "libraries.h"
 
 static const char *library_path_of_probe;
@@ -144,6 +145,96 @@ static void calls_from_several_threads_while_another_unloads_are_each_answered_o
     CHECK(weivel_c_testing_closes_made == closes + 1);
 }
 
+/**
+ * A host registration of one id raced against a load declaring it: the registering thread is held still at the clock
+ * reading its core call begins with, past the host's check for a live library declaring the id, while the load runs.
+ */
+typedef struct id_race {
+    host_world in;
+    test_mutex clock_mutex;
+    /** Guarded by `clock_mutex`: 1 while the next reading of the clock is the one the registering thread stops at. */
+    uint32_t stop_armed;
+    test_gate reached;
+    test_gate free_to_go;
+    test_thread registering;
+    int object;
+    weivel_c_status registered;
+} id_race;
+
+static id_race racing_for_an_id;
+
+static void stop_at_the_armed_reading(void *more) {
+    id_race *self = more;
+    uint32_t stopping;
+    lock_test_mutex(&self->clock_mutex);
+    stopping = self->stop_armed;
+    self->stop_armed = 0;
+    unlock_test_mutex(&self->clock_mutex);
+    if (stopping) {
+        open_gate(&self->reached);
+        pass_gate(&self->free_to_go);
+    }
+}
+
+static weivel_c_status settle_quietly(void *data, const weivel_c_settlement *settlement) {
+    (void)data;
+    (void)settlement;
+    return WEIVEL_C_STATUS_OK;
+}
+
+/** Arms a distant deadline through the host's own context, so every later core call reads the clock first. */
+static void arm_a_distant_deadline(host_world *in) {
+    weivel_c_want_options options = WEIVEL_INIT(weivel_c_want_options);
+    weivel_c_want_callback callback = {settle_quietly, NULL};
+    weivel_c_context *own = NULL;
+    options.timed = WEIVEL_CHOICE_YES;
+    options.timeout_millis = 1000000000;
+    CHECK(weivel_c_host_context(in->host, &own) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_want_service(own, "never:there", &options, &callback, NULL, NULL) == WEIVEL_C_STATUS_OK);
+}
+
+static void register_the_hosts_probe(void *argument) {
+    id_race *self = argument;
+    weivel_handle registration = 0;
+    self->registered =
+        weivel_c_host_register_service(self->in.host, "probe", &self->object, NULL, &registration, NULL);
+}
+
+static void begin_the_race_for_an_id(id_race *self) {
+    memset(self, 0, sizeof *self);
+    start_test_mutex(&self->clock_mutex);
+    start_gate(&self->reached);
+    start_gate(&self->free_to_go);
+    begin_host_world(&self->in);
+    arm_a_distant_deadline(&self->in);
+    self->in.clock_react = stop_at_the_armed_reading;
+    self->in.clock_more = self;
+    lock_test_mutex(&self->clock_mutex);
+    self->stop_armed = 1;
+    unlock_test_mutex(&self->clock_mutex);
+}
+
+static void a_host_service_and_a_load_racing_for_one_id_never_both_stand(void) {
+    id_race *self = &racing_for_an_id;
+    weivel_c_library_load_failure failure = WEIVEL_INIT(weivel_c_library_load_failure);
+    weivel_c_library *library = NULL;
+    weivel_c_status loaded;
+    declared probe;
+    begin_the_race_for_an_id(self);
+    declare_probe(&probe, "probe");
+    CHECK(start_test_thread(&self->registering, register_the_hosts_probe, self));
+    pass_gate(&self->reached);
+    loaded = weivel_c_host_load_library(self->in.host, library_path_of_probe, &probe.library, &library, &failure, NULL);
+    open_gate(&self->free_to_go);
+    join_test_thread(&self->registering);
+    CHECK(self->registered == WEIVEL_C_STATUS_OK);
+    CHECK(loaded == WEIVEL_C_STATUS_MISUSE && library == NULL);
+    check_text(failure.taken_id, "probe", "the id the host's registration claimed");
+    CHECK((const void *)service_of(&self->in, "probe") == (const void *)&self->object);
+    CHECK(sink_count(&self->in) == 0);
+    end_host_world(&self->in);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 3 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: host_library_threads_test <core-library> <service-library>\n");
@@ -151,6 +242,7 @@ int main(int argument_count, char **arguments) {
     }
     library_path_of_probe = arguments[2];
     calls_from_several_threads_while_another_unloads_are_each_answered_or_refused();
+    a_host_service_and_a_load_racing_for_one_id_never_both_stand();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host library threads");
 }

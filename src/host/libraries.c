@@ -222,8 +222,8 @@ static weivel_c_status register_one(library_service *service, weivel_c_refusal *
     if (is_refused_for_testing()) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
-    status = weivel_c_host_register_kept_service(service->library->host, service->id, &service->object, NULL,
-                                                 &service->registration, refusal);
+    status = weivel_c_host_register_library_service(service->library->host, service->id, &service->object,
+                                                    &service->registration, refusal);
     service->registered = status == WEIVEL_C_STATUS_OK;
     return status;
 }
@@ -254,10 +254,12 @@ static void unregister_services(weivel_c_library *library) {
 
 /**
  * Keeps a library on the host's list before anything of it is registered, so every later ending of it finds it, the
- * destroy's among them, unless the host has begun to be destroyed or another live library declares one of its ids.
+ * destroy's among them, unless the host has begun to be destroyed, or another live library or a service of the host's
+ * holds one of its ids.
  *
- * @implNote The check and the keeping are one step under the host's lock, so two loads declaring one id cannot both
- * be kept.
+ * @implNote The check and the keeping are one step under the host's lock, and a host registration claims its id under
+ * that lock before its core call, so two loads declaring one id, or a load and the host's own registration of it,
+ * cannot both stand.
  */
 static weivel_c_status keep_library(weivel_c_library *library, const weivel_standard_library *declaration,
                                     weivel_c_library_load_failure *failure) {
@@ -265,7 +267,7 @@ static weivel_c_status keep_library(weivel_c_library *library, const weivel_stan
     const library_service *taken;
     weivel_c_status status;
     weivel_c_mutex_lock(&host->lock);
-    taken = weivel_c_host_service_another_library_declares(host, library);
+    taken = weivel_c_host_service_already_held(host, library);
     status = host->state != HOST_RUNNING ? WEIVEL_C_STATUS_DESTROYED
              : taken != NULL             ? WEIVEL_C_STATUS_MISUSE
                                          : WEIVEL_C_STATUS_OK;
