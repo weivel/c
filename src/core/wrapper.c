@@ -577,6 +577,14 @@ int weivel_c_core_is_destroyed(weivel_c_core *core) {
     return destroyed;
 }
 
+int weivel_c_core_is_idle(weivel_c_core *core) {
+    int idle;
+    weivel_c_mutex_lock(&core->lock);
+    idle = core->core == NULL && !core->dispatching && !core->following;
+    weivel_c_mutex_unlock(&core->lock);
+    return idle;
+}
+
 weivel_c_status weivel_c_core_invoke_release(weivel_c_core *core, weivel_c_core_release release, void *answer) {
     if (core == NULL || answer == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
@@ -874,14 +882,10 @@ weivel_c_status weivel_c_core_destroy(weivel_c_core *core) {
 }
 
 weivel_c_status weivel_c_core_free(weivel_c_core *core) {
-    int idle;
     if (core == NULL) {
         return WEIVEL_C_STATUS_OK;
     }
-    weivel_c_mutex_lock(&core->lock);
-    idle = core->core == NULL && !core->dispatching && !core->following;
-    weivel_c_mutex_unlock(&core->lock);
-    if (!idle) {
+    if (!weivel_c_core_is_idle(core)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     discard(core);

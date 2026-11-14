@@ -229,15 +229,26 @@ static void free_the_records(weivel_c_host *host) {
     }
 }
 
-weivel_c_status weivel_c_host_free(weivel_c_host *host) {
+/**
+ * 1 when the destroy has finished and every part the free frees reports idle: no bytes of a library held, and no
+ * thread still dispatching the core or telling its `follow` hook, the thread that finished the destroy among them.
+ *
+ * @implNote Each part is asked before anything is freed, so a refusal frees nothing. The core is asked outside the
+ * host's lock, which is a leaf.
+ */
+static int is_idle(weivel_c_host *host) {
     int finished;
-    if (host == NULL) {
-        return WEIVEL_C_STATUS_OK;
-    }
     weivel_c_mutex_lock(&host->lock);
     finished = host->destroy_finished != 0 && !weivel_c_host_libraries_are_held(host);
     weivel_c_mutex_unlock(&host->lock);
-    if (!finished) {
+    return finished && weivel_c_core_is_idle(host->core);
+}
+
+weivel_c_status weivel_c_host_free(weivel_c_host *host) {
+    if (host == NULL) {
+        return WEIVEL_C_STATUS_OK;
+    }
+    if (!is_idle(host)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     weivel_c_host_free_libraries(host);

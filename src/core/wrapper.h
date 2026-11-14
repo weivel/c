@@ -96,6 +96,12 @@ weivel_c_status weivel_c_core_remove_deadline_hooks(weivel_c_core *core, const w
 /** 1 once the core behind the object is destroyed, so that no listener and no step of it will be taken again. */
 int weivel_c_core_is_destroyed(weivel_c_core *core);
 
+/**
+ * 1 once the core behind the object is destroyed and no thread dispatches it or tells its `follow` hook any more, so
+ * weivel_c_core_free would free it: what an owner checks before it frees anything of its own beside it.
+ */
+int weivel_c_core_is_idle(weivel_c_core *core);
+
 /** One release of an answer the core filled: it makes exactly one call through `table`, which needs no core. */
 typedef weivel_status (*weivel_c_core_release)(const weivel_c_core_table *table, void *answer);
 
