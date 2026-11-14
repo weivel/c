@@ -353,6 +353,20 @@ weivel_c_status weivel_c_host_verify_plugin(host_ending *ending, weivel_c_refusa
     return verified;
 }
 
+/** 1 while the plugin is in the opened list, so a quarantine of it is the host's to make and a release ends it. */
+static int is_opened(host_plugin *plugin) {
+    int opened;
+    weivel_c_mutex_lock(&plugin->host->lock);
+    opened = plugin->opened != 0;
+    weivel_c_mutex_unlock(&plugin->host->lock);
+    return opened;
+}
+
+/**
+ * @implNote A plugin the host never opened, or whose open the core refused, is answered as the core answers its
+ * verification, and quarantined by nothing: the host holds nothing open of it that a quarantine would end, nor any
+ * release that would end the quarantine.
+ */
 weivel_c_status weivel_c_host_verify(weivel_c_host *host, weivel_handle plugin, weivel_c_refusal *refusal) {
     host_plugin *found;
     if (host == NULL) {
@@ -364,6 +378,9 @@ weivel_c_status weivel_c_host_verify(weivel_c_host *host, weivel_handle plugin, 
     found = weivel_c_host_plugin_of(host, plugin);
     if (found == NULL) {
         return WEIVEL_C_STATUS_NONE;
+    }
+    if (!is_opened(found)) {
+        return weivel_c_core_verify_activation(host->core, plugin, refusal);
     }
     return weivel_c_host_verify_plugin(&found->verify_ending, refusal);
 }

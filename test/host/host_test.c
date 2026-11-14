@@ -358,6 +358,21 @@ static void an_activation_short_of_memory_for_its_outcomes_starts_no_plugin(void
 }
 #endif
 
+static void verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing(void) {
+    host_world in;
+    test_plugin plugin;
+    weivel_c_refusal refusal = WEIVEL_INIT(weivel_c_refusal);
+    begin_host_world(&in);
+    name_acting_plugin(&plugin, &in, "agenda", activate_and_answer_done, NULL);
+    register_test_plugin(&plugin);
+    CHECK(weivel_c_host_verify(in.host, plugin.handle, &refusal) == WEIVEL_C_STATUS_REFUSED);
+    CHECK(refusal.code != WEIVEL_REFUSAL_NONE && weivel_c_refusal_release(&refusal) == WEIVEL_C_STATUS_OK);
+    CHECK(state_of(&in, &plugin) == WEIVEL_C_PLUGIN_REGISTERED);
+    CHECK(ledger_status_of(&in, &plugin, NULL) == WEIVEL_PLUGIN_STATUS_REGISTERED);
+    CHECK(sink_count(&in) == 0);
+    end_host_world(&in);
+}
+
 static void every_call_answers_its_mistakes_as_values(void) {
     host_world in;
     weivel_c_host_options options = WEIVEL_INIT(weivel_c_host_options);
@@ -397,9 +412,11 @@ int main(int argument_count, char **arguments) {
     an_open_that_fails_for_no_refusal_is_answered_failed_and_leaves_nothing_open_in_the_core();
     an_awaited_want_does_not_hold_back_a_later_plugin();
     a_refused_verify_quarantines_the_plugin_in_the_same_step();
+    verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing();
 #if !defined(WEIVEL_C_USING_SHARED)
     an_activation_short_of_memory_for_its_outcomes_starts_no_plugin();
 #endif
+
     every_call_answers_its_mistakes_as_values();
 
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);

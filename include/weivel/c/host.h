@@ -246,8 +246,13 @@ WEIVEL_C_API weivel_c_status weivel_c_host_plan_release(weivel_c_host *host, wei
  * Verifies a plugin's activation with the core, and quarantines it in the same step, with no reason of the host's,
  * when the core refuses.
  *
- * @return WEIVEL_C_STATUS_OK, verified; WEIVEL_C_STATUS_REFUSED with the core's refusal, the plugin quarantined;
- * WEIVEL_C_STATUS_NONE for a plugin the host holds no row for; WEIVEL_C_STATUS_DESTROYED, quietly.
+ * A plugin the host has not opened, registered only or its open refused, is answered as the core answers its
+ * verification and quarantined by nothing, since the host holds nothing of it open.
+ *
+ * @return WEIVEL_C_STATUS_OK, verified; WEIVEL_C_STATUS_REFUSED with the core's refusal, the plugin quarantined when
+ * the host opened it; WEIVEL_C_STATUS_NONE for a plugin the host holds no row for; WEIVEL_C_STATUS_DESTROYED,
+ * quietly.
+
  */
 WEIVEL_C_API weivel_c_status weivel_c_host_verify(weivel_c_host *host, weivel_handle plugin,
                                                   weivel_c_refusal *refusal);
