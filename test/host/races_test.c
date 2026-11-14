@@ -196,32 +196,43 @@ static void stop_at_the_scheduling(void *more) {
     }
 }
 
-static void want_with_a_deadline(void *argument) {
+/** Runs the timer's task before its deadline, as a scheduler waking early does: the timer then follows it again. */
+static void run_the_task_early(void *argument) {
     race *self = argument;
+    weivel_c_task_callback callback;
+    void *data;
+    lock_test_mutex(&self->in.schedule_mutex);
+    callback = self->in.scheduled_callback;
+    data = self->in.scheduled_data;
+    unlock_test_mutex(&self->in.schedule_mutex);
+    callback(data);
+}
+
+/** Arms, through the host's own context, a deadline nearer than the early plugin's, which its release leaves alone. */
+static void arm_a_nearer_deadline_of_the_hosts(race *self) {
     weivel_c_want_options options = WEIVEL_INIT(weivel_c_want_options);
-    weivel_c_want_callback callback = {trace_settlement, &self->late};
+    weivel_c_want_callback callback = {trace_settlement, &self->early};
+    weivel_c_context *own = NULL;
     options.timed = WEIVEL_CHOICE_YES;
     options.timeout_millis = 1000;
-    self->answered = weivel_c_context_want_service(self->late.context, "never:there", &options, &callback, NULL, NULL);
+    CHECK(weivel_c_host_context(self->in.host, &own) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_want_service(own, "never:there", &options, &callback, NULL, NULL) == WEIVEL_C_STATUS_OK);
 }
 
 /**
- * Holds a thread inside the wrapper's `follow` hook, where the timer schedules its task, while the destroy finishes on
- * another: a free made then would free the timer and the contexts under it.
+ * Holds a thread inside the wrapper's `follow` hook, where the timer schedules its task again after it ran early, while
+ * the destroy finishes on another: a free made then would free the timer and the contexts under it. That `follow`
+ * tells a deadline no call drained, and the destroy's release moves no deadline, so no event waits on the held thread.
  */
 static void a_free_while_another_thread_is_still_inside_the_layer_frees_nothing(void) {
-    test_plugin *only[1];
     uint32_t finished = 0;
     begin_the_race(&racing);
+    arm_a_nearer_deadline_of_the_hosts(&racing);
     racing.in.clock_react = NULL;
     racing.in.schedule_react = stop_at_the_scheduling;
     racing.in.schedule_more = &racing;
-    wants_service(&racing.late, "never:there");
-    register_test_plugin(&racing.late);
-    only[0] = &racing.late;
-    CHECK(activate_in_order(&racing.in, only, 1, WEIVEL_EDGES_CAPABILITIES));
     arm_the_stop(&racing, 1);
-    CHECK(start_test_thread(&racing.runner, want_with_a_deadline, &racing));
+    CHECK(start_test_thread(&racing.runner, run_the_task_early, &racing));
     pass_gate(&racing.reached);
     CHECK(weivel_c_host_destroy(racing.in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 0);
     CHECK(weivel_c_completion_finish(racing.early.deactivation, WEIVEL_C_ENTRY_DONE, NULL) == WEIVEL_C_STATUS_OK);

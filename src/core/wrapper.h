@@ -110,7 +110,8 @@ weivel_c_status weivel_c_core_remove_deadline_hooks(weivel_c_core *core, const w
 /**
  * Runs `step` now, on this thread made the dispatcher, when no dispatch runs: behind whatever a thread still on its
  * way out drained ahead of it, as weivel_c_core_defer would run it then. When a dispatch runs, on this thread or
- * another, it queues nothing and answers `*ran` 0, so the step runs nowhere unless its caller runs it.
+ * another, or events held back until a `follow` returns still wait, it queues nothing and answers `*ran` 0, so the
+ * step runs nowhere unless its caller runs it.
  *
  * @param ran receives 1 when the step ran before this returned, else 0. Required.
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE (a NULL argument, a step smaller than its first shape, with no

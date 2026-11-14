@@ -427,10 +427,13 @@ typedef struct weivel_c_deadline_hooks {
      *
      * One thread calls it at a time, and what it is told last is always the latest announcement drained, whichever
      * thread drained it: a thread that drains a newer one while another is in `follow` leaves it to that thread,
-     * which calls `follow` again before it goes on. That second thread may so begin dispatching before `follow` has
-     * returned for its announcement, and it then dispatches what the thread in `follow` drained as well, so a slow
-     * `follow` holds back only the call that is telling it. Hooks set while a deadline is recorded are told it at
-     * once. A status other than WEIVEL_C_STATUS_OK is reported to the error sink.
+     * which calls `follow` again before it goes on. No event a call drained with an announcement is dispatched, on any
+     * thread, before `follow` has returned with that announcement or a newer one, and events queued behind them wait
+     * with them; the thread in `follow` dispatches them once it returns, unless a dispatch already runs. A slow
+     * `follow` therefore holds back the events of the calls whose announcements it tells and those queued after
+     * them, and a `follow` telling a deadline no call drained, as new hooks or a timer that woke early ask for, holds
+     * back nothing. Hooks set while a deadline is recorded are told it at once. A status other than
+     * WEIVEL_C_STATUS_OK is reported to the error sink.
      */
     weivel_c_status (*follow)(void *data, int64_t at, uint32_t set);
     void *data;
@@ -535,12 +538,14 @@ WEIVEL_C_API weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *cor
  * another step does. While a dispatch runs, on this thread or on another, that dispatch runs it, possibly after this
  * returns. While none runs, the calling thread becomes the dispatcher and the step has run when this returns, behind
  * whatever a call still telling the `follow` hook on another thread had drained; a call it makes is then a call made
- * inside a dispatch, its events heard after the step returns and before this does.
+ * inside a dispatch, its events heard after the step returns and before this does. Events held back until `follow`
+ * returns (see weivel_c_deadline_hooks) hold back the step queued behind them too, and the thread telling `follow`
+ * then runs it.
  *
  * @param step an idle step, as WEIVEL_INIT or its last run leaves it. Required.
  * @param dispatched_here receives 1 when the calling thread was the dispatcher, so the step has run, or a destroy
- * made inside that dispatch dropped it, before this returned; and 0 when a dispatch already running will run it,
- * possibly later, or the call answered anything but OK. May be NULL.
+ * made inside that dispatch dropped it, before this returned; and 0 when a dispatch already running, or the thread
+ * telling `follow`, will run it, possibly later, or the call answered anything but OK. May be NULL.
  * @return WEIVEL_C_STATUS_OK, whatever the step answers; WEIVEL_C_STATUS_MISUSE (NULL, a step smaller than its first
  * shape, without `run`, or already waiting); WEIVEL_C_STATUS_DESTROYED, the step never run.
  * Threading: any thread.

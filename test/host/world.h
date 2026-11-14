@@ -164,13 +164,19 @@ typedef struct host_world {
     /** What each scheduling of the timer's task does first, from inside the wrapper's `follow` hook. */
     void (*schedule_react)(void *more);
     void *schedule_more;
+    test_mutex schedule_mutex;
+    /** Guarded by `schedule_mutex`: the callback of the task scheduled last and its data, run by no one but a test. */
+    weivel_c_task_callback scheduled_callback;
+    void *scheduled_data;
 } host_world;
 
 static inline void *host_world_schedule(void *data, int64_t at, weivel_c_task_callback callback, void *callback_data) {
     host_world *self = data;
     (void)at;
-    (void)callback;
-    (void)callback_data;
+    lock_test_mutex(&self->schedule_mutex);
+    self->scheduled_callback = callback;
+    self->scheduled_data = callback_data;
+    unlock_test_mutex(&self->schedule_mutex);
     if (self->schedule_react != NULL) {
         self->schedule_react(self->schedule_more);
     }
@@ -222,6 +228,7 @@ static inline void begin_host_world_with(host_world *self, const weivel_c_core_t
     weivel_c_host_options options;
     memset(self, 0, sizeof *self);
     start_test_mutex(&self->sink_mutex);
+    start_test_mutex(&self->schedule_mutex);
     start_test_mutex(&self->log.mutex);
     start_test_mutex(&self->told.mutex);
     start_trace(&self->heard);

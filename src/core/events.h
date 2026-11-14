@@ -3,9 +3,13 @@
 
 #include "wrapper.h"
 
-/** A drained event waiting to be dispatched: its place in the queue, then the layer's copy of it. */
+/**
+ * A drained event waiting to be dispatched: its place in the queue, the deadline serial the `follow` hook must have
+ * returned with before it may be dispatched (0 for none), then the layer's copy of it.
+ */
 typedef struct weivel_c_queued_event {
     weivel_c_queue_place place;
+    uint64_t fence;
     weivel_c_event event;
 } weivel_c_queued_event;
 

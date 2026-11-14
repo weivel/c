@@ -47,7 +47,9 @@ each call of the core has a `weivel_c_core_` function of the same name that goes
   it and may call in;
 - the wrapper records each `WEIVEL_EVENT_DEADLINE` as it drains it. `weivel_c_core_set_deadline_hooks` gives it a
   clock, read before a call only while a deadline is recorded so a due deadline reaches the core first, and a
-  `follow` hook, told the latest deadline after the lock is let go and before the dispatch, by one thread at a time.
+  `follow` hook, told the latest deadline after the lock is let go, by one thread at a time; no event of a call that
+  drained an announcement is dispatched, by any thread, before `follow` has returned with it, and a `follow` telling
+  a deadline no call drained holds back nothing.
 
 `weivel_c_handles_create` makes the table from the core's handles to the layer's own objects: an entry per plugin,
 service registration, capability implementation, watch and want, made when the core answers the handle and ended
