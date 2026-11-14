@@ -129,6 +129,19 @@ else()
         "conformance module are not built")
 endif()
 
+set(WEIVEL_C_BENCHMARKS_SOURCES
+    src/benchmarks/measure.c src/benchmarks/budget.c src/benchmarks/pairs.c src/benchmarks/control.c
+    src/benchmarks/library.c src/benchmarks/same_language.c)
+
+# The benchmarks module: the layer's half of the platform's benchmarks, its own library, linked by its tests alone.
+add_library(weivel_c_benchmarks STATIC ${WEIVEL_C_BENCHMARKS_SOURCES})
+target_include_directories(weivel_c_benchmarks PUBLIC src/benchmarks)
+target_link_libraries(weivel_c_benchmarks PUBLIC weivel_c)
+if(NOT MSVC)
+    target_link_libraries(weivel_c_benchmarks PUBLIC m)
+endif()
+weivel_c_strict_warnings(weivel_c_benchmarks)
+
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     add_library(weivel_c_testing STATIC ${WEIVEL_C_SOURCES})
     weivel_c_target(weivel_c_testing)

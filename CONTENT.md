@@ -23,8 +23,7 @@ library of its own, and its tests are in `test/<module>/`. Every public name beg
 
 ## What is built
 
-The `core`, `handles`, `timer`, `context`, `host`, `standard` and `conformance` modules. The `benchmarks` module holds
-only a header saying what it is for.
+Every module: `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance` and `benchmarks`.
 
 `weivel_c_core_load` opens the core's shared binary with the platform's loader and fills one table,
 `weivel_c_core_table`, with every function the core exports; a path that is no library and a library that lacks a
@@ -264,6 +263,29 @@ pass. `weivel_c_conformance_vector_ids` lists every vector under a directory at 
 `test/conformance/` holds one test per layer vector of the pinned kit, named by its id and reading the kit's file at
 run time, and a coverage test that lists the kit's vector directory and fails on a vector no test names. The kit's
 location comes from the build: `siblings/conformance`, or `WEIVEL_C_KIT_DIRECTORY`.
+
+### The `benchmarks` module: the layer's half of the platform's benchmarks
+
+`src/benchmarks/` is a library of its own, `weivel_c_benchmarks`, linked by its tests alone; it has no public header.
+It times a call in batches, the paths compared sampled in turn one batch each per round, and builds what it measures
+through the layer's public surface on a table its caller loaded:
+
+- the control call through the wrapper, the core's `weivel_get_service` for a plugin made as
+  `weivel_c_core_get_service`, the very call the kit's `control_call.c` times, beside the same call made through the
+  bare table;
+- a C library's function called through the object the host registers for it, beside the same function called
+  directly through the platform's loader, each releasing what it answered;
+- a same-language call: a consumer plugin resolves another plugin's service through its context and calls the object
+  it was handed, beside the same call made twice on the provider's own object, so the run's own noise is measured
+  with it.
+
+`test/benchmarks/` holds the gates. In every build: the identity gate, a consumer handed the provider's very pointer
+by `weivel_c_context_get_service` and a thousand calls through it crossing into the core not once on a table that
+counts every crossing a resolve or a call of the layer's makes, refused for a resolver that copies the object; the
+control call refused against a budget of 1 ns. In a Release build, labelled `release-benchmark`, which CI's
+`benchmarks` job runs on all three runners: the control call through the wrapper against the core's own budget,
+`benchmarks/budget.txt` of the pinned kit, and a measuring mode that prints every measurement the C layer's bounds are
+set from. Every bound is the kit's; the layer sets none.
 
 ## Building
 
