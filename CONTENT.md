@@ -130,8 +130,11 @@ until the host is freed, and an entry.
   plugin's outcome reaches the caller's listener once, from the dispatch: `active`, `quarantined` (its activate
   failed, with a reason and a fix, or the core refused its verification, quarantined in the same step),
   `refused` (the core refused the open), `released` (released while its activate was in flight, told as that release
-  begins) or `failed` (an open that failed for no refusal, told to the sink, the plugin released and forgotten at
-  once when the core held it open).
+  begins, or kept from its activate because the host's destroy had begun) or `failed` (an open that failed for no
+  refusal, told to the sink, the plugin released and forgotten at once when the core held it open). Every completion
+  is made before the first open, so an activation short of memory starts nothing, and the plugins are started on the
+  calling thread exactly once whatever other thread dispatches meanwhile.
+
 - `weivel_c_host_release` calls the deactivate while the plugin is whole, releases it in the core, lets that
   release's events reach the plugin, then ends its entries, forgets it and detaches its context, those last three as
   one step deferred behind the events, the detach made in the forget's own hold of the layer lock.

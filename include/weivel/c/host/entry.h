@@ -75,7 +75,13 @@ typedef struct weivel_c_entry {
  * plugin was released while its activate was in flight, so that activate verifies, quarantines and reports nothing;
  * WEIVEL_C_STATUS_DESTROYED for an activate whose host has been destroyed, or is being destroyed, which is told to
  * nobody; WEIVEL_C_STATUS_MISUSE for NULL, an answer that is neither done nor failed, or a completion finished
- * already, each changing nothing. Never anything else, and nothing is reported to the log or the error sink.
+ * already, each changing nothing. Never anything else. The status is never what the sink is told: a finish answered
+ * anything but OK reports nothing, and one answered OK reports what the work it sets off reports, as the release and
+ * the activation do wherever they run. A deactivate finished WEIVEL_C_ENTRY_FAILED tells the sink
+ * WEIVEL_C_FAILURE_DEACTIVATE with its reason; a call the host then makes into the core that answers a failure other
+ * than WEIVEL_C_STATUS_DESTROYED tells it WEIVEL_C_FAILURE_HOST_CALL; and when this thread becomes the dispatcher, an
+ * outcome listener or a callback of a plugin's that answers a failure tells it WEIVEL_C_FAILURE_OUTCOME_LISTENER or
+ * WEIVEL_C_FAILURE_LISTENER. Nothing reaches the log but what a dispatch on this thread hands it.
  * Threading: any thread. Defined until weivel_c_host_free.
  */
 WEIVEL_C_API weivel_c_status weivel_c_completion_finish(weivel_c_completion *completion, uint32_t answer,
