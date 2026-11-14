@@ -103,10 +103,30 @@ function(weivel_c_add_the_standard_module)
         ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/shared)
 endfunction()
 
+set(WEIVEL_C_CONFORMANCE_SOURCES
+    src/conformance/text.c src/conformance/equality.c src/conformance/vectors.c src/conformance/ids.c
+    src/conformance/world.c src/conformance/time.c src/conformance/observe.c src/conformance/consume.c
+    src/conformance/want.c src/conformance/actions.c src/conformance/lifecycle.c src/conformance/driver.c)
+if(WIN32)
+    list(APPEND WEIVEL_C_CONFORMANCE_SOURCES src/conformance/directory_windows.c)
+else()
+    list(APPEND WEIVEL_C_CONFORMANCE_SOURCES src/conformance/directory_posix.c)
+endif()
+
+# The conformance module: the layer suite's driver, which reads the kit's vectors with the standard's JSON reader and
+# so links the standard, as the standard module does and no host target may.
+function(weivel_c_add_the_conformance_module)
+    add_library(weivel_c_conformance STATIC ${WEIVEL_C_CONFORMANCE_SOURCES})
+    target_link_libraries(weivel_c_conformance PUBLIC weivel_c weivel_standard)
+    weivel_c_strict_warnings(weivel_c_conformance)
+endfunction()
+
 if(EXISTS ${WEIVEL_C_STANDARD_SOURCE_DIRECTORY}/CMakeLists.txt OR TARGET weivel_standard)
     weivel_c_add_the_standard_module()
+    weivel_c_add_the_conformance_module()
 else()
-    message(STATUS "no standard at ${WEIVEL_C_STANDARD_SOURCE_DIRECTORY}: the optional standard module is not built")
+    message(STATUS "no standard at ${WEIVEL_C_STANDARD_SOURCE_DIRECTORY}: the optional standard module and the "
+        "conformance module are not built")
 endif()
 
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)

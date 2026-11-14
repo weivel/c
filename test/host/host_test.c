@@ -518,6 +518,41 @@ static void a_manifest_is_copied_so_its_caller_may_free_it_once_it_is_registered
     end_host_world(&in);
 }
 
+static weivel_c_status ignore_the_settlement(void *data, const weivel_c_settlement *settlement) {
+    (void)data;
+    (void)settlement;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void want_one_within(host_world *in, int64_t timeout) {
+    weivel_c_context *context = NULL;
+    weivel_c_want_options options = WEIVEL_INIT(weivel_c_want_options);
+    weivel_c_want_callback callback = {ignore_the_settlement, NULL};
+    options.timed = WEIVEL_CHOICE_YES;
+    options.timeout_millis = timeout;
+    CHECK(weivel_c_host_context(in->host, &context) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_want_service(context, "one", &options, &callback, NULL, NULL) == WEIVEL_C_STATUS_OK);
+}
+
+static void the_hosts_timer_answers_the_deadline_it_is_armed_for(void) {
+    host_world in;
+    weivel_c_timer *timer = NULL;
+    int64_t deadline = 0;
+    uint32_t finished = 0;
+    begin_host_world(&in);
+    in.now = 100;
+    CHECK(weivel_c_host_timer(NULL, &timer) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_host_timer(in.host, NULL) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_host_timer(in.host, &timer) == WEIVEL_C_STATUS_OK && timer != NULL);
+    CHECK(weivel_c_timer_deadline(timer, &deadline) == WEIVEL_C_STATUS_NONE);
+    want_one_within(&in, 1000);
+    CHECK(weivel_c_timer_deadline(timer, &deadline) == WEIVEL_C_STATUS_OK && deadline == 1100);
+    CHECK(weivel_c_host_destroy(in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
+    CHECK(weivel_c_host_timer(in.host, &timer) == WEIVEL_C_STATUS_DESTROYED);
+    CHECK(sink_count(&in) == 0);
+    CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_OK);
+}
+
 static void every_call_answers_its_mistakes_as_values(void) {
     host_world in;
     weivel_c_host_options options = WEIVEL_INIT(weivel_c_host_options);
@@ -559,6 +594,7 @@ int main(int argument_count, char **arguments) {
     a_refused_verify_quarantines_the_plugin_in_the_same_step();
     verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing();
     a_manifest_is_copied_so_its_caller_may_free_it_once_it_is_registered();
+    the_hosts_timer_answers_the_deadline_it_is_armed_for();
 #if !defined(WEIVEL_C_USING_SHARED)
     an_activation_short_of_memory_for_its_outcomes_starts_no_plugin();
     a_release_ends_its_plugins_entries_before_it_forgets_it_and_leaves_none();

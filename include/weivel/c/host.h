@@ -174,6 +174,14 @@ WEIVEL_C_API weivel_c_status weivel_c_host_context(weivel_c_host *host, weivel_c
  */
 WEIVEL_C_API weivel_c_status weivel_c_host_core(weivel_c_host *host, weivel_c_core **core);
 
+/**
+ * Answers the host's timer, so its caller can read what the layer says it armed (see weivel_c_timer_deadline). The
+ * host's: the caller destroys and frees nothing of it.
+ *
+ * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE; WEIVEL_C_STATUS_DESTROYED.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_host_timer(weivel_c_host *host, weivel_c_timer **timer);
+
 /** How one started plugin's activation came out. */
 typedef enum weivel_c_outcome_kind {
     /** Its activate finished and the core verified it. */
