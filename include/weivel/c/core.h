@@ -82,8 +82,12 @@ typedef enum weivel_c_status {
      * call answers when the core answered a status this layer does not know. */
     WEIVEL_C_STATUS_FAILED = 10,
     /** The C library a call was made through has been unloaded; nothing was called. */
-    WEIVEL_C_STATUS_UNLOADED = 11
+    WEIVEL_C_STATUS_UNLOADED = 11,
+    /** The context a call was made through was detached from its plugin, which the core has forgotten; the core was
+     * not called and no refusal is given. */
+    WEIVEL_C_STATUS_DETACHED = 12
 } weivel_c_status;
+
 
 /**
  * One loaded core: the binary and every function it exports, each under the name the core's header gives it without

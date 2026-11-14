@@ -1,5 +1,8 @@
 #include "host.h"
 
+#include "../core/calls.h"
+
+
 #include <stdio.h>
 
 /** What beginning a release found, under the host's lock. */
@@ -120,15 +123,32 @@ int weivel_c_host_go_on_releasing(host_plugin *plugin) {
     return (int)here;
 }
 
+/** The forget's answered step: detaches the context under the layer lock, before any later call can reach the core. */
+static weivel_c_status detach_the_context(void *data) {
+    return weivel_c_context_detach(data);
+}
+
+/**
+ * Forgets the plugin in the core and detaches its context in the same hold of the layer lock, so a call through the
+ * context either reached the core before the forget or finds it detached.
+ */
+static void forget_and_detach(host_plugin *plugin) {
+    weivel_c_host *host = plugin->host;
+    weivel_c_answered_step then = {detach_the_context, plugin->context, NULL, NULL};
+    weivel_c_status forgotten = weivel_c_core_forget_plugin_then(host->core, plugin->handle, NULL, &then);
+    weivel_c_host_report_call(host, forgotten, "the core did not forget a plugin the host released");
+    if (forgotten != WEIVEL_C_STATUS_OK) {
+        weivel_c_context_detach(plugin->context);
+    }
+}
+
 weivel_c_status weivel_c_host_finish_release(void *data, weivel_c_core *core) {
     host_plugin *plugin = data;
     weivel_c_host *host = plugin->host;
     int destroy_may_end;
     (void)core;
     weivel_c_context_end_entries(plugin->context);
-    weivel_c_host_report_call(host, weivel_c_core_forget_plugin(host->core, plugin->handle, NULL),
-                              "the core did not forget a plugin the host released");
-    weivel_c_context_detach(plugin->context);
+    forget_and_detach(plugin);
     weivel_c_mutex_lock(&host->lock);
     plugin->state = 0;
     host->releases_in_flight--;

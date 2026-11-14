@@ -37,7 +37,7 @@ weivel_c_status weivel_c_context_get_service(weivel_c_context *context, const ch
                                              weivel_c_refusal *refusal) {
     weivel_handle registration = 0;
     resolving resolved = {context, &registration, NULL, 0};
-    weivel_c_answered_step then = {hold_the_service, &resolved};
+    weivel_c_answered_step then = {hold_the_service, &resolved, weivel_c_context_guard, context};
     weivel_c_status status;
     if (service == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
@@ -47,7 +47,7 @@ weivel_c_status weivel_c_context_get_service(weivel_c_context *context, const ch
         return WEIVEL_C_STATUS_MISUSE;
     }
     if (weivel_c_context_is_detached(context)) {
-        return WEIVEL_C_STATUS_REFUSED;
+        return WEIVEL_C_STATUS_DETACHED;
     }
     status = weivel_c_handles_reserve(context->contexts->handles);
     if (status != WEIVEL_C_STATUS_OK) {
@@ -105,14 +105,14 @@ weivel_c_status weivel_c_context_want_service(weivel_c_context *context, const c
     weivel_want_options encoded = WEIVEL_INIT(weivel_want_options);
     weivel_handle answered = 0;
     weivel_c_keeping keeping = {NULL, &answered, 0};
-    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping};
+    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping, weivel_c_context_guard, context};
     weivel_c_status status = WEIVEL_C_STATUS_OK;
     answer_handle(want, 0, WEIVEL_C_STATUS_MISUSE);
     if (!want_is_usable(context, id, options, callback)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     if (weivel_c_context_is_detached(context)) {
-        return WEIVEL_C_STATUS_REFUSED;
+        return WEIVEL_C_STATUS_DETACHED;
     }
     if (options != NULL) {
         status = encode_want(context, options, &encoded);
@@ -144,14 +144,14 @@ weivel_c_status weivel_c_context_watch_service(weivel_c_context *context, const 
                                                weivel_c_refusal *refusal) {
     weivel_handle answered = 0;
     weivel_c_keeping keeping = {NULL, &answered, 0};
-    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping};
+    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping, weivel_c_context_guard, context};
     weivel_c_status status;
     answer_handle(watch, 0, WEIVEL_C_STATUS_MISUSE);
     if (context == NULL || !is_an_id(id) || watcher == NULL || watcher->hear == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     if (weivel_c_context_is_detached(context)) {
-        return WEIVEL_C_STATUS_REFUSED;
+        return WEIVEL_C_STATUS_DETACHED;
     }
     keeping.record = weivel_c_record_prepare(context, WEIVEL_C_RECORD_SERVICE_WATCH, id);
     if (keeping.record == NULL) {
@@ -174,13 +174,14 @@ weivel_c_status weivel_c_context_stop_watching(weivel_c_context *context, weivel
 
 weivel_c_status weivel_c_context_service_ids(weivel_c_context *context, weivel_service_list *list,
                                              weivel_c_refusal *refusal) {
+    weivel_c_answered_step then = {NULL, NULL, weivel_c_context_guard, context};
     if (context == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     if (weivel_c_context_is_detached(context)) {
-        return WEIVEL_C_STATUS_REFUSED;
+        return WEIVEL_C_STATUS_DETACHED;
     }
-    return weivel_c_core_service_ids(context->contexts->core, context->plugin, list, refusal);
+    return weivel_c_core_service_ids_then(context->contexts->core, context->plugin, list, refusal, &then);
 }
 
 weivel_c_status weivel_c_context_service_ids_release(weivel_c_context *context, weivel_service_list *list) {
@@ -195,14 +196,14 @@ weivel_c_status weivel_c_context_register_service(weivel_c_context *context, con
                                                   weivel_handle *registration, weivel_c_refusal *refusal) {
     weivel_handle answered = 0;
     weivel_c_keeping keeping = {NULL, &answered, 0};
-    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping};
+    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping, weivel_c_context_guard, context};
     weivel_c_status status;
     answer_handle(registration, 0, WEIVEL_C_STATUS_MISUSE);
     if (context == NULL || !is_an_id(id) || service == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     if (weivel_c_context_is_detached(context)) {
-        return WEIVEL_C_STATUS_REFUSED;
+        return WEIVEL_C_STATUS_DETACHED;
     }
     keeping.record = weivel_c_record_prepare(context, WEIVEL_C_RECORD_SERVICE, id);
     if (keeping.record == NULL) {

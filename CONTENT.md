@@ -94,8 +94,11 @@ the layer's, so each may call back into its context. A context decides nothing a
 Once a plugin is released or quarantined its callbacks still hear what that call queued; its entries end when the
 host calls `weivel_c_context_end_entries`, from a step it defers behind those events, and a call the plugin still
 makes is answered as the core answers a late call. Once the core has forgotten the plugin, the host detaches its
-context with `weivel_c_context_detach`: the plugin's handle leaves the table, so the core may issue it again, and a
-call through the context is refused without reaching the core, since that handle may by then name another plugin.
+context with `weivel_c_context_detach`, in the same hold of the layer lock as the forget: the plugin's handle leaves
+the table, so the core may issue it again, and a call through the context answers `WEIVEL_C_STATUS_DETACHED` without
+reaching the core, decided under that lock as the call is made, since the handle may by then name another plugin. An
+event is routed to a context only when it was drained after that context was made, so an event naming an earlier
+holder of the same handle reaches nobody.
 
 ### A plugin's entry in C
 
@@ -131,7 +134,8 @@ until the host is freed, and an entry.
   once when the core held it open).
 - `weivel_c_host_release` calls the deactivate while the plugin is whole, releases it in the core, lets that
   release's events reach the plugin, then ends its entries, forgets it and detaches its context, those last three as
-  one step deferred behind the events. Where no dispatch runs, the release has finished when it returns. A
+  one step deferred behind the events, the detach made in the forget's own hold of the layer lock.
+ Where no dispatch runs, the release has finished when it returns. A
   deactivate that answers pending holds the core's release and everything after it until it finishes, however long.
 - `weivel_c_host_destroy` releases every plugin the host opened and has not released, the last opened first, one in
   flight and one quarantined included; lets every event and step those releases left run; unloads every C library

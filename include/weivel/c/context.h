@@ -179,10 +179,13 @@ WEIVEL_C_API weivel_c_status weivel_c_context_end_entries(weivel_c_context *cont
 /**
  * Detaches a context from its plugin once the core has forgotten the plugin: the plugin's entry and every holding of
  * its leave the handles table, so the core may issue its handle to a plugin registered later, and from then on every
- * call through the context that would reach the core answers WEIVEL_C_STATUS_REFUSED, with no refusal, and asks the
- * core nothing, because the handle it would carry may by then name another plugin. Its log, its manifest and its
- * listeners stay as they were. The context's memory stays until it is freed, so a plugin that calls it after its host
- * forgot it reads nothing freed.
+ * call through the context that would reach the core answers WEIVEL_C_STATUS_DETACHED, with no refusal, and asks the
+ * core nothing, because the handle it would carry may by then name another plugin. Whether a call is detached is
+ * decided under the layer lock as the call is made, so a host that detaches the context in its forget's own hold of
+ * that lock, as the layer's host does, leaves no call that passed the check to reach the core after the forget. An
+ * event drained before the context was made never reaches its listeners, since it names whichever plugin held the
+ * handle then. Its log, its manifest and its listeners stay as they were. The context's memory stays until it is
+ * freed, so a plugin that calls it after its host forgot it reads nothing freed.
  *
  * @return WEIVEL_C_STATUS_OK, also for a context detached already; WEIVEL_C_STATUS_MISUSE.
  */

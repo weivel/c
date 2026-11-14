@@ -505,6 +505,14 @@ typedef struct invocation {
     int hands_the_time;
 } invocation;
 
+/** Under the lock, before the call: the guard of the call's step, whose failure becomes the call's answer. */
+static weivel_c_status guard_the_call(const invocation *asked) {
+    if (asked->then == NULL || asked->then->guard == NULL) {
+        return WEIVEL_C_STATUS_OK;
+    }
+    return asked->then->guard(asked->then->guard_data);
+}
+
 /** Under the lock: runs the step of a call the core answered OK, whose failure becomes the call's answer. */
 static weivel_c_status record_the_answer(const invocation *asked, weivel_c_status status) {
     if (status != WEIVEL_C_STATUS_OK || asked->then == NULL || asked->then->record == NULL) {
@@ -527,6 +535,11 @@ static weivel_c_status invoke(weivel_c_core *core, const invocation *asked) {
         status = hand_over_a_due_deadline(core);
     }
     if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    status = guard_the_call(asked);
+    if (status != WEIVEL_C_STATUS_OK) {
+        weivel_c_mutex_unlock(&core->lock);
         return status;
     }
     begin_notes(&notes);
@@ -575,6 +588,14 @@ int weivel_c_core_is_destroyed(weivel_c_core *core) {
     destroyed = core->core == NULL;
     weivel_c_mutex_unlock(&core->lock);
     return destroyed;
+}
+
+uint64_t weivel_c_core_last_sequence(weivel_c_core *core) {
+    uint64_t sequence;
+    weivel_c_mutex_lock(&core->lock);
+    sequence = core->sequence;
+    weivel_c_mutex_unlock(&core->lock);
+    return sequence;
 }
 
 int weivel_c_core_is_idle(weivel_c_core *core) {

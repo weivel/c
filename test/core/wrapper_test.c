@@ -1,6 +1,7 @@
 #include "fixture.h"
 
 #if !defined(WEIVEL_C_USING_SHARED)
+#include "../../src/core/calls.h"
 #include "../../src/core/events.h"
 #endif
 
@@ -1693,9 +1694,41 @@ static void a_step_run_as_the_dispatcher_runs_at_once_where_none_runs_and_nowher
     end_core(core);
 }
 
+static weivel_c_status refuse_as_detached(void *data) {
+    uint32_t *asked = data;
+    (*asked)++;
+    return WEIVEL_C_STATUS_DETACHED;
+}
+
+static weivel_c_status count_the_record(void *data) {
+    uint32_t *runs = data;
+    (*runs)++;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void a_guard_that_refuses_is_the_calls_answer_and_the_core_is_not_called(void) {
+    hearing listener = {0};
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    uint32_t guarded = 0;
+    uint32_t recorded = 0;
+    weivel_c_answered_step then = {count_the_record, &recorded, refuse_as_detached, &guarded};
+    weivel_handle handle = 0;
+    forget_crossings();
+    CHECK(weivel_c_core_register_service_then(core, WEIVEL_HOST, "c", &handle, NULL, &then) ==
+          WEIVEL_C_STATUS_DETACHED);
+    CHECK(guarded == 1 && recorded == 0 && handle == 0);
+    CHECK(crossed.next_event == 0 && crossed.events == 0 && listener.count == 0);
+    then.guard = NULL;
+    CHECK(weivel_c_core_register_service_then(core, WEIVEL_HOST, "c", &handle, NULL, &then) == WEIVEL_C_STATUS_OK);
+    CHECK(guarded == 1 && recorded == 1 && handle != 0);
+    end_core(core);
+}
+
 static void run_the_tests_of_the_layers_own_steps(void) {
     a_step_run_as_the_dispatcher_runs_at_once_where_none_runs_and_nowhere_inside_one();
+    a_guard_that_refuses_is_the_calls_answer_and_the_core_is_not_called();
 }
+
 
 #else
 

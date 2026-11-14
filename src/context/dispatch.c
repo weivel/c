@@ -25,7 +25,7 @@ static void tell_degraded(weivel_c_contexts *contexts, const weivel_c_event *eve
     told.reach = WEIVEL_REACH_SERVICE;
     told.id = settlement->id;
     told.refusal = settlement->refusal;
-    weivel_c_context_emit(weivel_c_contexts_context_of(contexts, event->data.want.plugin), &told, event);
+    weivel_c_context_emit(weivel_c_contexts_context_of(contexts, event->data.want.plugin, event), &told, event);
 }
 
 /**
@@ -158,7 +158,8 @@ static void revoke(weivel_c_contexts *contexts, const weivel_c_event *event) {
     weivel_c_handles_revoke(contexts->handles, event, NULL);
     weivel_c_mutex_unlock(&contexts->lock);
     if (described) {
-        weivel_c_context_emit(weivel_c_contexts_context_of(contexts, event->data.revoked.plugin), &told, event);
+        weivel_c_context_emit(weivel_c_contexts_context_of(contexts, event->data.revoked.plugin, event), &told,
+                              event);
     }
 }
 
@@ -169,7 +170,7 @@ static void refuse_reach(weivel_c_contexts *contexts, const weivel_c_event *even
     told.reach = refused->kind;
     told.id = refused->id;
     told.refusal = weivel_c_contexts_refusal_of(&refused->refusal, refused->subject, refused->has_fix);
-    weivel_c_context_emit(weivel_c_contexts_context_of(contexts, refused->plugin), &told, event);
+    weivel_c_context_emit(weivel_c_contexts_context_of(contexts, refused->plugin, event), &told, event);
 }
 
 static void write_the_cores_log(weivel_c_contexts *contexts, const weivel_c_event *event) {

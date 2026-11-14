@@ -517,6 +517,29 @@ static void a_listing_that_leaves_out_an_implementation_gives_back_the_room_it_k
     end_world(&in);
 }
 
+/** Every call of a detached context that would reach the core answers DETACHED, with no refusal. */
+static void check_every_call_answers_detached(plugin *consumer, const weivel_c_want_callback *callback,
+                                              const weivel_c_service_watcher *watcher) {
+    watched_record capabilities_heard = {0};
+    weivel_c_capability_watcher capability_watcher = watching_capabilities(&capabilities_heard);
+    weivel_service_list ids = WEIVEL_INIT(weivel_service_list);
+    weivel_c_refusal refusal = WEIVEL_INIT(weivel_c_refusal);
+    weivel_c_context *context = consumer->context;
+    CHECK(weivel_c_context_want_service(context, "p:a", NULL, callback, NULL, &refusal) == WEIVEL_C_STATUS_DETACHED);
+    CHECK(weivel_c_context_watch_service(context, "p:a", watcher, NULL, &refusal) == WEIVEL_C_STATUS_DETACHED);
+    CHECK(weivel_c_context_register_service(context, "c:x", &first_object, NULL, NULL, &refusal) ==
+          WEIVEL_C_STATUS_DETACHED);
+    CHECK(weivel_c_context_provide_capability(context, "screens", &first_object, NULL, &refusal) ==
+          WEIVEL_C_STATUS_DETACHED);
+    CHECK(weivel_c_context_watch_capability(context, "screens", &capability_watcher, NULL, &refusal) ==
+          WEIVEL_C_STATUS_DETACHED);
+    CHECK(weivel_c_context_service_ids(context, &ids, &refusal) == WEIVEL_C_STATUS_DETACHED);
+    CHECK(weivel_c_context_withdraw_want(context, 12345, &refusal) == WEIVEL_C_STATUS_DETACHED);
+    CHECK(weivel_c_context_unregister_service(context, 12345, &refusal) == WEIVEL_C_STATUS_DETACHED);
+    CHECK(weivel_c_context_stop_watching(context, 12345, &refusal) == WEIVEL_C_STATUS_DETACHED);
+    CHECK(refusal.code == WEIVEL_REFUSAL_NONE && refusal.detail == NULL);
+}
+
 static void a_detached_context_reaches_the_core_no_more_and_leaves_its_handle_free(void) {
     world in;
     plugin provider;
@@ -538,14 +561,10 @@ static void a_detached_context_reaches_the_core_no_more_and_leaves_its_handle_fr
     CHECK(weivel_c_context_detach(consumer.context) == WEIVEL_C_STATUS_OK);
     CHECK(entries_of(&in) == 2 && holdings_of(&in) == 0);
     forget_every_crossing();
-    CHECK(weivel_c_context_get_service(consumer.context, "p:a", &service, NULL) == WEIVEL_C_STATUS_REFUSED);
+    check_every_call_answers_detached(&consumer, &callback, &watcher);
+    CHECK(weivel_c_context_get_service(consumer.context, "p:a", &service, NULL) == WEIVEL_C_STATUS_DETACHED);
     CHECK(service == NULL);
-    CHECK(weivel_c_context_want_service(consumer.context, "p:a", NULL, &callback, NULL, NULL) ==
-          WEIVEL_C_STATUS_REFUSED);
-    CHECK(weivel_c_context_watch_service(consumer.context, "p:a", &watcher, NULL, NULL) == WEIVEL_C_STATUS_REFUSED);
-    CHECK(weivel_c_context_register_service(consumer.context, "c:x", &first_object, NULL, NULL, NULL) ==
-          WEIVEL_C_STATUS_REFUSED);
-    CHECK(weivel_c_context_all_capabilities(consumer.context, "screens", &list, NULL) == WEIVEL_C_STATUS_REFUSED);
+    CHECK(weivel_c_context_all_capabilities(consumer.context, "screens", &list, NULL) == WEIVEL_C_STATUS_DETACHED);
     CHECK(weivel_c_context_log(consumer.context, WEIVEL_LOG_ERROR, "still heard") == WEIVEL_C_STATUS_OK);
     CHECK(every_crossing() == 0 && settled.count == 0 && in.log.count == 1);
     CHECK(weivel_c_context_detach(consumer.context) == WEIVEL_C_STATUS_OK);
@@ -556,7 +575,43 @@ static void a_detached_context_reaches_the_core_no_more_and_leaves_its_handle_fr
 
 #if !defined(WEIVEL_C_USING_SHARED)
 
+/** A refusal of reach naming `plugin`, as the core would queue it, at the sequence given. */
+static weivel_c_event reach_refused_for(weivel_handle plugin, uint64_t sequence) {
+    weivel_c_event event;
+    memset(&event, 0, sizeof event);
+    event.kind = WEIVEL_EVENT_REACH_REFUSED;
+    event.sequence = sequence;
+    event.data.reach.plugin = plugin;
+    event.data.reach.kind = WEIVEL_REACH_SERVICE;
+    event.data.reach.id = "p:a";
+    event.data.reach.refusal.code = WEIVEL_REFUSAL_UNDECLARED;
+    return event;
+}
+
+/**
+ * An event drained before a context was made names its plugin's handle as an earlier plugin held it: the core may
+ * issue a forgotten plugin's handle again, so such an event belongs to that earlier plugin and reaches nobody.
+ */
+static void an_event_drained_before_a_context_was_made_never_reaches_its_listeners(void) {
+    world in;
+    plugin provider;
+    plugin consumer;
+    reported_record reported = {0};
+    weivel_c_event stale;
+    weivel_c_event fresh;
+    begin_pair(&in, &provider, &consumer, 0);
+    listen_to(&consumer, &reported);
+    stale = reach_refused_for(consumer.handle, consumer.context->first_sequence);
+    fresh = reach_refused_for(consumer.handle, UINT64_MAX);
+    CHECK(weivel_c_contexts_hear(in.contexts, in.core, &stale) == WEIVEL_C_STATUS_OK);
+    CHECK(reported.count == 0);
+    CHECK(weivel_c_contexts_hear(in.contexts, in.core, &fresh) == WEIVEL_C_STATUS_OK);
+    CHECK(reported.count == 1 && reported.items[0].kind == WEIVEL_C_PLUGIN_EVENT_REACH_REFUSED);
+    end_world(&in);
+}
+
 #define GRAVEYARD_BLOCKS 64
+
 
 /**
  * An allocator that never hands memory back while a test runs: a released block is poisoned and kept, so a read of it
@@ -829,7 +884,11 @@ int main(int argument_count, char **arguments) {
     freeing_the_contexts_leaves_no_entry_and_no_holding_in_the_table();
     a_listing_that_leaves_out_an_implementation_gives_back_the_room_it_kept_for_it();
     a_detached_context_reaches_the_core_no_more_and_leaves_its_handle_free();
+#if !defined(WEIVEL_C_USING_SHARED)
+    an_event_drained_before_a_context_was_made_never_reaches_its_listeners();
+#endif
     run_the_tests_of_the_layers_own_seams();
+
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("context endings");
 }

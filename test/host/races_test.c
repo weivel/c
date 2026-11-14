@@ -317,6 +317,33 @@ static void the_ending_of_a_quarantine_ends_no_entry_of_a_later_activation(void)
     destroy_and_finish(&racing);
 }
 
+static void register_through_the_late_plugins_context(void *argument) {
+    race *self = argument;
+    self->answered = weivel_c_context_register_service(self->late.context, "late:x", &registered_object, NULL, NULL,
+                                                       NULL);
+}
+
+/**
+ * Stops a plugin's own call on its way into the core, after any check made before the layer lock is taken, while
+ * the plugin is released and forgotten on another thread: the call must find its context detached under that lock.
+ */
+static void a_call_whose_plugin_is_forgotten_on_its_way_in_answers_detached(void) {
+    test_plugin *only[1];
+    uint32_t finished = 0;
+    begin_the_race(&racing);
+    register_test_plugin(&racing.late);
+    only[0] = &racing.late;
+    CHECK(activate_in_order(&racing.in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    arm_the_stop(&racing, 1);
+    CHECK(start_test_thread(&racing.runner, register_through_the_late_plugins_context, &racing));
+    pass_gate(&racing.reached);
+    CHECK(weivel_c_host_release(racing.in.host, racing.late.handle, &finished) == WEIVEL_C_STATUS_OK && finished);
+    open_gate(&racing.free_to_go);
+    join_test_thread(&racing.runner);
+    CHECK(racing.answered == WEIVEL_C_STATUS_DETACHED);
+    destroy_and_finish(&racing);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 2 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: host_races_test <core-library>\n");
@@ -327,6 +354,7 @@ int main(int argument_count, char **arguments) {
     a_free_while_another_thread_is_still_inside_the_layer_frees_nothing();
     an_activation_alongside_another_threads_dispatch_starts_its_plugin_once_before_it_returns();
     the_ending_of_a_quarantine_ends_no_entry_of_a_later_activation();
+    a_call_whose_plugin_is_forgotten_on_its_way_in_answers_detached();
 
 
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
