@@ -13,7 +13,7 @@
 static const char *library_path_of_probe;
 
 #define CALLERS 4
-#define CALLS 2000
+#define MOST_CALLS 10000000
 
 typedef struct crowd {
     host_world in;
@@ -21,6 +21,8 @@ typedef struct crowd {
     const weivel_c_library_service *service;
     test_thread callers[CALLERS];
     test_thread unloader;
+    test_mutex started_mutex;
+    uint32_t started;
     uint32_t answered[CALLERS];
     uint32_t refused[CALLERS];
     uint32_t other[CALLERS];
@@ -29,32 +31,48 @@ typedef struct crowd {
 
 static crowd everyone;
 
-static void count_one_call(uint32_t caller) {
+/** Makes one call and counts how it was answered; answers 1 while the caller should go on. */
+static int count_one_call(uint32_t caller) {
     const uint8_t input[] = {0, 'x', 'y'};
     weivel_c_library_answer answer;
     weivel_c_status status = call_with(everyone.service, PROBE_ANSWER, input, sizeof input, &answer);
     if (status == WEIVEL_C_STATUS_OK && body_is(&answer.body, "xy") &&
         weivel_c_bytes_release(&answer.body) == WEIVEL_C_STATUS_OK) {
         everyone.answered[caller]++;
-    } else if (status == WEIVEL_C_STATUS_UNLOADED && answer.body.owner == NULL) {
+        return 1;
+    }
+    if (status == WEIVEL_C_STATUS_UNLOADED && answer.body.owner == NULL) {
         everyone.refused[caller]++;
     } else {
         everyone.other[caller]++;
     }
+    return 0;
 }
 
-static void call_again_and_again(void *argument) {
+/** Calls until a call is refused, telling the unloader once the first call was answered. */
+static void call_until_refused(void *argument) {
     uint32_t caller = (uint32_t)(size_t)argument;
     uint32_t call;
-    for (call = 0; call < CALLS; call++) {
-        count_one_call(caller);
+    int going_on = count_one_call(caller);
+    lock_test_mutex(&everyone.started_mutex);
+    everyone.started++;
+    unlock_test_mutex(&everyone.started_mutex);
+    for (call = 1; going_on && call < MOST_CALLS; call++) {
+        going_on = count_one_call(caller);
     }
 }
 
-static void unload_after_a_while(void *argument) {
-    uint32_t turn;
+static uint32_t callers_started(void) {
+    uint32_t started;
+    lock_test_mutex(&everyone.started_mutex);
+    started = everyone.started;
+    unlock_test_mutex(&everyone.started_mutex);
+    return started;
+}
+
+static void unload_while_every_caller_calls(void *argument) {
     (void)argument;
-    for (turn = 0; turn < 64; turn++) {
+    while (callers_started() < CALLERS) {
         let_other_threads_run();
     }
     everyone.unloaded = weivel_c_host_unload_library(everyone.in.host, everyone.library);
@@ -68,10 +86,11 @@ static void calls_from_several_threads_while_another_unloads_are_each_answered_o
     everyone.library = load_declared(&everyone.in, library_path_of_probe, &probe);
     everyone.service = service_of(&everyone.in, "probe");
     closes = weivel_c_testing_closes_made;
+    start_test_mutex(&everyone.started_mutex);
     for (caller = 0; caller < CALLERS; caller++) {
-        CHECK(start_test_thread(&everyone.callers[caller], call_again_and_again, (void *)(size_t)caller));
+        CHECK(start_test_thread(&everyone.callers[caller], call_until_refused, (void *)(size_t)caller));
     }
-    CHECK(start_test_thread(&everyone.unloader, unload_after_a_while, NULL));
+    CHECK(start_test_thread(&everyone.unloader, unload_while_every_caller_calls, NULL));
     for (caller = 0; caller < CALLERS; caller++) {
         join_test_thread(&everyone.callers[caller]);
         answered += everyone.answered[caller];
@@ -79,7 +98,7 @@ static void calls_from_several_threads_while_another_unloads_are_each_answered_o
         other += everyone.other[caller];
     }
     join_test_thread(&everyone.unloader);
-    CHECK(everyone.unloaded == WEIVEL_C_STATUS_OK && other == 0 && answered + refused == CALLERS * CALLS);
+    CHECK(everyone.unloaded == WEIVEL_C_STATUS_OK && other == 0 && answered >= CALLERS && refused == CALLERS);
     CHECK(weivel_c_testing_closes_made == closes + 1);
     CHECK(sink_count(&everyone.in) == 0);
     end_host_world(&everyone.in);
