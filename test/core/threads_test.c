@@ -332,6 +332,30 @@ static void a_deadline_drained_while_another_thread_follows_is_followed_by_that_
     end_core(core);
 }
 
+static void another_threads_events_are_dispatched_while_one_thread_sits_in_follow(void) {
+    static hearing listener;
+    gated_follow gate;
+    test_thread thread;
+    weivel_handle handle = 0;
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    timed_wanter first = {core, "first", 1000, WEIVEL_C_STATUS_FAILED};
+    CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "s", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    begin_gate(&gate, core);
+    listener.count = 0;
+    forget_crossings();
+    CHECK(start_test_thread(&thread, want_within_a_timeout, &first));
+    wait_until_follow_is_inside(&gate);
+    CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "s", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(told_through(&gate).inside == 1);
+    CHECK(crossed.events >= 2 && listener.count == crossed.events);
+    CHECK(listener.items[0].kind == WEIVEL_EVENT_DEADLINE);
+    CHECK(count_heard(&listener, WEIVEL_EVENT_WATCH) == 1);
+    open_the_gate(&gate);
+    join_test_thread(&thread);
+    CHECK(first.answered == WEIVEL_C_STATUS_OK && listener.count == crossed.events);
+    end_core(core);
+}
+
 typedef struct caller_until_destroyed {
     weivel_c_core *core;
     char id[16];
@@ -450,6 +474,7 @@ int main(int argument_count, char **arguments) {
     calls_from_several_threads_are_dispatched_once_in_drained_order_by_one_thread();
     the_latest_deadline_is_followed_last_and_by_one_thread_at_a_time();
     a_deadline_drained_while_another_thread_follows_is_followed_by_that_thread();
+    another_threads_events_are_dispatched_while_one_thread_sits_in_follow();
     a_destroy_from_another_thread_ends_the_calls_of_the_rest();
     listeners_come_and_go_on_another_thread_while_events_are_dispatched();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
