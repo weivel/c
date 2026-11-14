@@ -57,6 +57,11 @@ weivel_c_status weivel_c_core_invoke(weivel_c_core *core, weivel_c_core_call cal
  * nothing drained. A check that must hold when the core is called, and not merely when the call began, is made there.
  * Each may be NULL, and each is held to what `record` is held to.
  *
+ * `deferred`, when not NULL, is put on the dispatch queue in the same hold, once `record` answered OK: right behind
+ * the call's events and ahead of anything another thread's call drains later. `deferred_ran`, when not NULL, receives
+ * 1 when that step ran on this thread before the call returned, and 0 otherwise. A step already waiting stays where
+ * it waits, queued once; one smaller than its first shape or with no `run` answers the call WEIVEL_C_STATUS_MISUSE.
+ *
  * @implNote A step that only records into room reserved before the call cannot fail. The failing answer stays for the
  * step that finds it cannot stand behind what the core answered: a get whose registration the layer keeps no object
  * for answers WEIVEL_C_STATUS_FAILED through it.
@@ -66,6 +71,8 @@ typedef struct weivel_c_answered_step {
     void *data;
     weivel_c_status (*guard)(void *guard_data);
     void *guard_data;
+    weivel_c_step *deferred;
+    uint32_t *deferred_ran;
 } weivel_c_answered_step;
 
 /** weivel_c_core_invoke with a step run once the core has answered OK; `then` may be NULL. */

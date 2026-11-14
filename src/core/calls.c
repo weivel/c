@@ -166,9 +166,15 @@ static weivel_status call_release_plugin(const weivel_c_core_table *table, weive
     return table->release_plugin(core, given->plugin, pending_events);
 }
 
-weivel_c_status weivel_c_core_release_plugin(weivel_c_core *core, weivel_handle plugin, weivel_c_refusal *refusal) {
+weivel_c_status weivel_c_core_release_plugin_then(weivel_c_core *core, weivel_handle plugin, weivel_c_refusal *refusal,
+                                                  const weivel_c_answered_step *then) {
     release_plugin_arguments arguments = {plugin};
-    return weivel_c_core_invoke(core, call_release_plugin, &arguments, WEIVEL_C_CALL_BUILT_BY_THE_LAYER, refusal);
+    return weivel_c_core_invoke_then(core, call_release_plugin, &arguments, WEIVEL_C_CALL_BUILT_BY_THE_LAYER, refusal,
+                                     then);
+}
+
+weivel_c_status weivel_c_core_release_plugin(weivel_c_core *core, weivel_handle plugin, weivel_c_refusal *refusal) {
+    return weivel_c_core_release_plugin_then(core, plugin, refusal, NULL);
 }
 
 typedef struct quarantine_plugin_arguments {
@@ -182,11 +188,17 @@ static weivel_status call_quarantine_plugin(const weivel_c_core_table *table, we
     return table->quarantine_plugin(core, given->plugin, given->reason, pending_events);
 }
 
+weivel_c_status weivel_c_core_quarantine_plugin_then(weivel_c_core *core, weivel_handle plugin,
+                                                     const weivel_quarantine_reason *reason, weivel_c_refusal *refusal,
+                                                     const weivel_c_answered_step *then) {
+    quarantine_plugin_arguments arguments = {plugin, reason};
+    return weivel_c_core_invoke_then(core, call_quarantine_plugin, &arguments, WEIVEL_C_CALL_CARRIES_A_CALLERS_STRUCT,
+                                     refusal, then);
+}
+
 weivel_c_status weivel_c_core_quarantine_plugin(weivel_c_core *core, weivel_handle plugin,
                                                 const weivel_quarantine_reason *reason, weivel_c_refusal *refusal) {
-    quarantine_plugin_arguments arguments = {plugin, reason};
-    return weivel_c_core_invoke(core, call_quarantine_plugin, &arguments, WEIVEL_C_CALL_CARRIES_A_CALLERS_STRUCT,
-                                refusal);
+    return weivel_c_core_quarantine_plugin_then(core, plugin, reason, refusal, NULL);
 }
 
 typedef struct forget_plugin_arguments {

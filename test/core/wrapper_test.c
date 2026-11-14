@@ -1711,7 +1711,7 @@ static void a_guard_that_refuses_is_the_calls_answer_and_the_core_is_not_called(
     weivel_c_core *core = make_core(NULL, &listener, NULL);
     uint32_t guarded = 0;
     uint32_t recorded = 0;
-    weivel_c_answered_step then = {count_the_record, &recorded, refuse_as_detached, &guarded};
+    weivel_c_answered_step then = {count_the_record, &recorded, refuse_as_detached, &guarded, NULL, NULL};
     weivel_handle handle = 0;
     forget_crossings();
     CHECK(weivel_c_core_register_service_then(core, WEIVEL_HOST, "c", &handle, NULL, &then) ==

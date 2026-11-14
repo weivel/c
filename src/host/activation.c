@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../core/calls.h"
+
 #define END_OF(type, field) (offsetof(type, field) + sizeof(((type *)0)->field))
 #define FIRST_ACTIVATION_SIZE END_OF(weivel_c_activation, listener)
 
@@ -355,16 +357,18 @@ static void stamp_the_ending(host_ending *ending) {
     weivel_c_mutex_unlock(&host->lock);
 }
 
+/**
+ * @implNote The ending is queued in the quarantine's own hold of the layer lock, right behind its events, so nothing
+ * another thread's call drains after it is heard by the plugin ahead of it.
+ */
 weivel_c_status weivel_c_host_quarantine(host_ending *ending, const weivel_quarantine_reason *reason) {
     host_plugin *plugin = ending->plugin;
     weivel_c_host *host = plugin->host;
+    weivel_c_answered_step then = {NULL, NULL, NULL, NULL, &ending->step, NULL};
     weivel_c_status status;
     stamp_the_ending(ending);
-    status = weivel_c_core_quarantine_plugin(host->core, plugin->handle, reason, NULL);
+    status = weivel_c_core_quarantine_plugin_then(host->core, plugin->handle, reason, NULL, &then);
     weivel_c_host_report_call(host, status, "the core did not quarantine a plugin the host quarantined");
-    if (status == WEIVEL_C_STATUS_OK) {
-        weivel_c_core_defer(host->core, &ending->step, NULL);
-    }
     return status;
 }
 

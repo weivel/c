@@ -1,9 +1,8 @@
 #include "host.h"
 
-#include "../core/calls.h"
-
-
 #include <stdio.h>
+
+#include "../core/calls.h"
 
 /** What beginning a release found, under the host's lock. */
 typedef struct beginning {
@@ -107,15 +106,21 @@ weivel_c_status weivel_c_host_begin_release(host_plugin *plugin, uint32_t *finis
 }
 
 /**
- * @implNote Steps 4 to 6 are always deferred behind the events the core's release queued, wherever it was made: with
- * no dispatch running the defer makes this thread the dispatcher, so they have run, after those events, before it
- * returns, and inside a dispatch they wait their turn there.
+ * @implNote Steps 4 to 6 are always deferred behind the events the core's release queued, wherever it was made, and
+ * are queued in the release's own hold of the layer lock, so nothing another thread's call drains after it is heard
+ * by the plugin ahead of them. With no dispatch running this thread becomes the dispatcher, so they have run, after
+ * those events, before it returns, and inside a dispatch they wait their turn there. A release the core did not take
+ * queued no events of its own, so its steps are then deferred, or run at once once the core is gone.
  */
 int weivel_c_host_go_on_releasing(host_plugin *plugin) {
     weivel_c_host *host = plugin->host;
     uint32_t here = 0;
-    weivel_c_host_report_call(host, weivel_c_core_release_plugin(host->core, plugin->handle, NULL),
-                              "the core did not release a plugin the host released");
+    weivel_c_answered_step then = {NULL, NULL, NULL, NULL, &plugin->finishing, &here};
+    weivel_c_status released = weivel_c_core_release_plugin_then(host->core, plugin->handle, NULL, &then);
+    weivel_c_host_report_call(host, released, "the core did not release a plugin the host released");
+    if (released == WEIVEL_C_STATUS_OK) {
+        return (int)here;
+    }
     if (weivel_c_core_defer(host->core, &plugin->finishing, &here) != WEIVEL_C_STATUS_OK) {
         weivel_c_host_finish_release(plugin, host->core);
         return 1;
@@ -134,7 +139,7 @@ static weivel_c_status detach_the_context(void *data) {
  */
 static void forget_and_detach(host_plugin *plugin) {
     weivel_c_host *host = plugin->host;
-    weivel_c_answered_step then = {detach_the_context, plugin->context, NULL, NULL};
+    weivel_c_answered_step then = {detach_the_context, plugin->context, NULL, NULL, NULL, NULL};
     weivel_c_status forgotten = weivel_c_core_forget_plugin_then(host->core, plugin->handle, NULL, &then);
     weivel_c_host_report_call(host, forgotten, "the core did not forget a plugin the host released");
     if (forgotten != WEIVEL_C_STATUS_OK) {
