@@ -28,16 +28,27 @@ static uint32_t deactivate(void *data, weivel_c_context *context, weivel_c_compl
                            const char **reason) {
     entry_library_state *self = data;
     (void)context;
-    (void)completion;
     (void)reason;
     self->deactivations++;
+    if (self->deactivate_waits) {
+        self->deactivation = completion;
+        return WEIVEL_C_ENTRY_PENDING;
+    }
     return WEIVEL_C_ENTRY_DONE;
+}
+
+static uint32_t finish_from_inside(void) {
+    volatile uint32_t survived = 0;
+    state.finish(state.deactivation, WEIVEL_C_ENTRY_DONE, NULL);
+    survived = ENTRY_LIBRARY_SURVIVED;
+    return survived;
 }
 
 ENTRY_LIBRARY_EXPORT weivel_c_status test_plugin_entry(weivel_c_entry *entry) {
     entry->activate = activate;
     entry->deactivate = deactivate;
     entry->data = &state;
+    state.finish_from_inside = finish_from_inside;
     return WEIVEL_C_STATUS_OK;
 }
 

@@ -122,7 +122,7 @@ weivel_c_status weivel_c_host_create(const weivel_c_host_options *options, weive
 }
 
 int weivel_c_host_destroy_may_end(weivel_c_host *host) {
-    if (!host->destroy_waits || host->releases_in_flight != 0) {
+    if (!host->destroy_waits || host->releases_in_flight != 0 || host->opens_in_flight != 0) {
         return 0;
     }
     host->destroy_waits = 0;
@@ -162,23 +162,14 @@ static weivel_c_status begin_destroying(void *data, weivel_c_core *core) {
     return WEIVEL_C_STATUS_OK;
 }
 
-static void close_every_library(weivel_c_host *host) {
-    host_plugin *plugin;
-    for (plugin = host->first_plugin; plugin != NULL; plugin = plugin->next) {
-        weivel_c_host_close_library(plugin);
-    }
-}
-
 /**
  * The destroy's last step, behind every event and step its releases left: unloads every C library loaded as host
- * services, closes the plugins' own libraries, those of plugins never opened among them, then disarms the timer and
- * destroys the core.
+ * services, then disarms the timer and destroys the core. The plugins' own libraries stay open until the free.
  */
 static weivel_c_status end_destroying(void *data, weivel_c_core *core) {
     weivel_c_host *host = data;
     (void)core;
     weivel_c_host_unload_every_library(host);
-    close_every_library(host);
     weivel_c_timer_destroy(host->timer);
     weivel_c_core_destroy(host->core);
     weivel_c_mutex_lock(&host->lock);
@@ -217,6 +208,7 @@ static void free_the_records(weivel_c_host *host) {
     while (host->first_plugin != NULL) {
         host_plugin *plugin = host->first_plugin;
         host->first_plugin = plugin->next;
+        weivel_c_host_close_library(plugin);
         free(plugin);
     }
     while (host->completions != NULL) {

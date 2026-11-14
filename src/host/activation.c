@@ -105,14 +105,54 @@ static void fail_the_open(host_plugin *plugin, weivel_c_completion *activation, 
     }
 }
 
-static void mark_activating(host_plugin *plugin, weivel_c_completion *activation) {
-    weivel_c_host *host = plugin->host;
+/**
+ * Takes an open the destroy will wait for, unless the destroy has begun. Answers 0, taking nothing, once it has.
+ *
+ * @implNote The destroy's first step walks only the plugins already opened, so an open made while it walks would be
+ * missed by it; counting the open first is what makes the destroy wait for it to be answered.
+ */
+static int take_the_open(weivel_c_host *host) {
+    int running;
     weivel_c_mutex_lock(&host->lock);
-    plugin->state = WEIVEL_C_PLUGIN_ACTIVATING;
-    plugin->activating = activation;
-    plugin->activate_called = 1;
-    weivel_c_host_join_opened(plugin);
+    running = host->state == HOST_RUNNING;
+    host->opens_in_flight += (uint32_t)running;
     weivel_c_mutex_unlock(&host->lock);
+    return running;
+}
+
+/** Ends an open answered without its plugin being taken into the opened list, and lets a waiting destroy end. */
+static void end_the_open(weivel_c_host *host) {
+    int destroy_may_end;
+    weivel_c_mutex_lock(&host->lock);
+    host->opens_in_flight--;
+    destroy_may_end = weivel_c_host_destroy_may_end(host);
+    weivel_c_mutex_unlock(&host->lock);
+    if (destroy_may_end) {
+        weivel_c_host_end_the_destroy(host);
+    }
+}
+
+/**
+ * Takes an opened plugin into the opened list as activating. Answers 0 when the destroy began while it was being
+ * opened: the plugin is then taken for a release owing no deactivate, since its activate is never called.
+ */
+static int mark_activating(host_plugin *plugin, weivel_c_completion *activation) {
+    weivel_c_host *host = plugin->host;
+    int running;
+    weivel_c_mutex_lock(&host->lock);
+    host->opens_in_flight--;
+    running = host->state == HOST_RUNNING;
+    if (running) {
+        plugin->state = WEIVEL_C_PLUGIN_ACTIVATING;
+        plugin->activating = activation;
+        plugin->activate_called = 1;
+        weivel_c_host_join_opened(plugin);
+    } else {
+        plugin->state = WEIVEL_C_PLUGIN_RELEASING;
+        host->releases_in_flight++;
+    }
+    weivel_c_mutex_unlock(&host->lock);
+    return running;
 }
 
 static void tell_at_once(weivel_c_completion *activation, uint32_t kind) {
@@ -126,6 +166,16 @@ static void tell_at_once(weivel_c_completion *activation, uint32_t kind) {
     }
 }
 
+/** Answers an open the core did not take: refused, or failed for a reason of the layer's. */
+static void answer_an_open_not_taken(host_plugin *plugin, weivel_c_completion *activation, weivel_c_status opened) {
+    if (opened == WEIVEL_C_STATUS_REFUSED) {
+        tell_at_once(activation, WEIVEL_C_OUTCOME_REFUSED);
+    } else {
+        fail_the_open(plugin, activation, opened);
+    }
+    end_the_open(activation->host);
+}
+
 /** Opens one plugin of the plan, builds nothing it could fail to build afterwards, and calls its activate. */
 static void start_plugin(weivel_c_host *host, const weivel_c_outcome_listener *listener, weivel_handle handle) {
     host_plugin *plugin = weivel_c_host_plugin_of(host, handle);
@@ -137,14 +187,18 @@ static void start_plugin(weivel_c_host *host, const weivel_c_outcome_listener *l
         return;
     }
     activation->outcome.listener = *listener;
+    if (!take_the_open(host)) {
+        tell_at_once(activation, WEIVEL_C_OUTCOME_RELEASED);
+        return;
+    }
     opened = plugin == NULL ? WEIVEL_C_STATUS_FAILED : open_with_its_token(plugin, &activation->outcome.refusal);
-    if (opened == WEIVEL_C_STATUS_REFUSED) {
-        tell_at_once(activation, WEIVEL_C_OUTCOME_REFUSED);
-    } else if (opened != WEIVEL_C_STATUS_OK) {
-        fail_the_open(plugin, activation, opened);
-    } else {
-        mark_activating(plugin, activation);
+    if (opened != WEIVEL_C_STATUS_OK) {
+        answer_an_open_not_taken(plugin, activation, opened);
+    } else if (mark_activating(plugin, activation)) {
         call_the_activate(plugin, activation);
+    } else {
+        tell_at_once(activation, WEIVEL_C_OUTCOME_RELEASED);
+        weivel_c_host_go_on_releasing(plugin);
     }
 }
 

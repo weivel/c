@@ -1,7 +1,7 @@
 /**
  * @file
  * A plugin's entry read from a shared library by the path and symbol name its caller gives, registered, activated
- * and released by the host, which closes the library once the plugin is forgotten.
+ * and released by the host, which closes the library when it is freed (see entry_closing_test.c).
  */
 
 #include "entry_library.h"
@@ -11,8 +11,8 @@ static const char *library_path;
 static const char *not_a_library_path;
 
 /**
- * @implNote The test loads the library a second time for itself, so the host closing its own load once the plugin is
- * forgotten leaves the library mapped, and its state can still be read.
+ * @implNote The test loads the library a second time for itself, so the host closing its own load when it is freed
+ * leaves the library mapped, and its state can still be read.
  */
 static void an_entry_read_from_a_library_is_activated_and_deactivated_and_its_library_closed_by_the_host(void) {
     host_world in;
@@ -62,7 +62,7 @@ static void a_library_that_is_none_lacks_the_symbol_or_cannot_provide_is_answere
     CHECK(weivel_c_entry_unload(NULL) == WEIVEL_C_STATUS_MISUSE);
 }
 
-static void a_library_entry_never_opened_is_closed_by_the_destroy(void) {
+static void a_library_entry_never_opened_is_closed_by_the_free(void) {
     host_world in;
     test_plugin plugin;
     weivel_c_entry kept = WEIVEL_INIT(weivel_c_entry);
@@ -89,7 +89,7 @@ int main(int argument_count, char **arguments) {
     not_a_library_path = arguments[3];
     an_entry_read_from_a_library_is_activated_and_deactivated_and_its_library_closed_by_the_host();
     a_library_that_is_none_lacks_the_symbol_or_cannot_provide_is_answered_as_a_value();
-    a_library_entry_never_opened_is_closed_by_the_destroy();
+    a_library_entry_never_opened_is_closed_by_the_free();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host entry");
 }

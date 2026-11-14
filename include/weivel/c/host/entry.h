@@ -59,8 +59,8 @@ typedef struct weivel_c_entry {
     /** The plugin's own; handed to both functions and never read by the layer. */
     void *data;
     /**
-     * The library weivel_c_entry_load read the entry from, which the host closes once it has forgotten the plugin or
-     * destroys itself; NULL for an entry the caller built itself. Private to the layer.
+     * The library weivel_c_entry_load read the entry from, which the host the entry is registered with closes when it
+     * is freed; NULL for an entry the caller built itself. Private to the layer.
      */
     void *library;
 } weivel_c_entry;
@@ -102,9 +102,11 @@ typedef struct weivel_c_entry_load_failure {
  * holds no directory separator is searched for by the platform's loader, as for weivel_c_core_load; give an absolute
  * path to load exactly one file.
  *
- * The library stays open, held by `entry->library`, until the host the entry is registered with closes it, or until
- * weivel_c_entry_unload for an entry never registered. The plugin's code runs nowhere once its release has finished,
- * since by then its library is closed.
+ * The library stays open, held by `entry->library`, until weivel_c_host_free frees the host the entry is registered
+ * with, or until weivel_c_entry_unload for an entry never registered. Code of the plugin's may run until that free:
+ * a finish made from inside the library on the plugin's own thread after its release or the destroy has finished, a
+ * thread of its own, a service object another plugin still holds. The free comes only once every call into the
+ * layer has returned, which is what makes closing the library then safe.
  *
  * @param entry an entry with `size` set and nothing else, as WEIVEL_INIT leaves it, filled only on OK. Required.
  * @param failure receives what a status alone cannot say; may be NULL. Cleared first when given and large enough.

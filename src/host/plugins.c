@@ -94,16 +94,22 @@ static void fill_plugin(host_plugin *plugin, weivel_c_host *host, const weivel_m
     plugin->quarantine_ending.data = plugin;
 }
 
-static void keep_plugin(host_plugin *plugin) {
+/** Keeps a registered plugin in the host's tables, unless the destroy has begun. Answers 0, keeping nothing, then. */
+static int keep_plugin(host_plugin *plugin) {
     weivel_c_host *host = plugin->host;
+    int running;
     weivel_c_mutex_lock(&host->lock);
-    if (host->last_plugin != NULL) {
+    running = host->state == HOST_RUNNING;
+    if (running && host->last_plugin != NULL) {
         host->last_plugin->next = plugin;
-    } else {
+    } else if (running) {
         host->first_plugin = plugin;
     }
-    host->last_plugin = plugin;
+    if (running) {
+        host->last_plugin = plugin;
+    }
     weivel_c_mutex_unlock(&host->lock);
+    return running;
 }
 
 /**
@@ -118,7 +124,18 @@ static void undo_the_registration(weivel_c_host *host, weivel_handle plugin) {
 }
 
 /**
- * @implNote The plugin's context is built here, before it is ever opened, though the plugin is handed it only by its
+ * Forgets in the core, quietly, a plugin registered while the destroy began, and detaches its context, which the
+ * contexts free with the host. The entry's library stays its caller's.
+ */
+static void forget_unkept(weivel_c_host *host, host_plugin *made) {
+    weivel_c_core_forget_plugin(host->core, made->handle, NULL);
+    weivel_c_context_detach(made->context);
+    free(made);
+}
+
+/**
+ * @implNote The plugin's context is built here
+, before it is ever opened, though the plugin is handed it only by its
  * activate: building it at the open could fail for want of memory after the core had opened the plugin, and here such
  * a failure is answered to the caller with nothing left registered.
  */
@@ -159,7 +176,10 @@ weivel_c_status weivel_c_host_register(weivel_c_host *host, const weivel_manifes
         return status;
     }
     fill_plugin(made, host, manifest, entry);
-    keep_plugin(made);
+    if (!keep_plugin(made)) {
+        forget_unkept(host, made);
+        return WEIVEL_C_STATUS_DESTROYED;
+    }
     *plugin = made->handle;
     return WEIVEL_C_STATUS_OK;
 }
