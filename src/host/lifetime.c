@@ -139,7 +139,9 @@ weivel_c_status weivel_c_host_create(const weivel_c_host_options *options, weive
 }
 
 int weivel_c_host_destroy_may_end(weivel_c_host *host) {
-    if (!host->destroy_waits || host->releases_in_flight != 0 || host->opens_in_flight != 0) {
+    if (!host->destroy_waits || host->releases_in_flight != 0 || host->opens_in_flight != 0 ||
+        host->settles_in_flight != 0) {
+
         return 0;
     }
     host->destroy_waits = 0;

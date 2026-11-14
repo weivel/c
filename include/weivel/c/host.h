@@ -92,8 +92,14 @@ WEIVEL_C_API weivel_c_status weivel_c_host_create(const weivel_c_host_options *o
  * Inside a dispatch, or while another thread's dispatch runs, it finishes there.
  *
  * From the moment it is called, every other call on the host answers WEIVEL_C_STATUS_DESTROYED, writing nothing to
- * the log or the sink; nothing the destroy sets off reaches the caller but the outcome `released` of an activation in
- * flight, and what a deactivate's failure tells the sink.
+ * the log or the sink. What the destroy sets off reaches the caller only as the outcome `released`, of an activation in
+ * flight and of each plugin of a plan the destroy kept from being started, and reaches the sink only for a failure of
+ * something the layer called or calls on its way: a deactivate that fails (WEIVEL_C_FAILURE_DEACTIVATE), an outcome
+ * listener or a callback of a plugin's that answers a failure (WEIVEL_C_FAILURE_OUTCOME_LISTENER,
+ * WEIVEL_C_FAILURE_LISTENER), a call the host makes into the core that answers a failure other than
+ * WEIVEL_C_STATUS_DESTROYED (WEIVEL_C_FAILURE_HOST_CALL), and a C library's binary that does not close
+ * (WEIVEL_C_FAILURE_UNLOAD).
+
  *
  * @param finished receives 1 once every step has run, else 0; may be NULL. The thread that ran the last step may still
  * be on its way out of the layer when another reads 1, and weivel_c_host_free answers WEIVEL_C_STATUS_MISUSE, freeing
@@ -174,7 +180,10 @@ typedef enum weivel_c_outcome_kind {
     WEIVEL_C_OUTCOME_QUARANTINED = 2,
     /** The core refused to open it, so it was never opened. */
     WEIVEL_C_OUTCOME_REFUSED = 3,
-    /** It was released while its activate was in flight; answered as that release begins. */
+    /**
+     * It was released while its activate was in flight, answered as that release begins; or the destroy began before
+     * its activate was called, so it was never opened, or released at once, its activate never called.
+     */
     WEIVEL_C_OUTCOME_RELEASED = 4,
     /** Its open failed for a reason other than the core's refusal, a defect of the layer the sink was told. */
     WEIVEL_C_OUTCOME_FAILED = 5
@@ -227,10 +236,15 @@ typedef struct weivel_c_activation {
  *
  * @param plan the caller's struct with `size` set and nothing held, as WEIVEL_INIT leaves it; on OK it holds the
  * core's plan, its order the order the activates were started in, and is handed to weivel_c_host_plan_release.
- * @return WEIVEL_C_STATUS_OK once every activate of the plan has been started, whatever any of them answered;
- * WEIVEL_C_STATUS_MISUSE (a NULL argument, options too small, no listener, or a plan the core calls malformed, an
- * edge source that is none among them, with its refusal); WEIVEL_C_STATUS_OUT_OF_MEMORY with nothing started;
- * WEIVEL_C_STATUS_DESTROYED.
+ * Every completion and outcome of the plan is made before the first plugin is opened, so running out of memory starts
+ * nothing. Once a destroy has begun, no further plugin of the plan is opened, and a plugin opened while it began is
+ * released at once without its activate; each is answered `released`. The plugins are started on the calling thread,
+ * each exactly once, whether or not another thread's dispatch runs meanwhile.
+ *
+ * @return WEIVEL_C_STATUS_OK once every activate of the plan has been started, or the plugin answered, whatever any of
+ * them answered; WEIVEL_C_STATUS_MISUSE (a NULL argument, options too small, no listener, or a plan the core calls
+ * malformed, an edge source that is none among them, with its refusal); WEIVEL_C_STATUS_OUT_OF_MEMORY with nothing
+ * started and the plan released; WEIVEL_C_STATUS_DESTROYED.
  */
 WEIVEL_C_API weivel_c_status weivel_c_host_activate(weivel_c_host *host, const weivel_c_activation *activation,
                                                     weivel_activation_plan *plan, weivel_c_refusal *refusal);

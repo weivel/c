@@ -334,6 +334,61 @@ static void open_three_with_the_last_completion_refused(host_world *in, test_plu
     weivel_c_host_replace_allocator(in->host, &allocator);
 }
 
+/** The host whose records a bent forget counts; set by the test that bends it. */
+static weivel_c_host *counted_host;
+static uint32_t records_at_the_forget;
+
+static weivel_status forget_counting_the_records(weivel_core *core, weivel_handle plugin, uint32_t *pending) {
+    CHECK(weivel_c_contexts_count(counted_host->contexts, NULL, &records_at_the_forget) == WEIVEL_C_STATUS_OK);
+    return real_table.forget_plugin(core, plugin, pending);
+}
+
+/** Registers a service of its own and wants one nothing provides, so it holds two records. */
+static uint32_t activate_holding_two_records(void *data, weivel_c_context *context, weivel_c_completion *completion,
+                                             const char **reason) {
+    test_plugin *self = data;
+    weivel_c_want_callback callback = {trace_settlement, self};
+    (void)completion;
+    (void)reason;
+    self->context = context;
+    CHECK(weivel_c_context_register_service(context, "agenda:x", &clock_object, NULL, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_want_service(context, "never:there", NULL, &callback, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    return WEIVEL_C_ENTRY_DONE;
+}
+
+static void counts_of(host_world *in, uint32_t *records, uint32_t *entries, uint32_t *holdings) {
+    CHECK(weivel_c_contexts_count(in->host->contexts, NULL, records) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_count(in->host->handles, entries, holdings) == WEIVEL_C_STATUS_OK);
+}
+
+static void a_release_ends_its_plugins_entries_before_it_forgets_it_and_leaves_none(void) {
+    host_world in;
+    test_plugin plugin;
+    test_plugin *only[1];
+    weivel_c_core_table bent = counting_table;
+    uint32_t records = 9;
+    uint32_t entries = 9;
+    uint32_t holdings = 9;
+    bent.forget_plugin = forget_counting_the_records;
+    begin_host_world_on(&in, &bent);
+    counted_host = in.host;
+    records_at_the_forget = 9;
+    name_acting_plugin(&plugin, &in, "agenda", activate_holding_two_records, NULL);
+    offers_service(&plugin, "agenda:x");
+    wants_service(&plugin, "never:there");
+    register_test_plugin(&plugin);
+    only[0] = &plugin;
+    CHECK(activate_in_order(&in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    counts_of(&in, &records, &entries, &holdings);
+    CHECK(records == 2 && entries == 4 && holdings == 0);
+    CHECK(weivel_c_host_release(in.host, plugin.handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(records_at_the_forget == 0);
+    counts_of(&in, &records, &entries, &holdings);
+    CHECK(records == 0 && entries == 1 && holdings == 0);
+    end_host_world(&in);
+}
+
 static void an_activation_short_of_memory_for_its_outcomes_starts_no_plugin(void) {
     host_world in;
     test_plugin plugins[3];
@@ -415,7 +470,9 @@ int main(int argument_count, char **arguments) {
     verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing();
 #if !defined(WEIVEL_C_USING_SHARED)
     an_activation_short_of_memory_for_its_outcomes_starts_no_plugin();
+    a_release_ends_its_plugins_entries_before_it_forgets_it_and_leaves_none();
 #endif
+
 
     every_call_answers_its_mistakes_as_values();
 

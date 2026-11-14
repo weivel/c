@@ -354,6 +354,84 @@ static void a_destroy_from_inside_an_activate_opens_no_later_plugin_of_the_plan(
     CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_OK);
 }
 
+/** Wants a service nothing provides, then fails, so its quarantine rejects that want. */
+static uint32_t activate_wanting_then_failing(void *data, weivel_c_context *context, weivel_c_completion *completion,
+                                              const char **reason) {
+    test_plugin *self = data;
+    weivel_c_want_callback callback = {trace_settlement, self};
+    (void)completion;
+    self->context = context;
+    CHECK(weivel_c_context_want_service(context, "mail:inbox", NULL, &callback, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    *reason = "on purpose";
+    return WEIVEL_C_ENTRY_FAILED;
+}
+
+static void a_quarantined_plugin_still_hears_its_want_rejected_stopped(void) {
+    host_world in;
+    test_plugin plugin;
+    test_plugin *only[1];
+    begin_host_world(&in);
+    name_acting_plugin(&plugin, &in, "calendar", activate_wanting_then_failing, NULL);
+    wants_service(&plugin, "mail:inbox");
+    register_test_plugin(&plugin);
+    only[0] = &plugin;
+    CHECK(activate_in_order(&in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    CHECK(state_of(&in, &plugin) == WEIVEL_C_PLUGIN_QUARANTINED);
+    CHECK(place_of(&in.heard, "rejected calendar mail:inbox stopped") >= 0);
+    end_host_world(&in);
+}
+
+/** An outcome listener that asks, by deferring a step, whether it was told from inside a dispatch. */
+typedef struct probing_listener {
+    host_world *in;
+    weivel_c_step probe;
+    uint32_t told;
+    uint32_t told_outside_a_dispatch;
+} probing_listener;
+
+static weivel_c_status do_nothing(void *data, weivel_c_core *core) {
+    (void)data;
+    (void)core;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static weivel_c_status hear_and_probe(void *data, const weivel_c_outcome *outcome) {
+    probing_listener *self = data;
+    weivel_c_core *core = NULL;
+    uint32_t here = 0;
+    (void)outcome;
+    CHECK(weivel_c_host_core(self->in->host, &core) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_defer(core, &self->probe, &here) == WEIVEL_C_STATUS_OK);
+    self->told++;
+    self->told_outside_a_dispatch += here;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void an_outcome_is_told_from_the_dispatch_even_for_a_release_made_outside_one(void) {
+    host_world in;
+    test_plugin plugin;
+    probing_listener listener;
+    weivel_c_activation activation = WEIVEL_INIT(weivel_c_activation);
+    weivel_activation_plan plan = WEIVEL_INIT(weivel_activation_plan);
+    memset(&listener, 0, sizeof listener);
+    listener.in = &in;
+    listener.probe = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
+    listener.probe.run = do_nothing;
+    begin_host_world(&in);
+    name_acting_plugin(&plugin, &in, "agenda", activate_and_wait, NULL);
+    register_test_plugin(&plugin);
+    activation.plugins = &plugin.handle;
+    activation.count = 1;
+    activation.edge_source = WEIVEL_EDGES_CAPABILITIES;
+    activation.listener.hear = hear_and_probe;
+    activation.listener.data = &listener;
+    CHECK(weivel_c_host_activate(in.host, &activation, &plan, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_host_plan_release(in.host, &plan) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_host_release(in.host, plugin.handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(listener.told == 1 && listener.told_outside_a_dispatch == 0);
+    end_host_world(&in);
+}
+
 /** Calls the host from code it runs: each would wait for ever on a lock of the host's held around that code. */
 static void call_the_host(void *more) {
     host_world *in = more;
@@ -419,6 +497,9 @@ int main(int argument_count, char **arguments) {
     a_destroy_inside_a_dispatch_runs_behind_what_is_queued_and_finishes_there();
     a_pending_deactivate_holds_the_destroy_for_as_long_as_it_takes();
     a_destroy_from_inside_an_activate_opens_no_later_plugin_of_the_plan();
+    a_quarantined_plugin_still_hears_its_want_rejected_stopped();
+    an_outcome_is_told_from_the_dispatch_even_for_a_release_made_outside_one();
+
     a_plugin_that_calls_its_context_after_it_was_forgotten_is_answered_detached_and_reads_nothing_freed();
     no_entry_listener_log_or_sink_runs_under_a_lock_of_the_hosts();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);

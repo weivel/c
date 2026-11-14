@@ -344,6 +344,38 @@ static void a_call_whose_plugin_is_forgotten_on_its_way_in_answers_detached(void
     destroy_and_finish(&racing);
 }
 
+static void finish_the_late_activation(void *argument) {
+    race *self = argument;
+    self->answered = weivel_c_completion_finish(self->late.activation, WEIVEL_C_ENTRY_DONE, NULL);
+}
+
+/**
+ * Stops a settling on its way into the verify, once the release no longer answers that activation, while the destroy
+ * releases its plugin and would end: the settling's outcome must still be queued before the core is destroyed.
+ */
+static void an_activate_settling_while_the_destroy_ends_is_still_told_its_outcome(void) {
+    test_plugin *only[1];
+    uint32_t finished = 9;
+    uint32_t kind = 0;
+    begin_the_race(&racing);
+    racing.late.entry.activate = activate_and_wait;
+    register_test_plugin(&racing.late);
+    only[0] = &racing.late;
+    CHECK(activate_in_order(&racing.in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    arm_the_stop(&racing, 1);
+    CHECK(start_test_thread(&racing.runner, finish_the_late_activation, &racing));
+    pass_gate(&racing.reached);
+    CHECK(weivel_c_host_destroy(racing.in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 0);
+    CHECK(weivel_c_completion_finish(racing.early.deactivation, WEIVEL_C_ENTRY_DONE, NULL) == WEIVEL_C_STATUS_OK);
+    open_gate(&racing.free_to_go);
+    join_test_thread(&racing.runner);
+    CHECK(racing.answered == WEIVEL_C_STATUS_OK);
+    CHECK(outcomes_of(&racing.in.told, racing.late.handle, &kind) == 1 && kind == WEIVEL_C_OUTCOME_RELEASED);
+    CHECK(weivel_c_host_destroy(racing.in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
+    CHECK(sink_count(&racing.in) == 0);
+    CHECK(weivel_c_host_free(racing.in.host) == WEIVEL_C_STATUS_OK);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 2 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: host_races_test <core-library>\n");
@@ -355,6 +387,8 @@ int main(int argument_count, char **arguments) {
     an_activation_alongside_another_threads_dispatch_starts_its_plugin_once_before_it_returns();
     the_ending_of_a_quarantine_ends_no_entry_of_a_later_activation();
     a_call_whose_plugin_is_forgotten_on_its_way_in_answers_detached();
+    an_activate_settling_while_the_destroy_ends_is_still_told_its_outcome();
+
 
 
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);

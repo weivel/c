@@ -769,6 +769,7 @@ static void end_inside_one_callback(uint32_t kind, int frees) {
     inside.frees = frees;
     make_the_callback_run(kind, &with, &inside);
     CHECK(inside.calls >= 1);
+    CHECK(records_of(&in) == 1 && entries_of(&in) == (frees ? 2u : 3u));
     check_text(inside.id, "p:a", "the id a callback reads after ending its own entries");
     CHECK(dead.released_twice == 0 && dead.unknown == 0);
     end_world(&in);
