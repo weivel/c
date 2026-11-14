@@ -155,7 +155,13 @@ void weivel_c_host_join_opened(host_plugin *plugin);
 /** Under the host's lock: takes a plugin out of the opened list. */
 void weivel_c_host_leave_opened(host_plugin *plugin);
 
-/** Closes the library of a plugin's entry, if it has one still open, and tells the sink when that fails. */
+/**
+ * Closes the library of a plugin's entry, if it has one, and tells the sink when that fails.
+ *
+ * @implNote Only weivel_c_host_free calls it: code of the plugin's may run until every call into the layer has
+ * returned, a finish made from inside the library on the plugin's own thread, a background thread of its or a service
+ * object another plugin holds among it, and none of them is known to the host to have ended any earlier.
+ */
 void weivel_c_host_close_library(host_plugin *plugin);
 
 /**

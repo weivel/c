@@ -83,8 +83,8 @@ WEIVEL_C_API weivel_c_status weivel_c_host_create(const weivel_c_host_options *o
  * activate is in flight and one quarantined included, the last opened first, each calling its deactivate when its
  * activate was called; lets every event those releases queued and every step they left run, each forget included;
  * unloads every C library it loaded (see weivel/c/host/library.h), telling the sink of one whose binary does not
- * close and unloading the rest, and closes every plugin library still open; then disarms the timer and destroys the
- * core, whatever the steps before reported.
+ * close and unloading the rest; then disarms the timer and destroys the core, whatever the steps before reported. The
+ * libraries plugins' entries were read from stay open until weivel_c_host_free.
  *
  * It is a step deferred behind everything already queued, and its last two steps a further step behind its own
  * releases' steps. Where no dispatch runs, it has finished when it returns, unless a deactivate it waits for is still
@@ -102,8 +102,9 @@ WEIVEL_C_API weivel_c_status weivel_c_host_create(const weivel_c_host_options *o
 WEIVEL_C_API weivel_c_status weivel_c_host_destroy(weivel_c_host *host, uint32_t *finished);
 
 /**
- * Frees a destroyed host: its contexts, every plugin's record and completion, its table and the core's binary when
- * the host loaded it. A context or a completion a plugin still holds is gone afterwards.
+ * Frees a destroyed host: its contexts, every plugin's record and completion, the library every plugin's entry was
+ * read from (see weivel_c_entry_load), telling the sink of one that does not close, its table and the core's binary
+ * when the host loaded it. A context or a completion a plugin still holds is gone afterwards, and so is its code.
  *
  * @return WEIVEL_C_STATUS_OK, also for NULL; WEIVEL_C_STATUS_MISUSE, freeing nothing, while the destroy has not
  * finished, or while bytes one of its C libraries answered are still held.

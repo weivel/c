@@ -82,6 +82,9 @@ add_dependencies(host_library_test weivel_core_shared service_library echo_libra
 weivel_c_test(host_library_threads_test host/library_threads_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library>)
 add_dependencies(host_library_threads_test weivel_core_shared service_library)
+weivel_c_test(host_entry_closing_test host/entry_closing_test.c weivel_c_testing
+    $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:entry_library>)
+add_dependencies(host_entry_closing_test weivel_core_shared entry_library)
 
 add_test(NAME host_calls_nothing_of_the_standard
     COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}

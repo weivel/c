@@ -1,4 +1,5 @@
 #include "host.h"
+#include "libraries.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -152,7 +153,7 @@ weivel_c_status weivel_c_entry_load(const char *path, const char *symbol, weivel
     read.size = (uint32_t)covered_size(entry);
     status = provide(binary, symbol, &read, failure);
     if (status != WEIVEL_C_STATUS_OK) {
-        weivel_c_binary_close(binary);
+        weivel_c_host_close_library_binary(binary);
         return status;
     }
     read.size = entry->size;
@@ -180,7 +181,7 @@ weivel_c_status weivel_c_entry_unload(weivel_c_entry *entry) {
 void weivel_c_host_close_library(host_plugin *plugin) {
     void *library = plugin->entry.library;
     plugin->entry.library = NULL;
-    if (library != NULL && !weivel_c_binary_close(library)) {
+    if (library != NULL && !weivel_c_host_close_library_binary(library)) {
         weivel_c_host_report(plugin->host, WEIVEL_C_FAILURE_UNLOAD, WEIVEL_C_STATUS_NOT_UNLOADED,
                              "the library a plugin's entry was read from could not be closed");
     }

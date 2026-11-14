@@ -108,7 +108,9 @@ or after the host was destroyed is answered as a value, and a completion stays v
 
 `weivel_c_entry_load` reads an entry from a shared library at a path its caller gives, through a
 `weivel_c_entry_provider` the library exports under a symbol name its caller gives; the layer has no default name for
-either. The host closes that library once it has forgotten the plugin, or as it is destroyed.
+either. The host closes that library only when it is freed: code of the plugin's may still run after its release or
+the destroy has finished, a finish it makes from inside the library on its own thread among it, and only the free
+comes after every call into the layer has returned.
 
 ### The host
 
@@ -133,8 +135,8 @@ until the host is freed, and an entry.
   deactivate that answers pending holds the core's release and everything after it until it finishes, however long.
 - `weivel_c_host_destroy` releases every plugin the host opened and has not released, the last opened first, one in
   flight and one quarantined included; lets every event and step those releases left run; unloads every C library
-  it loaded, telling the sink of one whose binary does not close and unloading the rest; closes the plugins'
-  libraries; then disarms the timer and destroys the core. It too is a deferred step, and finishes where no dispatch
+  it loaded, telling the sink of one whose binary does not close and unloading the rest; then disarms the timer and
+  destroys the core. It too is a deferred step, and finishes where no dispatch
   runs before it returns, unless a deactivate it waits on is pending. From then on every call on the host answers
   `WEIVEL_C_STATUS_DESTROYED`, quietly; `weivel_c_host_free` follows once it has finished.
 

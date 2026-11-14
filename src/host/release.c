@@ -129,7 +129,6 @@ weivel_c_status weivel_c_host_finish_release(void *data, weivel_c_core *core) {
     weivel_c_host_report_call(host, weivel_c_core_forget_plugin(host->core, plugin->handle, NULL),
                               "the core did not forget a plugin the host released");
     weivel_c_context_detach(plugin->context);
-    weivel_c_host_close_library(plugin);
     weivel_c_mutex_lock(&host->lock);
     plugin->state = 0;
     host->releases_in_flight--;
