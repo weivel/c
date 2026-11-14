@@ -286,6 +286,7 @@ static void a_pending_deactivate_holds_the_destroy_for_as_long_as_it_takes(void)
     CHECK(activate_in_order(&in, only, 1, WEIVEL_EDGES_CAPABILITIES));
     CHECK(weivel_c_host_destroy(in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 0);
     CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_host_verify(in.host, plugin.handle, NULL) == WEIVEL_C_STATUS_DESTROYED);
     CHECK(weivel_c_host_destroy(in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 0);
     CHECK(weivel_c_completion_finish(plugin.deactivation, WEIVEL_C_ENTRY_FAILED, "it would not stop") ==
           WEIVEL_C_STATUS_OK);
