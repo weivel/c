@@ -1,0 +1,1 @@
+host_sneaking_test weivel_c_testing,weivel_c_conformance

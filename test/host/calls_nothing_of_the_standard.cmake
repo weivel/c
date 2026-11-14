@@ -2,18 +2,20 @@
 # [-DEVASION=<a source file>] [-DLINK_EVASION=<lines of links>]
 #
 # Fails when the host can reach the standard's binary. The host may use the standard's published declaration types,
-# but it never loads, links or calls the standard's binary, and only the `standard` module's own library,
-# weivel_c_standard, and that module's tests may. Two ways are read:
+# but it never loads, links or calls the standard's binary. Only two modules may: the `standard` module, whose own
+# library is weivel_c_standard, and the `conformance` module, weivel_c_conformance, which reads the kit's vectors with
+# the standard's JSON reader; each with its tests. Two ways are read:
 #
-# - Every source outside the `standard` module, under src/, include/ and test/, read as its tokens with comments taken
+# - Every source outside those two modules, under src/, include/ and test/, read as its tokens with comments taken
 #   out and adjacent string literals joined, as the compiler joins them. It fails on a name of a function the standard
 #   exports, every `WEIVEL_STANDARD_API` declaration of its headers, so a new one is covered unread; on a string that
 #   spells one, or holds the start of the standard's names (`weivel_standard_`, `weivel_json_`), from which a lookup by
 #   name could be assembled; and on a token pasted onto a name of weivel's, which spells a name no reading can see,
 #   but for the core's loader pasting the core's own names, which only_the_wrapper_calls.cmake answers for.
 # - The link graph the build wrote: each target of this repository and what it links, followed through every target
-#   the graph names. It fails when a target other than weivel_c_standard, its shared build and the module's tests,
-#   named `standard_`, reaches a target of the standard's (`weivel_standard...`) or weivel_c_standard.
+#   the graph names. It fails when a target other than those `allowed_to_link_the_standard` names, each by its exact
+#   name, reaches a target of the standard's (`weivel_standard...`), weivel_c_standard, or weivel_c_conformance, which
+#   links the standard. A name is never exempt for how it begins, so a host test named like a standard test is read.
 #
 # With EVASION the file given is read as one more source, and with LINK_EVASION its lines are read as more of the
 # graph: how each way around the check stays failing.
@@ -23,7 +25,11 @@ cmake_minimum_required(VERSION 3.15)
 include(${CMAKE_CURRENT_LIST_DIR}/../read_tokens.cmake)
 
 set(names_prefixes "weivel_standard_" "weivel_json_")
-set(allowed_to_link_the_standard weivel_c_standard weivel_c_standard_shared)
+set(allowed_to_link_the_standard weivel_c_standard weivel_c_standard_shared weivel_c_conformance
+    conformance_layer_vectors_test conformance_coverage_test)
+foreach(suite manifest services library discovery)
+    list(APPEND allowed_to_link_the_standard standard_${suite}_test standard_${suite}_test_shared)
+endforeach()
 set(host_targets weivel_c weivel_c_shared weivel_c_testing)
 
 # Sets `${result}` to every function the standard's headers export.
@@ -43,14 +49,14 @@ function(read_the_standards_functions result)
     set(${result} "${functions}" PARENT_SCOPE)
 endfunction()
 
-# Sets `${result}` to the sources read: every C source and header of src/, include/ and test/ but the `standard`
-# module's own and the fixtures that must fail this check.
+# Sets `${result}` to the sources read: every C source and header of src/, include/ and test/ but the `standard` and
+# `conformance` modules' own and the fixtures that must fail this check.
 function(find_the_sources result)
     file(GLOB_RECURSE found RELATIVE "${SOURCE_ROOT}"
         "${SOURCE_ROOT}/src/*.c" "${SOURCE_ROOT}/src/*.h" "${SOURCE_ROOT}/include/*.h"
         "${SOURCE_ROOT}/test/*.c" "${SOURCE_ROOT}/test/*.h")
     list(FILTER found EXCLUDE REGEX
-        "^(src/standard/|test/standard/|include/weivel/c/standard[./]|test/host/standard_evasions/)")
+        "^(src/(standard|conformance)/|test/(standard|conformance)/|include/weivel/c/(standard|conformance)[./]|test/host/standard_evasions/)")
     set(${result} "${found}" PARENT_SCOPE)
 endfunction()
 
@@ -132,7 +138,7 @@ function(reach_of target result)
         list(GET waiting 0 current)
         list(REMOVE_AT waiting 0)
         foreach(link IN LISTS links_of_${current})
-            if(link MATCHES "^weivel_(c_)?standard")
+            if(link MATCHES "^weivel_(c_)?standard" OR link STREQUAL "weivel_c_conformance")
                 set(reached "${link} through ${current}")
             elseif(NOT link IN_LIST seen)
                 list(APPEND seen "${link}")
@@ -152,10 +158,10 @@ function(check_the_links)
         endif()
     endforeach()
     foreach(target IN LISTS graph_targets)
-        if(NOT target IN_LIST allowed_to_link_the_standard AND NOT target MATCHES "^standard_")
+        if(NOT target IN_LIST allowed_to_link_the_standard)
             reach_of("${target}" reached)
             if(reached)
-                list(APPEND found "${target} links the standard's ${reached}; only weivel_c_standard and its tests may")
+                list(APPEND found "${target} links the standard's ${reached}; only the standard and conformance modules and their tests may")
             endif()
         endif()
     endforeach()

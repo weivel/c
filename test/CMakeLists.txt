@@ -96,6 +96,20 @@ foreach(variant "" _shared)
     add_dependencies(standard_discovery_test${variant} weivel_core_shared entry_library)
 endforeach()
 
+set(WEIVEL_C_KIT_DIRECTORY ${PROJECT_SOURCE_DIR}/siblings/conformance
+    CACHE PATH "The conformance kit checkout, at the commit .weivel/repo.json pins, whose layer vectors the suite reads")
+if(NOT EXISTS ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer/LAYER.md)
+    message(FATAL_ERROR "no vectors/layer under ${WEIVEL_C_KIT_DIRECTORY}: link or clone the conformance kit checkout "
+        "at siblings/conformance, or set WEIVEL_C_KIT_DIRECTORY to it")
+endif()
+weivel_c_test(conformance_layer_vectors_test "conformance/layer_vectors_test.c;conformance/layer_vectors.c"
+    weivel_c_conformance $<TARGET_FILE:weivel_core_shared> ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer)
+add_dependencies(conformance_layer_vectors_test weivel_core_shared)
+set(conformance_probe ${CMAKE_CURRENT_BINARY_DIR}/conformance_probe)
+file(MAKE_DIRECTORY ${conformance_probe}/nested/deeper)
+weivel_c_test(conformance_coverage_test "conformance/coverage_test.c;conformance/layer_vectors.c"
+    weivel_c_conformance ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer ${conformance_probe})
+
 add_test(NAME standard_holds_no_default
     COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/standard/holds_no_default.cmake)
@@ -188,6 +202,12 @@ weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_host_test_l
 weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_the_host_linking_through_another_target
     "weivel_c links the standard's weivel_standard through helping"
     -DLINK_EVASION=${standard_evasions}/host_links_through_another_target.txt)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_host_test_named_like_a_standard_test
+    "standard_sneaking_test links the standard's weivel_standard_shared through standard_sneaking_test"
+    -DLINK_EVASION=${standard_evasions}/standard_named_host_test_links_the_standard.txt)
+weivel_c_standard_check(host_calls_nothing_of_the_standard_refuses_a_host_test_linking_the_conformance_module
+    "host_sneaking_test links the standard's weivel_c_conformance through host_sneaking_test"
+    -DLINK_EVASION=${standard_evasions}/host_test_links_the_conformance_module.txt)
 
 add_test(NAME core_table_covers_the_core
     COMMAND ${CMAKE_COMMAND} -DCORE_HEADER=${WEIVEL_C_CORE_INCLUDE_DIRECTORY}/weivel/core.h
