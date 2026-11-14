@@ -225,6 +225,113 @@ static void the_latest_deadline_is_followed_last_and_by_one_thread_at_a_time(voi
     end_core(core);
 }
 
+/**
+ * A `follow` hook that waits at a gate its test opens, and what it was told, guarded by a mutex of its own so the
+ * test may look while a call sits inside it.
+ */
+typedef struct gated_follow {
+    test_mutex mutex;
+    int open;
+    followed told;
+} gated_follow;
+
+static followed told_through(gated_follow *self) {
+    followed told;
+    lock_test_mutex(&self->mutex);
+    told = self->told;
+    unlock_test_mutex(&self->mutex);
+    return told;
+}
+
+static int gate_is_open(gated_follow *self) {
+    int open;
+    lock_test_mutex(&self->mutex);
+    open = self->open;
+    unlock_test_mutex(&self->mutex);
+    return open;
+}
+
+static void open_the_gate(gated_follow *self) {
+    lock_test_mutex(&self->mutex);
+    self->open = 1;
+    unlock_test_mutex(&self->mutex);
+}
+
+static weivel_c_status follow_through_the_gate(void *data, int64_t at, uint32_t set) {
+    gated_follow *self = data;
+    lock_test_mutex(&self->mutex);
+    self->told.calls++;
+    self->told.inside = 1;
+    self->told.last_at = at;
+    self->told.last_set = set;
+    unlock_test_mutex(&self->mutex);
+    while (!gate_is_open(self)) {
+        let_other_threads_run();
+    }
+    lock_test_mutex(&self->mutex);
+    self->told.inside = 0;
+    unlock_test_mutex(&self->mutex);
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void wait_until_follow_is_inside(gated_follow *self) {
+    while (!told_through(self).inside) {
+        let_other_threads_run();
+    }
+}
+
+static void begin_gate(gated_follow *self, weivel_c_core *core) {
+    weivel_c_deadline_hooks hooks = WEIVEL_INIT(weivel_c_deadline_hooks);
+    memset(self, 0, sizeof *self);
+    start_test_mutex(&self->mutex);
+    hooks.follow = follow_through_the_gate;
+    hooks.data = self;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+}
+
+typedef struct timed_wanter {
+    weivel_c_core *core;
+    const char *id;
+    int64_t timeout;
+    weivel_c_status answered;
+} timed_wanter;
+
+static void want_within_a_timeout(void *argument) {
+    timed_wanter *self = argument;
+    weivel_want_options options = WEIVEL_INIT(weivel_want_options);
+    weivel_handle want = 0;
+    options.timed = WEIVEL_CHOICE_YES;
+    options.timeout_millis = self->timeout;
+    self->answered = weivel_c_core_want_service(self->core, WEIVEL_HOST, self->id, &options, &want, NULL);
+}
+
+/**
+ * @implNote The newer want is made on the test's own thread and has returned before the gate opens, and that thread
+ * calls nothing more until the other is joined: so the second `follow` can only be the first thread's.
+ */
+static void a_deadline_drained_while_another_thread_follows_is_followed_by_that_thread(void) {
+    gated_follow gate;
+    test_thread thread;
+    followed told;
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    timed_wanter first = {core, "first", 1000, WEIVEL_C_STATUS_FAILED};
+    timed_wanter newer = {core, "newer", 500, WEIVEL_C_STATUS_FAILED};
+    begin_gate(&gate, core);
+    CHECK(start_test_thread(&thread, want_within_a_timeout, &first));
+    wait_until_follow_is_inside(&gate);
+    want_within_a_timeout(&newer);
+    told = told_through(&gate);
+    CHECK(newer.answered == WEIVEL_C_STATUS_OK);
+    CHECK(told.calls == 1 && told.inside == 1 && told.last_at == 1000);
+    open_the_gate(&gate);
+    join_test_thread(&thread);
+    told = told_through(&gate);
+    CHECK(first.answered == WEIVEL_C_STATUS_OK);
+    CHECK(told.calls == 2 && told.inside == 0);
+    CHECK(told.last_set == 1 && told.last_at == 500);
+    end_core(core);
+}
+
 typedef struct caller_until_destroyed {
     weivel_c_core *core;
     char id[16];
@@ -342,6 +449,7 @@ int main(int argument_count, char **arguments) {
     }
     calls_from_several_threads_are_dispatched_once_in_drained_order_by_one_thread();
     the_latest_deadline_is_followed_last_and_by_one_thread_at_a_time();
+    a_deadline_drained_while_another_thread_follows_is_followed_by_that_thread();
     a_destroy_from_another_thread_ends_the_calls_of_the_rest();
     listeners_come_and_go_on_another_thread_while_events_are_dispatched();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
