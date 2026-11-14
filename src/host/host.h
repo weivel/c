@@ -79,7 +79,8 @@ struct host_plugin {
     host_plugin *opened_previous;
     host_plugin *opened_next;
     weivel_handle handle;
-    const weivel_manifest *manifest;
+    /** The host's own copy of the manifest the plugin was registered with, freed with the record. */
+    weivel_manifest *manifest;
     weivel_c_entry entry;
     /** Made when the plugin is first opened, detached once it is forgotten, freed with the host. */
     weivel_c_context *context;
@@ -146,6 +147,12 @@ struct weivel_c_host {
  * may have been made yet.
  */
 void weivel_c_host_replace_allocator(weivel_c_host *host, const weivel_c_allocator *allocator);
+
+/**
+ * Copies a manifest the caller registers into one block of the host's own, every text and array of it included, so
+ * the caller may free or change its own once the registration returns. NULL when memory ran out. Freed with free().
+ */
+weivel_manifest *weivel_c_host_copy_manifest(const weivel_manifest *given);
 
 /** 1 while nothing has begun to destroy the host. */
 int weivel_c_host_is_running(weivel_c_host *host);
