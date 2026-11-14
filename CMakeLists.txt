@@ -31,7 +31,8 @@ set(WEIVEL_C_SOURCES
     src/handles/table.c
     src/timer/timer.c
     src/context/contexts.c src/context/records.c src/context/services.c src/context/capabilities.c
-    src/context/capacity.c src/context/dispatch.c)
+    src/context/capacity.c src/context/dispatch.c
+    src/host/entry.c src/host/plugins.c src/host/activation.c src/host/release.c src/host/lifetime.c)
 if(WIN32)
     list(APPEND WEIVEL_C_SOURCES src/core/binary_windows.c src/core/mutex_windows.c)
 else()

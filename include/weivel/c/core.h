@@ -316,7 +316,17 @@ typedef enum weivel_c_failure_kind {
      * The core did not take the time the wrapper handed it for a deadline that fell due. The call the wrapper was
      * asked for is still made, the deadline stays due, and the time is handed over again before the next call.
      */
-    WEIVEL_C_FAILURE_DUE_ADVANCE = 13
+    WEIVEL_C_FAILURE_DUE_ADVANCE = 13,
+    /** A plugin's deactivate answered a failure, or an answer that is none; its release went on. */
+    WEIVEL_C_FAILURE_DEACTIVATE = 14,
+    /** A plugin's open failed for a reason other than the core's refusal: a defect of the layer. */
+    WEIVEL_C_FAILURE_OPEN = 15,
+    /** A call the host made to carry out a verification, a quarantine, a release or a forget did not succeed. */
+    WEIVEL_C_FAILURE_HOST_CALL = 16,
+    /** A plugin's library could not be closed. */
+    WEIVEL_C_FAILURE_UNLOAD = 17,
+    /** An activation's outcome listener answered a status other than WEIVEL_C_STATUS_OK. */
+    WEIVEL_C_FAILURE_OUTCOME_LISTENER = 18
 } weivel_c_failure_kind;
 
 /** One failure, as the error sink is told it. Everything in it lives for the length of the sink's call. */

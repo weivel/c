@@ -16,14 +16,15 @@ the layer runs against whichever core binary its caller loads.
 
 `src/` holds the modules every language implementation of weivel holds, as the core's `MODULES` list names them:
 `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance` and `benchmarks`. A module's public header is
-`include/weivel/c/<module>.h`, `include/weivel/c.h` includes them all, and its tests are in `test/<module>/`. Every
+`include/weivel/c/<module>.h`, with any further header of the module under `include/weivel/c/<module>/`,
+`include/weivel/c.h` includes them all, and its tests are in `test/<module>/`. Every
 public name begins with `weivel_c_`, every public struct begins with its `size`, and every call answers a
 `weivel_c_status`.
 
 ## What is built
 
-The `core`, `handles`, `timer` and `context` modules. The other four modules hold only a header saying what they
-are for.
+The `core`, `handles`, `timer`, `context` and `host` modules, the host without C libraries as host services yet. The
+other three modules hold only a header saying what they are for.
 
 `weivel_c_core_load` opens the core's shared binary with the platform's loader and fills one table,
 `weivel_c_core_table`, with every function the core exports; a path that is no library and a library that lacks a
@@ -92,7 +93,52 @@ A callback that answers a failure goes to the error sink and silences nothing, a
 the layer's, so each may call back into its context. A context decides nothing and keeps no answer of the core's.
 Once a plugin is released or quarantined its callbacks still hear what that call queued; its entries end when the
 host calls `weivel_c_context_end_entries`, from a step it defers behind those events, and a call the plugin still
-makes is answered as the core answers a late call.
+makes is answered as the core answers a late call. Once the core has forgotten the plugin, the host detaches its
+context with `weivel_c_context_detach`: the plugin's handle leaves the table, so the core may issue it again, and a
+call through the context is refused without reaching the core, since that handle may by then name another plugin.
+
+### A plugin's entry in C
+
+A plugin written in C hands its host one `weivel_c_entry` (`include/weivel/c/host/entry.h`): a size-prefixed struct
+holding `activate`, an optional `deactivate` and the plugin's own `data`. Each is a `weivel_c_entry_function`, called
+with the plugin's context and a `weivel_c_completion`, and answers at once `WEIVEL_C_ENTRY_DONE`,
+`WEIVEL_C_ENTRY_FAILED` with an English reason, or `WEIVEL_C_ENTRY_PENDING`. A pending one finishes later by calling
+`weivel_c_completion_finish` exactly once, from any thread. A finish that comes twice, after the plugin was released,
+or after the host was destroyed is answered as a value, and a completion stays valid until the host is freed.
+
+`weivel_c_entry_load` reads an entry from a shared library at a path its caller gives, through a
+`weivel_c_entry_provider` the library exports under a symbol name its caller gives; the layer has no default name for
+either. The host closes that library once it has forgotten the plugin, or as it is destroyed.
+
+### The host
+
+`weivel_c_host_create` makes a host from a loaded core table or the path of the core's binary, the core's options,
+the caller's scheduler, an error sink and a log, and builds the wrapper's core, the handles table, the timer and the
+contexts. It never links or loads the standard: `weivel_c_host_register` takes a manifest value, which it borrows
+until the host is freed, and an entry.
+
+- `weivel_c_host_register_service` registers a service of the host's own under `WEIVEL_HOST`, offered to every plan
+  as provided by the host and answered to a plugin as the very pointer given.
+- `weivel_c_host_activate` asks the core for the plan with the edge source its caller chooses, answers the plan at
+  once, and starts each plugin of the plan's order in that order inside a dispatch: it opens the plugin with its
+  context's token as payload and calls its activate, never waiting for one before starting the next. Each started
+  plugin's outcome reaches the caller's listener once, from the dispatch: `active`, `quarantined` (its activate
+  failed, with a reason and a fix, or the core refused its verification, quarantined in the same step),
+  `refused` (the core refused the open), `released` (released while its activate was in flight, told as that release
+  begins) or `failed` (an open that failed for no refusal, told to the sink, the plugin released and forgotten at
+  once when the core held it open).
+- `weivel_c_host_release` calls the deactivate while the plugin is whole, releases it in the core, lets that
+  release's events reach the plugin, then ends its entries, forgets it and detaches its context, those last three as
+  one step deferred behind the events. Where no dispatch runs, the release has finished when it returns. A
+  deactivate that answers pending holds the core's release and everything after it until it finishes, however long.
+- `weivel_c_host_destroy` releases every plugin the host opened and has not released, the last opened first, one in
+  flight and one quarantined included; lets every event and step those releases left run; closes the plugins'
+  libraries; then disarms the timer and destroys the core. It too is a deferred step, and finishes where no dispatch
+  runs before it returns, unless a deactivate it waits on is pending. From then on every call on the host answers
+  `WEIVEL_C_STATUS_DESTROYED`, quietly; `weivel_c_host_free` follows once it has finished.
+
+No entry function, listener, log line or sink report runs under a lock of the layer's: the host's own lock guards its
+tables and is let go before it calls anything.
 
 ## Building
 
