@@ -46,7 +46,8 @@ SERVICE_LIBRARY_EXPORT int32_t service_own_address(const uint8_t *input, size_t 
     int32_t status = answer_copy(&input, sizeof input, 0, output, output_length);
     (void)input_length;
     if (*output != NULL) {
-        memcpy(*output, output, sizeof *output);
+        const void *address = *output;
+        memcpy(*output, &address, sizeof address);
     }
     return status;
 }

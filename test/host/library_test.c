@@ -142,7 +142,8 @@ static void a_status_other_than_zero_answers_the_status_and_its_body_read_as_utf
     const weivel_c_library_service *service;
     const uint8_t why[] = {3, 'w', 'h', 'y'}, smile[] = {9, 0xF0, 0x9F, 0x98, 0x80}, empty[] = {4};
     const uint8_t bytes[] = {5, 0xFF, 0xFE}, overlong[] = {6, 0xC0, 0x80}, surrogate[] = {7, 0xED, 0xA0, 0x80};
-    const uint8_t cut[] = {8, 'a', 0xE2, 0x82}, result[] = {0, 0xFF};
+    const uint8_t cut[] = {8, 'a', 0xE2, 0x82}, result[] = {0, 0xFF}, long_three[] = {10, 0xE0, 0x9F, 0xBF};
+    const uint8_t long_four[] = {11, 0xF0, 0x8F, 0xBF, 0xBF}, beyond[] = {12, 0xF4, 0x90, 0x80, 0x80};
     begin_host_world(&in);
     declare_probe(&probe, "probe");
     load_declared(&in, library_path_of_probe, &probe);
@@ -154,6 +155,9 @@ static void a_status_other_than_zero_answers_the_status_and_its_body_read_as_utf
     answers(service, overlong, sizeof overlong, WEIVEL_C_STATUS_FAILED, 6, 0);
     answers(service, surrogate, sizeof surrogate, WEIVEL_C_STATUS_FAILED, 7, 0);
     answers(service, cut, sizeof cut, WEIVEL_C_STATUS_FAILED, 8, 0);
+    answers(service, long_three, sizeof long_three, WEIVEL_C_STATUS_FAILED, 10, 0);
+    answers(service, long_four, sizeof long_four, WEIVEL_C_STATUS_FAILED, 11, 0);
+    answers(service, beyond, sizeof beyond, WEIVEL_C_STATUS_FAILED, 12, 0);
     answers(service, result, sizeof result, WEIVEL_C_STATUS_OK, 0, 0);
     CHECK(sink_count(&in) == 0);
     end_host_world(&in);
