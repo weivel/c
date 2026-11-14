@@ -184,6 +184,54 @@ static void a_registration_that_races_the_destroy_answers_destroyed_and_keeps_no
     finish_the_destroy(&racing);
 }
 
+static void stop_at_the_scheduling(void *more) {
+    race *self = more;
+    int stopping;
+    lock_test_mutex(&self->clock_mutex);
+    stopping = self->readings_left > 0 && --self->readings_left == 0;
+    unlock_test_mutex(&self->clock_mutex);
+    if (stopping) {
+        open_gate(&self->reached);
+        pass_gate(&self->free_to_go);
+    }
+}
+
+static void want_with_a_deadline(void *argument) {
+    race *self = argument;
+    weivel_c_want_options options = WEIVEL_INIT(weivel_c_want_options);
+    weivel_c_want_callback callback = {trace_settlement, &self->late};
+    options.timed = WEIVEL_CHOICE_YES;
+    options.timeout_millis = 1000;
+    self->answered = weivel_c_context_want_service(self->late.context, "never:there", &options, &callback, NULL, NULL);
+}
+
+/**
+ * Holds a thread inside the wrapper's `follow` hook, where the timer schedules its task, while the destroy finishes on
+ * another: a free made then would free the timer and the contexts under it.
+ */
+static void a_free_while_another_thread_is_still_inside_the_layer_frees_nothing(void) {
+    test_plugin *only[1];
+    uint32_t finished = 0;
+    begin_the_race(&racing);
+    racing.in.clock_react = NULL;
+    racing.in.schedule_react = stop_at_the_scheduling;
+    racing.in.schedule_more = &racing;
+    wants_service(&racing.late, "never:there");
+    register_test_plugin(&racing.late);
+    only[0] = &racing.late;
+    CHECK(activate_in_order(&racing.in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    arm_the_stop(&racing, 1);
+    CHECK(start_test_thread(&racing.runner, want_with_a_deadline, &racing));
+    pass_gate(&racing.reached);
+    CHECK(weivel_c_host_destroy(racing.in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 0);
+    CHECK(weivel_c_completion_finish(racing.early.deactivation, WEIVEL_C_ENTRY_DONE, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_host_destroy(racing.in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
+    CHECK(weivel_c_host_free(racing.in.host) == WEIVEL_C_STATUS_MISUSE);
+    open_gate(&racing.free_to_go);
+    join_test_thread(&racing.runner);
+    CHECK(weivel_c_host_free(racing.in.host) == WEIVEL_C_STATUS_OK);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 2 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: host_races_test <core-library>\n");
@@ -191,6 +239,8 @@ int main(int argument_count, char **arguments) {
     }
     an_activation_whose_open_races_the_destroys_first_step_releases_its_plugin_without_its_activate();
     a_registration_that_races_the_destroy_answers_destroyed_and_keeps_nothing();
+    a_free_while_another_thread_is_still_inside_the_layer_frees_nothing();
+
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host races");
 }

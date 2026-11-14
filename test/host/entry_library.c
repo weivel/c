@@ -4,6 +4,8 @@
  * symbol answers that it cannot provide one.
  */
 
+#include <stddef.h>
+
 #include "entry_library.h"
 
 #if defined(_WIN32)

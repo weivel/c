@@ -95,7 +95,9 @@ WEIVEL_C_API weivel_c_status weivel_c_host_create(const weivel_c_host_options *o
  * the log or the sink; nothing the destroy sets off reaches the caller but the outcome `released` of an activation in
  * flight, and what a deactivate's failure tells the sink.
  *
- * @param finished receives 1 once every step has run, so weivel_c_host_free may follow, else 0; may be NULL.
+ * @param finished receives 1 once every step has run, else 0; may be NULL. The thread that ran the last step may still
+ * be on its way out of the layer when another reads 1, and weivel_c_host_free answers WEIVEL_C_STATUS_MISUSE, freeing
+ * nothing, until it is out.
  * @return WEIVEL_C_STATUS_OK, for a second destroy too, which answers as the first did and `finished` as things
  * stand; WEIVEL_C_STATUS_MISUSE for NULL.
  */
@@ -107,7 +109,9 @@ WEIVEL_C_API weivel_c_status weivel_c_host_destroy(weivel_c_host *host, uint32_t
  * when the host loaded it. A context or a completion a plugin still holds is gone afterwards, and so is its code.
  *
  * @return WEIVEL_C_STATUS_OK, also for NULL; WEIVEL_C_STATUS_MISUSE, freeing nothing, while the destroy has not
- * finished, or while bytes one of its C libraries answered are still held.
+ * finished, while bytes one of its C libraries answered are still held, or while a thread is still on its way out of
+ * the layer, dispatching or telling the timer of a deadline, the thread that finished the destroy among them.
+
  * Threading: no call on the host, on any of its contexts or completions, may be in flight or follow.
  */
 WEIVEL_C_API weivel_c_status weivel_c_host_free(weivel_c_host *host);

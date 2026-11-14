@@ -139,12 +139,6 @@ static inline weivel_c_status count_log(void *data, const weivel_c_log_record *r
     return WEIVEL_C_STATUS_OK;
 }
 
-static inline void *host_world_schedule(void *data, int64_t at, weivel_c_task_callback callback, void *callback_data) {
-    (void)at;
-    (void)callback;
-    (void)callback_data;
-    return data;
-}
 
 static inline int host_world_cancel(void *data, void *task) {
     (void)data;
@@ -166,7 +160,21 @@ typedef struct host_world {
     /** What each reading of the clock does first; the wrapper reads it outside every lock. */
     void (*clock_react)(void *more);
     void *clock_more;
+    /** What each scheduling of the timer's task does first, from inside the wrapper's `follow` hook. */
+    void (*schedule_react)(void *more);
+    void *schedule_more;
 } host_world;
+
+static inline void *host_world_schedule(void *data, int64_t at, weivel_c_task_callback callback, void *callback_data) {
+    host_world *self = data;
+    (void)at;
+    (void)callback;
+    (void)callback_data;
+    if (self->schedule_react != NULL) {
+        self->schedule_react(self->schedule_more);
+    }
+    return data;
+}
 
 /** A clock the test moves, and a scheduler that keeps a task and never runs one. */
 static inline int64_t host_world_now(void *data) {
