@@ -9,12 +9,13 @@
 
 #define BUDGET_LINE 256
 #define BUDGET_FIELD 64
-#define BUDGET_SCALARS 4
+#define BUDGET_SCALARS 2
+#define BUDGET_PLATFORM_KEYS 4
 
-static const char *const gate_names[BENCHMARK_GATES] = {"control-call", "library-call"};
+static const char *const platform_key_names[BUDGET_PLATFORM_KEYS] = {"control-call", "library-call", "quiet-noise",
+                                                                     "worst-noise"};
 static const char *const platform_names[BENCHMARK_PLATFORMS] = {"linux", "windows", "macos"};
-static const char *const scalar_names[BUDGET_SCALARS] = {"ratio-margin", "quiet-noise", "worst-noise",
-                                                         "noise-margin"};
+static const char *const scalar_names[BUDGET_SCALARS] = {"ratio-margin", "noise-margin"};
 
 /** A line's fields, split at single spaces as the format separates them. */
 typedef struct budget_fields {
@@ -45,18 +46,24 @@ static void split_fields(char *line, budget_fields *fields) {
 }
 
 static double *scalar_of(benchmark_budget *budget, int scalar) {
-    double *scalars[BUDGET_SCALARS] = {&budget->ratio_margin, &budget->quiet_noise, &budget->worst_noise,
-                                       &budget->noise_margin};
+    double *scalars[BUDGET_SCALARS] = {&budget->ratio_margin, &budget->noise_margin};
     return scalars[scalar];
+}
+
+static double *platform_row_of(benchmark_budget *budget, int key) {
+    double *rows[BUDGET_PLATFORM_KEYS] = {budget->highest[BENCHMARK_CONTROL_CALL],
+                                          budget->highest[BENCHMARK_LIBRARY_CALL], budget->quiet_noise,
+                                          budget->worst_noise};
+    return rows[key];
 }
 
 /** Where a line's number goes, or NULL for a line the format does not define. */
 static double *place_of(benchmark_budget *budget, const budget_fields *fields) {
-    int gate = index_of(gate_names, BENCHMARK_GATES, fields->field[0]);
+    int key = index_of(platform_key_names, BUDGET_PLATFORM_KEYS, fields->field[0]);
     int platform = fields->count == 3 ? index_of(platform_names, BENCHMARK_PLATFORMS, fields->field[1]) : -1;
     int scalar = fields->count == 2 ? index_of(scalar_names, BUDGET_SCALARS, fields->field[0]) : -1;
-    if (gate >= 0 && platform >= 0) {
-        return &budget->highest[gate][platform];
+    if (key >= 0 && platform >= 0) {
+        return &platform_row_of(budget, key)[platform];
     }
     return scalar >= 0 ? scalar_of(budget, scalar) : NULL;
 }
@@ -71,7 +78,7 @@ static int read_line(char *line, benchmark_budget *budget, char *problem, size_t
     }
     place = place_of(budget, &fields);
     if (place == NULL) {
-        snprintf(problem, problem_size, "'%s' is neither '<gate> <platform> <number>' nor '<bound> <number>'", line);
+        snprintf(problem, problem_size, "'%s' is neither '<gate or noise> <platform> <number>' nor '<margin> <number>'", line);
         return 0;
     }
     if (!read_positive(fields.field[fields.count - 1], &number)) {
@@ -145,22 +152,41 @@ const char *benchmark_platform(void) {
 #endif
 }
 
+static int platform_index(const char *platform) {
+    return platform == NULL ? -1 : index_of(platform_names, BENCHMARK_PLATFORMS, platform);
+}
+
 double benchmark_ratio_bound(const benchmark_budget *budget, benchmark_gate gate, const char *platform) {
-    int at = platform == NULL ? -1 : index_of(platform_names, BENCHMARK_PLATFORMS, platform);
+    int at = platform_index(platform);
     return at < 0 ? 0 : budget->highest[gate][at] * budget->ratio_margin;
+}
+
+benchmark_noise_bounds benchmark_noise_bounds_of(const benchmark_budget *budget, const char *platform) {
+    benchmark_noise_bounds bounds = {0, 0};
+    int at = platform_index(platform);
+    if (at >= 0) {
+        bounds.quiet = budget->quiet_noise[at];
+        bounds.worst = budget->worst_noise[at];
+    }
+    return bounds;
+}
+
+int benchmark_noise_bounded(benchmark_noise_bounds bounds) {
+    return bounds.quiet > 0 && bounds.worst > 0;
 }
 
 double benchmark_deviation(double ratio) {
     return (ratio > 1 / ratio ? ratio : 1 / ratio) - 1;
 }
 
-int benchmark_too_noisy_to_judge(const benchmark_budget *budget, double noise_ratio) {
-    return benchmark_deviation(noise_ratio) > budget->worst_noise;
+int benchmark_too_noisy_to_judge(benchmark_noise_bounds bounds, double noise_ratio) {
+    return benchmark_deviation(noise_ratio) > bounds.worst;
 }
 
-double benchmark_same_language_bound(const benchmark_budget *budget, double noise_ratio) {
+double benchmark_same_language_bound(const benchmark_budget *budget, benchmark_noise_bounds bounds,
+                                     double noise_ratio) {
     double noise = benchmark_deviation(noise_ratio);
-    return 1 + budget->noise_margin * (noise > budget->quiet_noise ? noise : budget->quiet_noise);
+    return 1 + budget->noise_margin * (noise > bounds.quiet ? noise : bounds.quiet);
 }
 
 int benchmark_within(double ratio, double bound) {

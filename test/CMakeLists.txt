@@ -373,6 +373,9 @@ weivel_c_benchmark(control_ratio_fails_on_a_platform_the_budget_gives_no_line 1 
     control-ratio ${benchmark_core} ${benchmark_fixtures}/no_platform_line.txt brief)
 weivel_c_benchmark(library_ratio_fails_on_a_platform_the_budget_gives_no_line 1 "gives no line for library-call on"
     library-ratio ${benchmark_core} ${benchmark_library} ${benchmark_fixtures}/no_platform_line.txt brief)
+weivel_c_benchmark(same_language_fails_on_a_platform_the_budget_gives_no_noise_line 1
+    "gives no line for quiet-noise or worst-noise on"
+    same-language ${benchmark_core} ${benchmark_fixtures}/no_platform_line.txt brief)
 
 set(WEIVEL_C_BENCHMARK_RELEASE_ONLY -DRELEASE_ONLY=ON)
 weivel_c_benchmark(measure_prints_every_measurement 0 "weivel-c-benchmark same-language platform=[a-z]+ repetition=10 "
