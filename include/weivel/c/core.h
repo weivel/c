@@ -85,7 +85,10 @@ typedef enum weivel_c_status {
     WEIVEL_C_STATUS_UNLOADED = 11,
     /** The context a call was made through was detached from its plugin, which the core has forgotten; the core was
      * not called and no refusal is given. */
-    WEIVEL_C_STATUS_DETACHED = 12
+    WEIVEL_C_STATUS_DETACHED = 12,
+    /** The standard declined a document the `standard` module handed it, as the standard's refusal or validation the
+     * caller handed in says; the core was not called. Only that module answers it. */
+    WEIVEL_C_STATUS_REFUSED_BY_THE_STANDARD = 13
 } weivel_c_status;
 
 

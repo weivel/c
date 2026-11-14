@@ -3,7 +3,13 @@ if(NOT EXISTS ${PROJECT_SOURCE_DIR}/siblings/core/CMakeLists.txt)
         "there (for example a directory junction or symlink named siblings/core pointing at the core repository)")
 endif()
 
-add_subdirectory(${PROJECT_SOURCE_DIR}/siblings/core ${PROJECT_BINARY_DIR}/core EXCLUDE_FROM_ALL)
+if(NOT TARGET weivel_core)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/siblings/core ${PROJECT_BINARY_DIR}/core EXCLUDE_FROM_ALL)
+endif()
+if(NOT TARGET weivel_c_standard)
+    message(FATAL_ERROR "the standard module is not built, so its tests cannot run: link or clone the standard "
+        "checkout at siblings/standard")
+endif()
 
 add_library(partial_core SHARED core/partial_core.c)
 weivel_c_strict_warnings(partial_core)
@@ -74,6 +80,39 @@ foreach(variant "" _shared)
         $<TARGET_FILE:weivel_core_shared> ${CMAKE_CURRENT_BINARY_DIR}/core_sink_test${variant}.standard_error)
     add_dependencies(core_sink_test${variant} weivel_core_shared)
 endforeach()
+
+foreach(variant "" _shared)
+    foreach(suite manifest services)
+        weivel_c_test(standard_${suite}_test${variant} standard/${suite}_test.c weivel_c_standard${variant}
+            $<TARGET_FILE:weivel_core_shared>)
+        add_dependencies(standard_${suite}_test${variant} weivel_core_shared)
+    endforeach()
+    weivel_c_test(standard_library_test${variant} standard/library_test.c weivel_c_standard${variant}
+        $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library>)
+    add_dependencies(standard_library_test${variant} weivel_core_shared service_library)
+    weivel_c_test(standard_discovery_test${variant} standard/discovery_test.c weivel_c_standard${variant}
+        $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:entry_library>
+        ${CMAKE_CURRENT_BINARY_DIR}/standard_discovery_test${variant}.plugins)
+    add_dependencies(standard_discovery_test${variant} weivel_core_shared entry_library)
+endforeach()
+
+add_test(NAME standard_holds_no_default
+    COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/standard/holds_no_default.cmake)
+
+function(weivel_c_default_evasion name expected)
+    add_test(NAME standard_holds_no_default_refuses_${name}
+        COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
+            -DEVASION=${CMAKE_CURRENT_SOURCE_DIR}/standard/default_evasions/${name}.c
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/standard/holds_no_default.cmake)
+    set_tests_properties(standard_holds_no_default_refuses_${name} PROPERTIES
+        PASS_REGULAR_EXPRESSION "${expected}"
+        FAIL_REGULAR_EXPRESSION "holds no default of its own")
+endfunction()
+
+weivel_c_default_evasion(file_name "file_name.c holds a string literal")
+weivel_c_default_evasion(service_id_copied "names WEIVEL_STANDARD_SERVICE_CONFIG")
+weivel_c_default_evasion(environment_read "names getenv")
 
 weivel_c_test(host_library_test host/library_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library> $<TARGET_FILE:echo_library>

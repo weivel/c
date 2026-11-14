@@ -17,14 +17,15 @@ the layer runs against whichever core binary its caller loads.
 `src/` holds the modules every language implementation of weivel holds, as the core's `MODULES` list names them:
 `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance` and `benchmarks`. A module's public header is
 `include/weivel/c/<module>.h`, with any further header of the module under `include/weivel/c/<module>/`,
-`include/weivel/c.h` includes them all, and its tests are in `test/<module>/`. Every
+`include/weivel/c.h` includes them all but the optional `standard` module's, which is a library of its own, and its
+tests are in `test/<module>/`. Every
 public name begins with `weivel_c_`, every public struct begins with its `size`, and every call answers a
 `weivel_c_status`.
 
 ## What is built
 
-The `core`, `handles`, `timer`, `context` and `host` modules. The other three modules hold only a header saying what
-they are for.
+The `core`, `handles`, `timer`, `context`, `host` and `standard` modules. The other two modules hold only a header
+saying what they are for.
 
 `weivel_c_core_load` opens the core's shared binary with the platform's loader and fills one table,
 `weivel_c_core_table`, with every function the core exports; a path that is no library and a library that lacks a
@@ -193,13 +194,43 @@ on a name of a function the standard exports, a string spelling one or the start
 pasted onto a name of weivel's; and it reads the link graph the build writes and fails when any target but the
 `standard` module's library and tests reaches the standard.
 
+### The `standard` module, optional and its own library
+
+`include/weivel/c/standard.h` is C's access to the standard's defaults, each feeding the host. It is optional and a
+library of its own, `weivel_c_standard` (`weivel_c_standard_shared` for the shared build), the one target that links
+the standard; the host never links, loads or requires it, and every host test links without it. The standard is a C
+library, so C reaches it by calling its functions: where nothing needs translating the caller calls the standard
+directly, `weivel_standard_discover` to lay out and discover plugins on disk, `weivel_standard_read_library`, whose
+declaration is exactly what `weivel_c_host_load_library` takes with the path the caller gives, and the identity
+parsing and ordering. The module adds what joins the standard's answers to the host:
+
+- `weivel_c_standard_register_manifest` validates and reads a JSON manifest with the standard and registers it with
+  an entry and the identity the caller supplies. The standard's manifest is the standard's, freed by its own release;
+  the module releases it before returning, since the host copies what it registers. A document the standard declines
+  answers `WEIVEL_C_STATUS_REFUSED_BY_THE_STANDARD`, the validation saying why, with nothing registered.
+- `weivel_c_standard_discovered_manifest` fills a manifest value with a discovered plugin's manifest and the identity
+  its identity file gives; `weivel_c_standard_register_discovered` registers it with the entry read from the file its
+  manifest names. The layout names a file and no symbol, so the entry's symbol is always the caller's: the module has
+  none of its own. An entry the standard did not find present, or a manifest naming none, opens nothing.
+- `weivel_c_standard_offer_config`, `_offer_secrets` and `_offer_paths` register the caller's own definition of each
+  service as a host service under the id the standard's binary answers, so a plugin resolving it through its context
+  holds that very object.
+- `weivel_c_standard_status` translates a status of the standard's into the layer's.
+
+The module holds no default of its own: a test reads its sources and header and fails on any string literal, on a
+service id or placeholder macro of the standard's that would compile one of its values into this binary, and on a
+call that reads the environment or opens a file.
+
 ## Building
 
 C11 and CMake, with no other dependency. The static library is the target `weivel_c` and the shared one
 `weivel_c_shared`. The layer is compiled against the core's `weivel/core.h`, found under
 `siblings/core/include` unless `WEIVEL_C_CORE_INCLUDE_DIRECTORY` says otherwise, and the standard's
 `weivel/library.h` for its declaration types alone, found under `siblings/standard/include` unless
-`WEIVEL_C_STANDARD_INCLUDE_DIRECTORY` says otherwise; it links neither.
+`WEIVEL_C_STANDARD_INCLUDE_DIRECTORY` says otherwise; it links neither. When the standard's checkout is under
+`siblings/standard`, or `WEIVEL_C_STANDARD_SOURCE_DIRECTORY` names one, the optional `weivel_c_standard` and
+`weivel_c_standard_shared` are built from it as well, linking the standard's `weivel_standard` and
+`weivel_standard_shared`; the tests need it.
 
 `.weivel/repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks them out there;
 locally, link or clone each checkout into `siblings/`. The tests build the pinned core as a shared library and load

@@ -66,6 +66,49 @@ set_target_properties(weivel_c_shared PROPERTIES
     C_VISIBILITY_PRESET hidden
     ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/shared)
 
+set(WEIVEL_C_CORE_SOURCE_DIRECTORY ${PROJECT_SOURCE_DIR}/siblings/core
+    CACHE PATH "The core checkout whose headers the standard is built with, when no weivel_core target exists yet")
+set(WEIVEL_C_STANDARD_SOURCE_DIRECTORY ${PROJECT_SOURCE_DIR}/siblings/standard
+    CACHE PATH "The standard checkout the optional standard module links, when no weivel_standard target exists yet")
+
+# Adds the standard's targets, and the core's its build needs, unless the including project already has them.
+function(weivel_c_add_the_standard)
+    if(TARGET weivel_standard)
+        return()
+    endif()
+    if(NOT TARGET weivel_core)
+        add_subdirectory(${WEIVEL_C_CORE_SOURCE_DIRECTORY} ${PROJECT_BINARY_DIR}/core EXCLUDE_FROM_ALL)
+    endif()
+    add_subdirectory(${WEIVEL_C_STANDARD_SOURCE_DIRECTORY} ${PROJECT_BINARY_DIR}/standard EXCLUDE_FROM_ALL)
+    set_target_properties(weivel_standard_shared PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+endfunction()
+
+set(WEIVEL_C_STANDARD_MODULE_SOURCES src/standard/status.c src/standard/manifests.c src/standard/services.c)
+
+# The optional standard module: its own library, the one target of this repository that links the standard.
+function(weivel_c_add_the_standard_module)
+    weivel_c_add_the_standard()
+    add_library(weivel_c_standard STATIC ${WEIVEL_C_STANDARD_MODULE_SOURCES})
+    target_link_libraries(weivel_c_standard PUBLIC weivel_c weivel_standard)
+    weivel_c_strict_warnings(weivel_c_standard)
+    set_target_properties(weivel_c_standard PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    add_library(weivel_c_standard_shared SHARED ${WEIVEL_C_STANDARD_MODULE_SOURCES})
+    target_link_libraries(weivel_c_standard_shared PUBLIC weivel_c_shared weivel_standard_shared)
+    weivel_c_strict_warnings(weivel_c_standard_shared)
+    target_compile_definitions(weivel_c_standard_shared
+        PRIVATE WEIVEL_C_STANDARD_BUILDING_SHARED INTERFACE WEIVEL_C_STANDARD_USING_SHARED)
+    set_target_properties(weivel_c_standard_shared PROPERTIES
+        OUTPUT_NAME weivel_c_standard
+        C_VISIBILITY_PRESET hidden
+        ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/shared)
+endfunction()
+
+if(EXISTS ${WEIVEL_C_STANDARD_SOURCE_DIRECTORY}/CMakeLists.txt OR TARGET weivel_standard)
+    weivel_c_add_the_standard_module()
+else()
+    message(STATUS "no standard at ${WEIVEL_C_STANDARD_SOURCE_DIRECTORY}: the optional standard module is not built")
+endif()
+
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
     add_library(weivel_c_testing STATIC ${WEIVEL_C_SOURCES})
     weivel_c_target(weivel_c_testing)
