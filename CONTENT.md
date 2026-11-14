@@ -130,7 +130,8 @@ whole, so its caller may free its own at once, and an entry.
   once, and starts each plugin of the plan's order in that order inside a dispatch: it opens the plugin with its
   context's token as payload and calls its activate, never waiting for one before starting the next. Each started
   plugin's outcome reaches the caller's listener once, from the dispatch: `active`, `quarantined` (its activate
-  failed, with a reason and a fix, or the core refused its verification, quarantined in the same step),
+  failed, with a reason and a fix, or the core refused its verification, quarantined before any event of the
+  verification is dispatched and before the next plugin is started),
   `refused` (the core refused the open), `released` (released while its activate was in flight, told as that release
   begins, or kept from its activate because the host's destroy had begun) or `failed` (an open that failed for no
   refusal, told to the sink, the plugin released and forgotten at once when the core held it open). Every completion
