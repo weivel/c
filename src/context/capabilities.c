@@ -15,7 +15,7 @@ static int is_an_id(const char *id) {
 weivel_c_status weivel_c_context_provide_capability(weivel_c_context *context, const char *id, void *implementation,
                                                     weivel_handle *provided, weivel_c_refusal *refusal) {
     weivel_handle answered = 0;
-    weivel_c_keeping keeping = {NULL, &answered};
+    weivel_c_keeping keeping = {NULL, &answered, 0};
     weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping};
     weivel_c_status status;
     if (provided != NULL) {
@@ -32,7 +32,7 @@ weivel_c_status weivel_c_context_provide_capability(weivel_c_context *context, c
     status = weivel_c_core_provide_capability_then(context->contexts->core, context->plugin, id, &answered, refusal,
                                                    &then);
     if (status != WEIVEL_C_STATUS_OK) {
-        weivel_c_record_abandon(keeping.record);
+        weivel_c_record_abandon(&keeping);
     } else if (provided != NULL) {
         *provided = answered;
     }
@@ -177,7 +177,7 @@ weivel_c_status weivel_c_context_watch_capability(weivel_c_context *context, con
                                                   const weivel_c_capability_watcher *watcher, weivel_handle *watch,
                                                   weivel_c_refusal *refusal) {
     weivel_handle answered = 0;
-    weivel_c_keeping keeping = {NULL, &answered};
+    weivel_c_keeping keeping = {NULL, &answered, 0};
     weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping};
     weivel_c_status status;
     if (watch != NULL) {
@@ -194,7 +194,7 @@ weivel_c_status weivel_c_context_watch_capability(weivel_c_context *context, con
     status = weivel_c_core_watch_capability_then(context->contexts->core, context->plugin, id, &answered, refusal,
                                                  &then);
     if (status != WEIVEL_C_STATUS_OK) {
-        weivel_c_record_abandon(keeping.record);
+        weivel_c_record_abandon(&keeping);
     } else if (watch != NULL) {
         *watch = answered;
     }

@@ -20,6 +20,9 @@ weivel_c_status weivel_c_core_register_service_then(weivel_c_core *core, weivel_
                                                weivel_handle *registration, weivel_c_refusal *refusal,
                                                     const weivel_c_answered_step *then);
 
+weivel_c_status weivel_c_core_unregister_then(weivel_c_core *core, weivel_handle handle, weivel_c_refusal *refusal,
+                                              const weivel_c_answered_step *then);
+
 weivel_c_status weivel_c_core_get_service_then(weivel_c_core *core, weivel_handle plugin, const char *id,
                                                weivel_handle *implementation, weivel_c_refusal *refusal,
                                                const weivel_c_answered_step *then);

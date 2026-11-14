@@ -29,4 +29,7 @@ typedef uint64_t (*weivel_c_handles_hash)(uint32_t space, uint64_t first_key, ui
  */
 void weivel_c_handles_replace_hash(weivel_c_handles *handles, weivel_c_handles_hash hash);
 
+/** Answers how many reservations wait to be used or given back: what a test reads to find one that leaked. */
+uint32_t weivel_c_handles_reserved(weivel_c_handles *handles);
+
 #endif

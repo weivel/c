@@ -34,11 +34,19 @@ typedef struct weivel_c_record weivel_c_record;
  * with the id it was asked under and what the plugin gave with it.
  *
  * @implNote A record is freed only by the thread dispatching, or once the core is destroyed: by the step it carries,
- * by the listener that settled its want, or by its context ending its entries. A callback therefore never has a
- * record, or the id text it was handed from one, freed under it by another thread. `ended` is 1 from the moment the
- * record is taken to be ended, so no callback is begun for it afterwards; `retiring` is 1 while a thread has taken
- * it and its step may still be queued, and whoever would free it meanwhile sets `abandoned` and leaves the freeing to
- * that step.
+ * by the listener that settled its want or called back with it, or by its context ending its entries. A callback
+ * therefore never has a record, or the id text it was handed from one, freed under it by another thread.
+ *
+ * - `ended` is 1 once what the record stands for ended, so no callback is begun for it afterwards. A plugin's own
+ *   ending sets it only once the core has answered that ending OK, under the layer lock, so a settlement the core had
+ *   already queued still finds the record and settles it.
+ * - `retiring` is 1 while the freeing belongs to one path that has not run yet: the step an ending queued, or the
+ *   dispatch that claimed a want to settle it.
+ * - `calling` is 1 while the dispatch is inside a callback that was handed the record's id; whoever ends the record
+ *   meanwhile leaves the freeing to the dispatch, which frees it once the callback returns.
+ *
+ * Whoever would free a record that is retiring or calling instead leaves it, moving it to the orphans when its
+ * context is freed.
  */
 struct weivel_c_record {
     weivel_c_step step;
@@ -52,7 +60,9 @@ struct weivel_c_record {
     uint32_t kind;
     uint32_t ended;
     uint32_t retiring;
-    uint32_t abandoned;
+    uint32_t calling;
+    /** 1 while a want holds the reservation of the one holding its settlement may hand over. */
+    uint32_t holding_reserved;
     /** The provider's object, for a registration and an implementation. */
     void *object;
     weivel_c_capacity_answerer answerer;
@@ -102,6 +112,8 @@ struct weivel_c_contexts {
 typedef struct weivel_c_keeping {
     weivel_c_record *record;
     const weivel_handle *answered;
+    /** 1 once the step used the record's reservation, whatever the addition into it answered. */
+    int reservation_used;
 } weivel_c_keeping;
 
 /**
@@ -111,45 +123,50 @@ typedef struct weivel_c_keeping {
 void weivel_c_contexts_replace_allocator(weivel_c_contexts *contexts, const weivel_c_allocator *allocator);
 
 /**
- * Makes a record of `kind` for `context` with its own copy of `id`, and reserves its entry in the handles table:
- * everything a call that answers a handle of the plugin's own needs, taken before the core is asked, so nothing can
- * fail once the core has answered. NULL when memory ran out, with nothing made and nothing reserved.
+ * Makes a record of `kind` for `context` with its own copy of `id`, and reserves its entry in the handles table, and
+ * for a want the one holding its settlement may hand over: everything a call that answers a handle of the plugin's
+ * own needs, taken before the core is asked, so nothing can fail once the core has answered. NULL when memory ran
+ * out, with nothing made and nothing reserved.
  */
 weivel_c_record *weivel_c_record_prepare(weivel_c_context *context, uint32_t kind, const char *id);
 
-/** Frees a prepared record the core answered no handle for, and gives its reservation back. */
-void weivel_c_record_abandon(weivel_c_record *record);
+/**
+ * Frees a prepared record the core answered no handle for, or one its answered step could not keep, and gives back
+ * each reservation it took that was not used.
+ */
+void weivel_c_record_abandon(const weivel_c_keeping *keeping);
 
 /**
  * The answered step of a call that answers a handle of the plugin's own: `data` is a weivel_c_keeping. It fills the
- * entry its record reserved and has no way to fail, so no event names a handle the table lacks.
+ * entry its record reserved and needs no memory, so no event names a handle the table lacks for want of it. It fails
+ * only for a handle the table already holds, and says in the keeping whether it used the reservation.
  */
 weivel_c_status weivel_c_record_keep_answered(void *data);
 
 /** Under the lock of the contexts: the record kept under `handle` when it is of `kind`, ended or not; else NULL. */
 weivel_c_record *weivel_c_record_find(weivel_c_contexts *contexts, weivel_handle handle, uint32_t kind);
 
-/**
- * Copies the record kept under `handle` when it is of `kind` and not ended. Answers 0 when there is none. Only the
- * dispatching thread may read the copy's `id`.
- */
+/** Copies the record kept under `handle` when it is of `kind` and not ended. Answers 0 when there is none. */
 int weivel_c_record_read(weivel_c_contexts *contexts, weivel_handle handle, uint32_t kind, weivel_c_record *copy);
 
-/** As weivel_c_record_read, and ends the record for every later reader: what settles a want exactly once. */
+/**
+ * The record kept under `handle` when it is of `kind` and not ended, marked as called back with until
+ * weivel_c_record_put_back; else NULL. Only the dispatching thread calls it, around one callback.
+ */
+weivel_c_record *weivel_c_record_borrow(weivel_c_contexts *contexts, weivel_handle handle, uint32_t kind);
+
+/** Ends a borrowing, and frees the record when it was ended meanwhile and no step is left to free it. */
+void weivel_c_record_put_back(weivel_c_record *record);
+
+/** As weivel_c_record_borrow, and ends the record for every later reader: what settles a want exactly once. */
 weivel_c_record *weivel_c_record_claim(weivel_c_contexts *contexts, weivel_handle handle, uint32_t kind);
 
 /**
- * Takes a record of the context's own plugin to be ended in the core: of `kind` or of `other_kind`, not ended yet.
- * NULL when `handle` names none. The taker then calls weivel_c_record_retire or weivel_c_record_give_back.
+ * Hands a claimed want's settlement over: records that its plugin holds the registration `implementation`, into the
+ * room the want reserved for it, and answers the provider's object, as weivel_c_contexts_hold answers it.
  */
-weivel_c_record *weivel_c_record_take(weivel_c_context *context, weivel_handle handle, uint32_t kind,
-                                      uint32_t other_kind);
-
-/** Ends a taken record once every event drained so far has been dispatched; the record is not touched afterwards. */
-void weivel_c_record_retire(weivel_c_record *record);
-
-/** Gives a taken record back as it was, because the core did not end what it stands for. */
-void weivel_c_record_give_back(weivel_c_record *record);
+weivel_c_status weivel_c_record_hold_settled(weivel_c_record *want, weivel_handle plugin,
+                                             weivel_handle implementation, void **object);
 
 /** Ends and frees a claimed record at once. Only the dispatching thread calls it. */
 void weivel_c_record_end_in_dispatch(weivel_c_record *record);
@@ -157,8 +174,14 @@ void weivel_c_record_end_in_dispatch(weivel_c_record *record);
 /** Ends every record of a context. With `freeing`, a record whose step still waits is moved to the orphans. */
 void weivel_c_records_end(weivel_c_context *context, int freeing);
 
-/** Frees the records of a list whose steps can no longer run. */
+/** Frees the records of a list whose entries have ended and whose steps can no longer run. */
 void weivel_c_records_free(weivel_c_record *first);
+
+/**
+ * Ends the entries of the records of a list, each only while the table still keeps that very record, and frees them:
+ * what freeing the contexts does once the core is destroyed.
+ */
+void weivel_c_records_discard(weivel_c_record *first);
 
 /**
  * Records that `plugin` holds the registration or implementation `handle`, and answers the provider's object.
@@ -196,7 +219,11 @@ void weivel_c_contexts_answer_capacity(weivel_c_contexts *contexts, const weivel
 /** A refusal as a callback is handed it: the event's own texts, with nothing to release. */
 weivel_c_refusal weivel_c_contexts_refusal_of(const weivel_refusal *refusal, const char *subject, uint32_t has_fix);
 
-/** Ends in the core what a handle of the context's own plugin stands for, and retires its record. */
+/**
+ * Ends in the core what a handle of the context's own plugin stands for, of `kind` or `other_kind`, and retires its
+ * record once the core has answered OK. Answers WEIVEL_C_STATUS_NONE, asking the core nothing, for a handle that names
+ * no such record of the plugin's that has not ended.
+ */
 weivel_c_status weivel_c_context_end_handle(weivel_c_context *context, weivel_handle handle, uint32_t kind,
                                             uint32_t other_kind, weivel_c_refusal *refusal);
 

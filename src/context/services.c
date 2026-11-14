@@ -101,7 +101,7 @@ weivel_c_status weivel_c_context_want_service(weivel_c_context *context, const c
                                               weivel_c_refusal *refusal) {
     weivel_want_options encoded = WEIVEL_INIT(weivel_want_options);
     weivel_handle answered = 0;
-    weivel_c_keeping keeping = {NULL, &answered};
+    weivel_c_keeping keeping = {NULL, &answered, 0};
     weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping};
     weivel_c_status status = WEIVEL_C_STATUS_OK;
     answer_handle(want, 0, WEIVEL_C_STATUS_MISUSE);
@@ -122,7 +122,7 @@ weivel_c_status weivel_c_context_want_service(weivel_c_context *context, const c
     status = weivel_c_core_want_service_then(context->contexts->core, context->plugin, id,
                                              options == NULL ? NULL : &encoded, &answered, refusal, &then);
     if (status != WEIVEL_C_STATUS_OK) {
-        weivel_c_record_abandon(keeping.record);
+        weivel_c_record_abandon(&keeping);
     }
     answer_handle(want, answered, status);
     return status;
@@ -137,7 +137,7 @@ weivel_c_status weivel_c_context_watch_service(weivel_c_context *context, const 
                                                const weivel_c_service_watcher *watcher, weivel_handle *watch,
                                                weivel_c_refusal *refusal) {
     weivel_handle answered = 0;
-    weivel_c_keeping keeping = {NULL, &answered};
+    weivel_c_keeping keeping = {NULL, &answered, 0};
     weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping};
     weivel_c_status status;
     answer_handle(watch, 0, WEIVEL_C_STATUS_MISUSE);
@@ -151,7 +151,7 @@ weivel_c_status weivel_c_context_watch_service(weivel_c_context *context, const 
     keeping.record->service_watcher = *watcher;
     status = weivel_c_core_watch_service_then(context->contexts->core, context->plugin, id, &answered, refusal, &then);
     if (status != WEIVEL_C_STATUS_OK) {
-        weivel_c_record_abandon(keeping.record);
+        weivel_c_record_abandon(&keeping);
     }
     answer_handle(watch, answered, status);
     return status;
@@ -182,7 +182,7 @@ weivel_c_status weivel_c_context_register_service(weivel_c_context *context, con
                                                   const weivel_c_capacity_answerer *answerer,
                                                   weivel_handle *registration, weivel_c_refusal *refusal) {
     weivel_handle answered = 0;
-    weivel_c_keeping keeping = {NULL, &answered};
+    weivel_c_keeping keeping = {NULL, &answered, 0};
     weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping};
     weivel_c_status status;
     answer_handle(registration, 0, WEIVEL_C_STATUS_MISUSE);
@@ -200,7 +200,7 @@ weivel_c_status weivel_c_context_register_service(weivel_c_context *context, con
     status = weivel_c_core_register_service_then(context->contexts->core, context->plugin, id, &answered, refusal,
                                                  &then);
     if (status != WEIVEL_C_STATUS_OK) {
-        weivel_c_record_abandon(keeping.record);
+        weivel_c_record_abandon(&keeping);
     }
     answer_handle(registration, answered, status);
     return status;

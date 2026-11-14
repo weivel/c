@@ -379,6 +379,14 @@ void weivel_c_handles_replace_hash(weivel_c_handles *handles, weivel_c_handles_h
     weivel_c_mutex_unlock(&handles->lock);
 }
 
+uint32_t weivel_c_handles_reserved(weivel_c_handles *handles) {
+    uint32_t reserved;
+    weivel_c_mutex_lock(&handles->lock);
+    reserved = handles->reserved;
+    weivel_c_mutex_unlock(&handles->lock);
+    return reserved;
+}
+
 weivel_c_status weivel_c_handles_add(weivel_c_handles *handles, const weivel_c_handle_entry *entry,
                                      uint64_t *token) {
     weivel_c_status status;
@@ -570,6 +578,26 @@ weivel_c_status weivel_c_handles_revoke(weivel_c_handles *handles, const weivel_
     status = drop_holding(handles, event->data.revoked.plugin, event->data.revoked.implementation, object);
     weivel_c_mutex_unlock(&handles->lock);
     return status;
+}
+
+static int is_a_holding_of(const node *candidate, weivel_handle plugin) {
+    return candidate->space == SPACE_OF_HOLDINGS && candidate->second_key == plugin;
+}
+
+weivel_c_status weivel_c_handles_drop_holdings(weivel_c_handles *handles, weivel_handle plugin) {
+    uint32_t position;
+    if (handles == NULL || plugin == 0) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    weivel_c_mutex_lock(&handles->lock);
+    for (position = 1; position <= handles->nodes_begun; position++) {
+        if (is_a_holding_of(node_at(handles, position), plugin)) {
+            end_node(handles, position);
+            handles->holdings--;
+        }
+    }
+    weivel_c_mutex_unlock(&handles->lock);
+    return WEIVEL_C_STATUS_OK;
 }
 
 weivel_c_status weivel_c_handles_count(weivel_c_handles *handles, uint32_t *entries, uint32_t *holdings) {

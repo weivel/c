@@ -108,8 +108,9 @@ WEIVEL_C_API weivel_c_status weivel_c_contexts_create(const weivel_c_contexts_op
                                                       weivel_c_contexts **contexts);
 
 /**
- * Frees the contexts, every context still made from them, and every record any of them still keeps. The core must be
- * destroyed first: only then is no event, no step and no callback of the contexts' left to run.
+ * Frees the contexts, every context still made from them, and every record any of them still keeps, ending each one's
+ * entry and every holding of their plugins in the handles table, so the table is left with nothing of theirs. The core
+ * must be destroyed first: only then is no event, no step and no callback of the contexts' left to run.
  *
  * @return WEIVEL_C_STATUS_OK, also for NULL; WEIVEL_C_STATUS_MISUSE, freeing nothing, while the core is not
  * destroyed.
@@ -162,7 +163,8 @@ WEIVEL_C_API weivel_c_status weivel_c_context_token(weivel_c_context *context, u
  * Ends the plugin's own entries: its registrations, implementations, watches, wants, answerers and listeners are
  * dropped from the layer's tables, and nothing is called in the core, which has ended them already. It is the step
  * the host takes once the events its release or quarantine call queued have been dispatched, and not before. What the
- * plugin holds of others is not an entry and goes with the revocations the core queues.
+ * plugin holds of others is not an entry and goes with the revocations the core queues. A callback of the plugin's
+ * may call it: what that callback was handed stays until it returns.
  *
  * The context stays usable: a call made through it afterwards is a late call the core answers, and a want made then
  * is still settled to its callback. A plugin opened again after a quarantine goes on with the same context.
@@ -175,7 +177,9 @@ WEIVEL_C_API weivel_c_status weivel_c_context_token(weivel_c_context *context, u
 WEIVEL_C_API weivel_c_status weivel_c_context_end_entries(weivel_c_context *context);
 
 /**
- * Frees a context, every record it still keeps, and the plugin's entry in the handles table.
+ * Frees a context, every record it still keeps, the plugin's entry in the handles table and every holding of the
+ * plugin's. A record a callback is still being handed, or whose want is being settled, is freed by the dispatch once
+ * that callback returns, so a callback may free its own context; a plugin listener of the context may not.
  *
  * @return WEIVEL_C_STATUS_OK, also for NULL.
  * Threading: as weivel_c_context_end_entries; and no call on the context may be in flight or follow.
@@ -283,7 +287,9 @@ WEIVEL_C_API weivel_c_status weivel_c_context_want_service(weivel_c_context *con
                                                            weivel_handle *want, weivel_c_refusal *refusal);
 
 /**
- * Withdraws a want that has not settled; its callback is then never called.
+ * Withdraws a want that has not settled; its callback is then never called. A want the core had already settled,
+ * its settlement still waiting to be dispatched, is not withdrawn: the core refuses the withdrawal, which is answered
+ * as the core answered it, and the settlement still reaches the callback.
  *
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_NONE, with nothing asked of the core, for a handle that names no want
  * of this plugin's that still waits; and what the core answers the withdrawal.
@@ -530,7 +536,8 @@ typedef struct weivel_c_plugin_listener {
 } weivel_c_plugin_listener;
 
 /**
- * Adds a listener behind those the plugin already added; each event is heard by every one in that order.
+ * Adds a listener behind those the plugin already added; each event is heard by every one in that order. One added
+ * while an event is being told to the plugin's listeners hears that event too.
  *
  * @param registration receives what weivel_c_context_remove_listener takes, never 0. Required.
  * @return WEIVEL_C_STATUS_OK, WEIVEL_C_STATUS_MISUSE or WEIVEL_C_STATUS_OUT_OF_MEMORY.
@@ -540,7 +547,8 @@ WEIVEL_C_API weivel_c_status weivel_c_context_add_listener(weivel_c_context *con
                                                            uint64_t *registration);
 
 /**
- * Removes a listener; it is taken for no event once this returns.
+ * Removes a listener; it is taken for no event once this returns. The one call another thread's dispatch had already
+ * begun may still be running.
  *
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE for NULL or a registration that names no listener.
  */

@@ -391,6 +391,26 @@ static void holding_the_same_thing_again_replaces_the_object(void) {
     weivel_c_handles_free(table);
 }
 
+static void dropping_a_plugins_holdings_drops_every_one_of_its_and_nothing_else(void) {
+    weivel_c_handles *table = make_table();
+    void *held = NULL;
+    CHECK(weivel_c_handles_hold(table, 5, 6, &service_object) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_hold(table, 5, 7, &service_object) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_hold(table, 8, 6, &other_record) == WEIVEL_C_STATUS_OK);
+    CHECK(add(table, WEIVEL_C_HANDLE_WATCH, 5, 9, &watch_object) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_drop_holdings(table, 5) == WEIVEL_C_STATUS_OK);
+    CHECK(holdings_in(table) == 1 && entries_in(table) == 1);
+    CHECK(weivel_c_handles_held(table, 5, 6, &held) == WEIVEL_C_STATUS_NONE);
+    CHECK(weivel_c_handles_held(table, 8, 6, &held) == WEIVEL_C_STATUS_OK && held == &other_record);
+    CHECK(holds(table, 5, WEIVEL_C_HANDLE_WATCH, 9, &watch_object));
+    CHECK(weivel_c_handles_drop_holdings(table, 5) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_drop_holdings(table, 0) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_handles_drop_holdings(NULL, 5) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_handles_hold(table, 5, 6, &service_object) == WEIVEL_C_STATUS_OK);
+    CHECK(holdings_in(table) == 2);
+    weivel_c_handles_free(table);
+}
+
 static void a_revocation_is_read_only_from_an_event_that_is_one(void) {
     weivel_c_handles *table = make_table();
     weivel_c_event event;
@@ -892,6 +912,41 @@ static void the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_e
     end_core(core);
 }
 
+/** What the step of an unregistration saw: how often it ran, and how many events had been heard by then. */
+typedef struct seen_ending {
+    uint32_t runs;
+    uint32_t events_heard_before;
+    hearing *listener;
+} seen_ending;
+
+static weivel_c_status see_the_ending(void *data) {
+    seen_ending *self = data;
+    self->runs++;
+    self->events_heard_before = self->listener->count;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void the_step_of_an_unregistration_runs_only_when_the_core_ended_the_handle_and_before_any_event(void) {
+    hearing listener = {0};
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    weivel_handle provider = open_plugin(core, "p", PROVIDED, 1, NULL, 0);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    weivel_handle watch = 0;
+    weivel_handle registration = 0;
+    seen_ending seen = {0, 0, &listener};
+    weivel_c_answered_step then = {see_the_ending, &seen};
+    CHECK(weivel_c_core_watch_service(core, consumer, "p:a", &watch, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_register_service(core, provider, "p:a", &registration, NULL) == WEIVEL_C_STATUS_OK);
+    listener.count = 0;
+    CHECK(weivel_c_core_unregister_then(core, registration, NULL, &then) == WEIVEL_C_STATUS_OK);
+    CHECK(seen.runs == 1 && seen.events_heard_before == 0 && count_heard(&listener, WEIVEL_EVENT_WATCH) == 1);
+    CHECK(weivel_c_core_unregister_then(core, registration, NULL, &then) == WEIVEL_C_STATUS_REFUSED);
+    CHECK(seen.runs == 1);
+    CHECK(weivel_c_core_unregister_then(core, watch, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    end_core(core);
+}
+
 /** Run again with every key placed alike, where a key compared by less than all of itself finds another's node. */
 static void keys_placed_alike_are_told_apart_by_their_space_and_both_halves(void) {
     every_key_collides = 1;
@@ -899,6 +954,7 @@ static void keys_placed_alike_are_told_apart_by_their_space_and_both_halves(void
     a_revocation_naming_a_forgotten_plugin_drops_that_plugins_holding();
     an_entry_an_owner_and_a_holding_of_one_number_are_each_their_own();
     holding_the_same_thing_again_replaces_the_object();
+    dropping_a_plugins_holdings_drops_every_one_of_its_and_nothing_else();
     every_key_collides = 0;
 }
 
@@ -910,6 +966,7 @@ static void run_the_tests_of_the_layers_own_seams(void) {
     an_allocation_that_fails_while_the_table_grows_changes_nothing_whichever_it_is();
     a_reserved_addition_needs_no_memory_and_an_unused_reservation_is_given_back();
     the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_event_is_heard();
+    the_step_of_an_unregistration_runs_only_when_the_core_ended_the_handle_and_before_any_event();
 }
 
 #else
@@ -932,6 +989,7 @@ int main(int argument_count, char **arguments) {
     the_payload_a_plugin_was_opened_with_reaches_its_record_without_a_search();
     the_entries_of_one_owner_are_ended_one_by_one();
     holding_the_same_thing_again_replaces_the_object();
+    dropping_a_plugins_holdings_drops_every_one_of_its_and_nothing_else();
     a_revocation_is_read_only_from_an_event_that_is_one();
     an_entry_an_owner_and_a_holding_of_one_number_are_each_their_own();
     a_misused_call_changes_nothing();
