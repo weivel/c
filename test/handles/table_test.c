@@ -21,9 +21,36 @@ static int service_object;
 static int watch_object;
 static int want_object;
 
+#if !defined(WEIVEL_C_USING_SHARED)
+
+/** 1 while every table a test makes places all its keys at one spot, so only whole keys tell them apart. */
+static int every_key_collides;
+
+static uint64_t place_every_key_alike(uint32_t space, uint64_t first_key, uint64_t second_key) {
+    (void)space;
+    (void)first_key;
+    (void)second_key;
+    return 7;
+}
+
+static void choose_the_hash(weivel_c_handles *table) {
+    if (every_key_collides) {
+        weivel_c_handles_replace_hash(table, place_every_key_alike);
+    }
+}
+
+#else
+
+static void choose_the_hash(weivel_c_handles *table) {
+    (void)table;
+}
+
+#endif
+
 static weivel_c_handles *make_table(void) {
     weivel_c_handles *table = NULL;
     CHECK(weivel_c_handles_create(&table) == WEIVEL_C_STATUS_OK);
+    choose_the_hash(table);
     return table;
 }
 
@@ -104,17 +131,12 @@ static void check_it_ended(weivel_c_core *core, weivel_c_handles *table, weivel_
     CHECK(weivel_c_handles_end(table, handle, NULL) == WEIVEL_C_STATUS_NONE);
 }
 
-static void an_entry_ends_when_what_its_handle_stands_for_ends(void) {
+/** Opens a plugin that provides the service `p:a` and the capability `cap.one`. */
+static weivel_handle open_a_provider_of_both(weivel_c_core *core) {
     static const char *const CAPABILITIES[] = {"cap.one"};
-    weivel_c_handles *table = make_table();
-    weivel_c_core *core = make_core(NULL, NULL, NULL);
     weivel_manifest manifest = WEIVEL_INIT(weivel_manifest);
     weivel_service_offer offer = WEIVEL_INIT(weivel_service_offer);
     weivel_handle plugin = 0;
-    weivel_handle registration = 0;
-    weivel_handle implementation = 0;
-    weivel_handle watch = 0;
-    weivel_handle want = 0;
     offer.id = "p:a";
     manifest.import_name = "p";
     manifest.api = 1;
@@ -124,6 +146,17 @@ static void an_entry_ends_when_what_its_handle_stands_for_ends(void) {
     manifest.capabilities.provides.count = 1;
     CHECK(weivel_c_core_register_manifest(core, &manifest, &plugin, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_core_open_plugin(core, plugin, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    return plugin;
+}
+
+static void an_entry_ends_when_what_its_handle_stands_for_ends(void) {
+    weivel_c_handles *table = make_table();
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle plugin = open_a_provider_of_both(core);
+    weivel_handle registration = 0;
+    weivel_handle implementation = 0;
+    weivel_handle watch = 0;
+    weivel_handle want = 0;
     CHECK(add(table, WEIVEL_C_HANDLE_PLUGIN, plugin, 0, &plugin_record) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_core_register_service(core, plugin, "p:a", &registration, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(add(table, WEIVEL_C_HANDLE_SERVICE_REGISTRATION, registration, plugin, &service_object) ==
@@ -341,6 +374,64 @@ static void the_entries_of_one_owner_are_ended_one_by_one(void) {
     CHECK(weivel_c_handles_end_owned(table, other, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_handles_end_owned(table, 0, NULL) == WEIVEL_C_STATUS_MISUSE);
     CHECK(entries_in(table) == 1);
+    weivel_c_handles_free(table);
+}
+
+static void holding_the_same_thing_again_replaces_the_object(void) {
+    weivel_c_handles *table = make_table();
+    void *held = NULL;
+    CHECK(weivel_c_handles_hold(table, 5, 6, &service_object) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_hold(table, 5, 6, &other_record) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_held(table, 5, 6, &held) == WEIVEL_C_STATUS_OK && held == &other_record);
+    CHECK(holdings_in(table) == 1);
+    CHECK(weivel_c_handles_reserve(table) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_hold_reserved(table, 5, 6, &watch_object) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_held(table, 5, 6, &held) == WEIVEL_C_STATUS_OK && held == &watch_object);
+    CHECK(holdings_in(table) == 1);
+    weivel_c_handles_free(table);
+}
+
+static void a_revocation_is_read_only_from_an_event_that_is_one(void) {
+    weivel_c_handles *table = make_table();
+    weivel_c_event event;
+    void *dropped = &other_record;
+    void *held = NULL;
+    memset(&event, 0, sizeof event);
+    event.data.revoked.plugin = 5;
+    event.data.revoked.implementation = 6;
+    CHECK(weivel_c_handles_hold(table, 5, 6, &service_object) == WEIVEL_C_STATUS_OK);
+    event.kind = WEIVEL_EVENT_WATCH;
+    CHECK(weivel_c_handles_revoke(table, &event, &dropped) == WEIVEL_C_STATUS_NONE);
+    CHECK(dropped == &other_record && holdings_in(table) == 1);
+    CHECK(weivel_c_handles_held(table, 5, 6, &held) == WEIVEL_C_STATUS_OK && held == &service_object);
+    event.kind = WEIVEL_EVENT_REVOKED;
+    CHECK(weivel_c_handles_revoke(table, &event, &dropped) == WEIVEL_C_STATUS_OK);
+    CHECK(dropped == &service_object && holdings_in(table) == 0);
+    CHECK(weivel_c_handles_revoke(table, &event, &dropped) == WEIVEL_C_STATUS_NONE);
+    weivel_c_handles_free(table);
+}
+
+/** One number as a handle, as an owner and as either half of a holding: every one of them a key of its own. */
+static void an_entry_an_owner_and_a_holding_of_one_number_are_each_their_own(void) {
+    weivel_c_handles *table = make_table();
+    weivel_c_handle_entry ended = WEIVEL_INIT(weivel_c_handle_entry);
+    void *held = NULL;
+    CHECK(add(table, WEIVEL_C_HANDLE_WATCH, 5, 6, &watch_object) == WEIVEL_C_STATUS_OK);
+    CHECK(add(table, WEIVEL_C_HANDLE_WANT, 6, 5, &want_object) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_hold(table, 5, 6, &service_object) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_hold(table, 6, 5, &other_record) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_hold(table, 5, 5, &plugin_record) == WEIVEL_C_STATUS_OK);
+    CHECK(entries_in(table) == 2 && holdings_in(table) == 3);
+    CHECK(holds(table, 5, WEIVEL_C_HANDLE_WATCH, 6, &watch_object));
+    CHECK(holds(table, 6, WEIVEL_C_HANDLE_WANT, 5, &want_object));
+    CHECK(weivel_c_handles_held(table, 5, 6, &held) == WEIVEL_C_STATUS_OK && held == &service_object);
+    CHECK(weivel_c_handles_held(table, 6, 5, &held) == WEIVEL_C_STATUS_OK && held == &other_record);
+    CHECK(weivel_c_handles_held(table, 5, 5, &held) == WEIVEL_C_STATUS_OK && held == &plugin_record);
+    CHECK(weivel_c_handles_held(table, 6, 6, &held) == WEIVEL_C_STATUS_NONE);
+    CHECK(weivel_c_handles_end_owned(table, 5, &ended) == WEIVEL_C_STATUS_OK && ended.handle == 6);
+    CHECK(weivel_c_handles_end_owned(table, 5, &ended) == WEIVEL_C_STATUS_NONE);
+    CHECK(holds(table, 5, WEIVEL_C_HANDLE_WATCH, 6, &watch_object) && answers_nothing(table, 6));
+    CHECK(entries_in(table) == 1 && holdings_in(table) == 3);
     weivel_c_handles_free(table);
 }
 
@@ -564,6 +655,10 @@ static weivel_c_status fail_to_record(void *data) {
     return WEIVEL_C_STATUS_OUT_OF_MEMORY;
 }
 
+/**
+ * @implNote No step that records into reserved room fails any more, but a get still answers through this path when
+ * the core names a registration the layer keeps no object for, so the wrapper's half of it is held here.
+ */
 static void a_step_runs_only_for_a_call_the_core_answered_and_its_failure_is_the_calls_answer(void) {
     uint32_t runs = 0;
     weivel_c_answered_step failing = {fail_to_record, &runs};
@@ -580,16 +675,18 @@ static void a_step_runs_only_for_a_call_the_core_answered_and_its_failure_is_the
     end_core(core);
 }
 
+/** An allocator that fails every allocation from the one numbered `fail_from`, and the one numbered `fail_at`. */
 typedef struct scarce_memory {
     uint32_t allocations;
     uint32_t fail_from;
     int32_t held;
+    uint32_t fail_at;
 } scarce_memory;
 
 static void *allocate_scarcely(void *data, size_t size) {
     scarce_memory *self = data;
     self->allocations++;
-    if (self->fail_from != 0 && self->allocations >= self->fail_from) {
+    if ((self->fail_from != 0 && self->allocations >= self->fail_from) || self->allocations == self->fail_at) {
         return NULL;
     }
     self->held++;
@@ -603,7 +700,7 @@ static void release_scarcely(void *data, void *memory) {
 }
 
 static void an_addition_that_runs_out_of_memory_changes_nothing(void) {
-    scarce_memory memory = {0, 0, 0};
+    scarce_memory memory = {0, 0, 0, 0};
     weivel_c_allocator allocator = {allocate_scarcely, release_scarcely, &memory};
     weivel_c_handles *table = make_table();
     uint32_t added = 0;
@@ -626,12 +723,76 @@ static void an_addition_that_runs_out_of_memory_changes_nothing(void) {
     CHECK(memory.held == 0);
 }
 
+#define GROWTH_ALLOCATIONS 8
+#define GROWTH_ADDITIONS 200
+
+static int holds_the_first(weivel_c_handles *table, uint32_t count) {
+    uint32_t index;
+    for (index = 0; index < count; index++) {
+        if (!holds(table, 100 + index, WEIVEL_C_HANDLE_WATCH, 9, &watch_object)) {
+            return 0;
+        }
+    }
+    return entries_in(table) == count && answers_nothing(table, 100 + count);
+}
+
+/**
+ * Adds entries until one addition meets the allocation numbered `failing`, which fails: that addition must answer
+ * out of memory and leave the table as it was, and the same addition made again must then succeed.
+ */
+static int grows_whole_or_not_at_all(uint32_t failing) {
+    scarce_memory memory = {0, 0, 0, failing};
+    weivel_c_allocator allocator = {allocate_scarcely, release_scarcely, &memory};
+    weivel_c_handles *table = make_table();
+    weivel_c_status status = WEIVEL_C_STATUS_OK;
+    uint32_t added = 0;
+    int whole;
+    weivel_c_handles_replace_allocator(table, &allocator);
+    while (status == WEIVEL_C_STATUS_OK && added < GROWTH_ADDITIONS) {
+        status = add(table, WEIVEL_C_HANDLE_WATCH, 100 + added, 9, &watch_object);
+        added += status == WEIVEL_C_STATUS_OK;
+    }
+    whole = status == WEIVEL_C_STATUS_OUT_OF_MEMORY && memory.allocations == failing && holds_the_first(table, added);
+    whole = whole && add(table, WEIVEL_C_HANDLE_WATCH, 100 + added, 9, &watch_object) == WEIVEL_C_STATUS_OK;
+    whole = whole && holds_the_first(table, added + 1);
+    weivel_c_handles_free(table);
+    return whole && memory.held == 0;
+}
+
+/** The nodes and the buckets grow by one allocation each, in turn: each of the first several is failed alone. */
+static void an_allocation_that_fails_while_the_table_grows_changes_nothing_whichever_it_is(void) {
+    uint32_t failing;
+    for (failing = 1; failing <= GROWTH_ALLOCATIONS; failing++) {
+        if (!grows_whole_or_not_at_all(failing)) {
+            fprintf(stderr, "the allocation numbered %u failed and the table was not left whole\n", (unsigned)failing);
+            check_failures++;
+        }
+    }
+}
+
+/** Reserves until memory runs out, then checks every reservation made still takes an addition. */
+static void use_every_reservation_memory_allowed(weivel_c_handles *table, scarce_memory *memory) {
+    weivel_c_handle_entry entry = entry_of(WEIVEL_C_HANDLE_WATCH, 500, 9, &watch_object);
+    uint32_t before = entries_in(table);
+    uint32_t reserved = 0;
+    uint32_t index;
+    memory->fail_from = memory->allocations + 1;
+    while (weivel_c_handles_reserve(table) == WEIVEL_C_STATUS_OK) {
+        reserved++;
+    }
+    CHECK(reserved < 64 && weivel_c_handles_add(table, &entry, NULL) == WEIVEL_C_STATUS_OUT_OF_MEMORY);
+    for (index = 0; index < reserved; index++) {
+        entry.handle = 600 + index;
+        CHECK(weivel_c_handles_add_reserved(table, &entry, NULL) == WEIVEL_C_STATUS_OK);
+    }
+    CHECK(entries_in(table) == before + reserved);
+}
+
 static void a_reserved_addition_needs_no_memory_and_an_unused_reservation_is_given_back(void) {
-    scarce_memory memory = {0, 0, 0};
+    scarce_memory memory = {0, 0, 0, 0};
     weivel_c_allocator allocator = {allocate_scarcely, release_scarcely, &memory};
     weivel_c_handle_entry entry = entry_of(WEIVEL_C_HANDLE_WATCH, 5, 9, &watch_object);
     weivel_c_handles *table = make_table();
-    uint32_t reserved = 0;
     uint32_t index;
     weivel_c_handles_replace_allocator(table, &allocator);
     CHECK(weivel_c_handles_add_reserved(table, &entry, NULL) == WEIVEL_C_STATUS_MISUSE);
@@ -656,17 +817,7 @@ static void a_reserved_addition_needs_no_memory_and_an_unused_reservation_is_giv
     CHECK(weivel_c_handles_reserve(table) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_handles_unreserve(table) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_handles_unreserve(table) == WEIVEL_C_STATUS_MISUSE);
-    memory.fail_from = memory.allocations + 1;
-    while (weivel_c_handles_reserve(table) == WEIVEL_C_STATUS_OK) {
-        reserved++;
-    }
-    entry.handle = 500;
-    CHECK(reserved < 64 && weivel_c_handles_add(table, &entry, NULL) == WEIVEL_C_STATUS_OUT_OF_MEMORY);
-    for (index = 0; index < reserved; index++) {
-        entry.handle = 600 + index;
-        CHECK(weivel_c_handles_add_reserved(table, &entry, NULL) == WEIVEL_C_STATUS_OK);
-    }
-    CHECK(entries_in(table) == 20 + reserved);
+    use_every_reservation_memory_allowed(table, &memory);
     weivel_c_handles_free(table);
     CHECK(memory.held == 0);
 }
@@ -691,27 +842,37 @@ static weivel_c_status see_the_answer(void *data) {
     return WEIVEL_C_STATUS_OK;
 }
 
-static void the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_event_is_heard(void) {
+/** Opens a plugin that provides and consumes the capability `screens`, and has it provide one implementation. */
+static weivel_handle open_a_maker_of_screens(weivel_c_core *core) {
     static const char *const CAPABILITY[] = {"screens"};
-    hearing listener = {0};
-    weivel_service_want consumed = want_of("p:a");
     weivel_manifest manifest = WEIVEL_INIT(weivel_manifest);
-    weivel_capability_list list = WEIVEL_INIT(weivel_capability_list);
-    weivel_c_core *core = make_core(NULL, &listener, NULL);
-    weivel_handle provider = open_plugin(core, "p", PROVIDED, 1, NULL, 0);
-    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
     weivel_handle maker = 0;
-    weivel_handle registration = 0;
-    weivel_handle answered = 0;
     weivel_handle implementation = 0;
-    seen_answer seen = {&answered, NULL, 0, 0, 0, 0, &listener};
-    weivel_c_answered_step then = {see_the_answer, &seen};
     manifest.import_name = "m";
     manifest.api = 1;
     manifest.capabilities.provides.items = CAPABILITY;
     manifest.capabilities.provides.count = 1;
     manifest.capabilities.consumes.items = CAPABILITY;
     manifest.capabilities.consumes.count = 1;
+    CHECK(weivel_c_core_register_manifest(core, &manifest, &maker, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_open_plugin(core, maker, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_provide_capability(core, maker, "screens", &implementation, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_verify_activation(core, maker, NULL) == WEIVEL_C_STATUS_OK);
+    return maker;
+}
+
+static void the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_event_is_heard(void) {
+    hearing listener = {0};
+    weivel_service_want consumed = want_of("p:a");
+    weivel_capability_list list = WEIVEL_INIT(weivel_capability_list);
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    weivel_handle provider = open_plugin(core, "p", PROVIDED, 1, NULL, 0);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    weivel_handle maker;
+    weivel_handle registration = 0;
+    weivel_handle answered = 0;
+    seen_answer seen = {&answered, NULL, 0, 0, 0, 0, &listener};
+    weivel_c_answered_step then = {see_the_answer, &seen};
     CHECK(weivel_c_core_get_service_then(core, consumer, "p:a", &answered, NULL, &then) == WEIVEL_C_STATUS_NONE);
     CHECK(seen.runs == 0);
     CHECK(weivel_c_core_get_service_then(core, consumer, "p:undeclared", &answered, NULL, &then) ==
@@ -720,10 +881,7 @@ static void the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_e
     CHECK(weivel_c_core_register_service(core, provider, "p:a", &registration, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_core_get_service_then(core, consumer, "p:a", &answered, NULL, &then) == WEIVEL_C_STATUS_OK);
     CHECK(seen.runs == 1 && seen.registration_seen == registration && answered == registration);
-    CHECK(weivel_c_core_register_manifest(core, &manifest, &maker, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_open_plugin(core, maker, NULL, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_provide_capability(core, maker, "screens", &implementation, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_verify_activation(core, maker, NULL) == WEIVEL_C_STATUS_OK);
+    maker = open_a_maker_of_screens(core);
     seen = (seen_answer){NULL, &list, 0, 0, 0, 0, &listener};
     CHECK(weivel_c_core_all_capabilities_then(core, consumer, "screens", &list, NULL, &then) ==
           WEIVEL_C_STATUS_REFUSED);
@@ -734,10 +892,22 @@ static void the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_e
     end_core(core);
 }
 
+/** Run again with every key placed alike, where a key compared by less than all of itself finds another's node. */
+static void keys_placed_alike_are_told_apart_by_their_space_and_both_halves(void) {
+    every_key_collides = 1;
+    the_entries_of_one_owner_are_ended_one_by_one();
+    a_revocation_naming_a_forgotten_plugin_drops_that_plugins_holding();
+    an_entry_an_owner_and_a_holding_of_one_number_are_each_their_own();
+    holding_the_same_thing_again_replaces_the_object();
+    every_key_collides = 0;
+}
+
 static void run_the_tests_of_the_layers_own_seams(void) {
     an_entry_made_as_the_core_answers_is_there_when_an_event_naming_the_handle_is_heard();
     a_step_runs_only_for_a_call_the_core_answered_and_its_failure_is_the_calls_answer();
+    keys_placed_alike_are_told_apart_by_their_space_and_both_halves();
     an_addition_that_runs_out_of_memory_changes_nothing();
+    an_allocation_that_fails_while_the_table_grows_changes_nothing_whichever_it_is();
     a_reserved_addition_needs_no_memory_and_an_unused_reservation_is_given_back();
     the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_event_is_heard();
 }
@@ -761,6 +931,9 @@ int main(int argument_count, char **arguments) {
     a_revocation_naming_a_forgotten_plugin_drops_that_plugins_holding();
     the_payload_a_plugin_was_opened_with_reaches_its_record_without_a_search();
     the_entries_of_one_owner_are_ended_one_by_one();
+    holding_the_same_thing_again_replaces_the_object();
+    a_revocation_is_read_only_from_an_event_that_is_one();
+    an_entry_an_owner_and_a_holding_of_one_number_are_each_their_own();
     a_misused_call_changes_nothing();
     many_entries_are_each_found_while_others_come_and_go();
     calls_from_several_threads_leave_the_table_whole();

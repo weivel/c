@@ -51,6 +51,10 @@ weivel_c_status weivel_c_core_invoke(weivel_c_core *core, weivel_c_core_call cal
  * It is the layer's own code and never a caller's: it may not call into the core, which would wait on the lock it
  * runs under, and it calls nothing it was handed. A status other than WEIVEL_C_STATUS_OK becomes the call's answer,
  * with the core's answer already written where the call writes it, so the caller can still end what the core made.
+ *
+ * @implNote A step that only records into room reserved before the call cannot fail. The failing answer stays for the
+ * step that finds it cannot stand behind what the core answered: a get whose registration the layer keeps no object
+ * for answers WEIVEL_C_STATUS_FAILED through it.
  */
 typedef struct weivel_c_answered_step {
     weivel_c_status (*record)(void *data);
