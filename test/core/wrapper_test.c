@@ -860,6 +860,51 @@ static void hooks_set_while_a_deadline_is_recorded_are_told_it_at_once(void) {
     end_core(core);
 }
 
+/** A `follow` hook that ends the core it follows from inside one of its calls, and what the core answered it. */
+typedef struct ending_follower {
+    weivel_c_core *core;
+    uint32_t ends_at_follow;
+    uint32_t follows;
+    weivel_c_status destroyed;
+    weivel_c_status freed_inside;
+} ending_follower;
+
+static weivel_c_status destroy_and_free_inside_follow(void *data, int64_t at, uint32_t set) {
+    ending_follower *self = data;
+    (void)at;
+    (void)set;
+    self->follows++;
+    if (self->follows == self->ends_at_follow) {
+        self->destroyed = weivel_c_core_destroy(self->core);
+        self->freed_inside = weivel_c_core_free(self->core);
+        CHECK(self->freed_inside == WEIVEL_C_STATUS_MISUSE);
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static weivel_c_deadline_hooks hooks_that_end_the_core(ending_follower *ender) {
+    weivel_c_deadline_hooks hooks = WEIVEL_INIT(weivel_c_deadline_hooks);
+    hooks.follow = destroy_and_free_inside_follow;
+    hooks.data = ender;
+    return hooks;
+}
+
+static void a_core_is_not_freed_while_its_follow_hook_is_being_told(void) {
+    ending_follower ender = {NULL, 1, 0, WEIVEL_C_STATUS_FAILED, WEIVEL_C_STATUS_FAILED};
+    weivel_c_deadline_hooks hooks = hooks_that_end_the_core(&ender);
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    ender.core = core;
+    want_for_a_hundred_milliseconds(core, consumer);
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    CHECK(ender.follows == 1 && ender.destroyed == WEIVEL_C_STATUS_OK);
+    CHECK(ender.freed_inside == WEIVEL_C_STATUS_MISUSE);
+    if (ender.freed_inside == WEIVEL_C_STATUS_MISUSE) {
+        CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_OK);
+    }
+}
+
 static void bend_a_watch_to_an_unknown_kind(weivel_event *event) {
     if (event->kind == WEIVEL_EVENT_WATCH && kind_before_bending == 0) {
         kind_before_bending = event->kind;
@@ -1436,6 +1481,24 @@ static void more_failures_than_one_call_keeps_are_counted_for_the_sink(void) {
     CHECK(memory.held == 0);
 }
 
+static void a_core_is_not_freed_while_a_follow_asked_for_again_is_being_told(void) {
+    ending_follower ender = {NULL, 2, 0, WEIVEL_C_STATUS_FAILED, WEIVEL_C_STATUS_FAILED};
+    weivel_c_deadline_hooks hooks = hooks_that_end_the_core(&ender);
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    ender.core = core;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    want_for_a_hundred_milliseconds(core, consumer);
+    CHECK(ender.follows == 1);
+    CHECK(weivel_c_core_follow_deadline_again(core) == WEIVEL_C_STATUS_OK);
+    CHECK(ender.follows == 2 && ender.destroyed == WEIVEL_C_STATUS_OK);
+    CHECK(ender.freed_inside == WEIVEL_C_STATUS_MISUSE);
+    if (ender.freed_inside == WEIVEL_C_STATUS_MISUSE) {
+        CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_OK);
+    }
+}
+
 static void a_core_says_whether_it_is_destroyed(void) {
     weivel_c_core *core = make_core(NULL, NULL, NULL);
     CHECK(weivel_c_core_is_destroyed(core) == 0);
@@ -1446,6 +1509,7 @@ static void a_core_says_whether_it_is_destroyed(void) {
 
 static void run_the_tests_that_fail_an_allocation(void) {
     a_core_says_whether_it_is_destroyed();
+    a_core_is_not_freed_while_a_follow_asked_for_again_is_being_told();
     a_deadline_whose_copy_fails_is_still_followed();
     more_failures_than_one_call_keeps_are_counted_for_the_sink();
     an_event_that_cannot_be_copied_goes_to_the_sink_and_the_rest_are_still_drained();
@@ -1493,6 +1557,7 @@ int main(int argument_count, char **arguments) {
     a_failing_deadline_hook_goes_to_the_sink_and_the_call_is_still_made();
     the_deadline_hooks_run_outside_the_layer_lock();
     hooks_set_while_a_deadline_is_recorded_are_told_it_at_once();
+    a_core_is_not_freed_while_its_follow_hook_is_being_told();
     an_event_of_a_kind_the_layer_does_not_know_is_released_and_never_heard();
     each_defect_of_one_call_keeps_its_own_text();
     a_drain_the_core_refuses_midway_is_a_defect_and_the_rest_is_drained_by_the_next_call();

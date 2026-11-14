@@ -450,6 +450,10 @@ WEIVEL_C_API weivel_c_status weivel_c_core_create(const weivel_c_core_options *o
  * The object itself stays until weivel_c_core_free, and every later call on it answers WEIVEL_C_STATUS_DESTROYED.
  * It may be called inside a listener or a step: the dispatch it runs in then ends with that listener or step.
  *
+ * The deadline hooks are taken off, and `follow` is never told that no deadline is left: whoever follows a core's
+ * deadline disarms itself as it destroys the core. A thread that had already taken its turn to call `follow` when
+ * this was called still calls it, once and possibly after this returns, with the deadline it had read by then.
+ *
  * @return WEIVEL_C_STATUS_OK, also for a core destroyed already; WEIVEL_C_STATUS_MISUSE for NULL.
  * Threading: any thread; a call in flight on another thread finishes first. The one event or step another thread's
  * dispatch had already taken from the queue may still be running when this returns.
@@ -459,8 +463,9 @@ WEIVEL_C_API weivel_c_status weivel_c_core_destroy(weivel_c_core *core);
 /**
  * Frees a destroyed core's object.
  *
- * @return WEIVEL_C_STATUS_OK, also for NULL; WEIVEL_C_STATUS_MISUSE, freeing nothing, for a core not destroyed or
- * one whose dispatch is still running, which is where a listener or a step that destroyed it still is.
+ * @return WEIVEL_C_STATUS_OK, also for NULL; WEIVEL_C_STATUS_MISUSE, freeing nothing, for a core not destroyed, for
+ * one whose dispatch is still running, which is where a listener or a step that destroyed it still is, and for one
+ * whose `follow` hook is still being told a deadline, which is where a hook that destroyed it still is.
  * Threading: no call on this object may be in flight or follow.
  */
 WEIVEL_C_API weivel_c_status weivel_c_core_free(weivel_c_core *core);

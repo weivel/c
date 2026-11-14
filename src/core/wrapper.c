@@ -808,7 +808,7 @@ weivel_c_status weivel_c_core_free(weivel_c_core *core) {
         return WEIVEL_C_STATUS_OK;
     }
     weivel_c_mutex_lock(&core->lock);
-    idle = core->core == NULL && !core->dispatching;
+    idle = core->core == NULL && !core->dispatching && !core->following;
     weivel_c_mutex_unlock(&core->lock);
     if (!idle) {
         return WEIVEL_C_STATUS_MISUSE;
