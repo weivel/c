@@ -87,6 +87,8 @@ typedef weivel_c_status (*benchmark_resolve)(void *data, weivel_c_context *conte
 typedef struct benchmark_same_language_world {
     weivel_c_host *host;
     benchmark_arithmetic provided;
+    benchmark_arithmetic *direct;
+    benchmark_arithmetic *direct_again;
     benchmark_arithmetic *resolved;
     weivel_c_context *provider;
     weivel_c_context *consumer;
@@ -104,11 +106,15 @@ int benchmark_same_language_world_start(benchmark_same_language_world *world, co
 /** 1 when what the consumer resolved is the provider's own object, the very pointer it registered. */
 int benchmark_resolved_the_providers_object(const benchmark_same_language_world *world);
 
-/** The call on the provider's own object; `data` is the world. */
-int benchmark_same_language_call_directly(void *data, uint32_t call);
-
-/** The call on the object the consumer resolved; `data` is the world. */
-int benchmark_same_language_call_through_weivel(void *data, uint32_t call);
+/**
+ * The call on the object `data` points to, a `benchmark_arithmetic **`: `&world->direct` or `&world->direct_again` for
+ * the provider's own object, `&world->resolved` for what the consumer resolved.
+ *
+ * @implNote One function serves all three paths, so they run the very same instructions and differ only in the
+ * pointer they read: a function of each would differ in where its code lies, which moves a call this short by more
+ * than anything the layer could add, and the two direct paths could not measure that.
+ */
+int benchmark_same_language_call(void *data, uint32_t call);
 
 void benchmark_same_language_world_end(benchmark_same_language_world *world);
 

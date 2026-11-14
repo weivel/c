@@ -35,10 +35,10 @@ int benchmark_measure_same_language(benchmark_same_language_world *world, const 
     benchmark_path paths[3];
     benchmark_samples samples;
     int usable;
-    paths[0].call = benchmark_same_language_call_directly;
-    paths[1].call = benchmark_same_language_call_directly;
-    paths[2].call = benchmark_same_language_call_through_weivel;
-    paths[0].data = paths[1].data = paths[2].data = world;
+    paths[0].call = paths[1].call = paths[2].call = benchmark_same_language_call;
+    paths[0].data = &world->direct;
+    paths[1].data = &world->direct_again;
+    paths[2].data = &world->resolved;
     if (!benchmark_sample(paths, 3, sampling, &samples)) {
         return 0;
     }

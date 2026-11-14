@@ -92,6 +92,8 @@ int benchmark_same_language_world_start(benchmark_same_language_world *world, co
     void *resolved = NULL;
     memset(world, 0, sizeof *world);
     world->provided.add = add;
+    world->direct = &world->provided;
+    world->direct_again = &world->provided;
     options.table = table;
     if (weivel_c_host_create(&options, &world->host, NULL) != WEIVEL_C_STATUS_OK) {
         return 0;
@@ -113,15 +115,9 @@ int benchmark_resolved_the_providers_object(const benchmark_same_language_world 
 /** Where every answer is kept, so an optimiser cannot drop a call whose answer nobody reads. */
 static volatile int64_t answers;
 
-int benchmark_same_language_call_directly(void *data, uint32_t call) {
-    benchmark_same_language_world *world = data;
-    answers = world->provided.add((int64_t)call, 1);
-    return 1;
-}
-
-int benchmark_same_language_call_through_weivel(void *data, uint32_t call) {
-    benchmark_same_language_world *world = data;
-    answers = world->resolved->add((int64_t)call, 1);
+int benchmark_same_language_call(void *data, uint32_t call) {
+    benchmark_arithmetic *const *object = data;
+    answers = (*object)->add((int64_t)call, 1);
     return 1;
 }
 

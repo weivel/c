@@ -61,7 +61,7 @@ static int judge_identity(benchmark_same_language_world *world) {
         return EXIT_FAILS;
     }
     for (call = 0; call < IDENTITY_CALLS; call++) {
-        benchmark_same_language_call_through_weivel(world, call);
+        benchmark_same_language_call(&world->resolved, call);
     }
     if (crossings != before) {
         printf("weivel-c-benchmark identity: %d calls through the resolved object crossed into the core %u times\n",
@@ -209,7 +209,7 @@ static void print_pair(const char *name, int repetition, const benchmark_pair *p
 
 static void print_same_language(int repetition, const benchmark_same_language *result) {
     printf("weivel-c-benchmark same-language platform=%s repetition=%d direct_median_ns=%.3f "
-           "through_weivel_median_ns=%.3f noise_ratio=%.4f noise=%.4f ratio=%.4f deviation=%.4f\n",
+           "through_weivel_median_ns=%.3f noise_ratio=%.6f noise=%.6f ratio=%.6f deviation=%.6f\n",
            platform_text(), repetition, result->direct.median, result->through_weivel.median, result->noise_ratio,
            benchmark_deviation(result->noise_ratio), result->ratio, benchmark_deviation(result->ratio));
 }
