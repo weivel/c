@@ -543,6 +543,14 @@ weivel_c_status weivel_c_core_follow_deadline_again(weivel_c_core *core) {
     return WEIVEL_C_STATUS_OK;
 }
 
+int weivel_c_core_is_destroyed(weivel_c_core *core) {
+    int destroyed;
+    weivel_c_mutex_lock(&core->lock);
+    destroyed = core->core == NULL;
+    weivel_c_mutex_unlock(&core->lock);
+    return destroyed;
+}
+
 weivel_c_status weivel_c_core_invoke_release(weivel_c_core *core, weivel_c_core_release release, void *answer) {
     if (core == NULL || answer == NULL) {
         return WEIVEL_C_STATUS_MISUSE;

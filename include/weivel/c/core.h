@@ -303,7 +303,15 @@ typedef enum weivel_c_failure_kind {
     /** One call met more failures than the layer keeps for it; `sequence` holds how many were not told. */
     WEIVEL_C_FAILURE_NOT_TOLD = 7,
     /** An event's texts or constraints could not be copied, so it was heard marked `incomplete`. */
-    WEIVEL_C_FAILURE_EVENT_INCOMPLETE = 8
+    WEIVEL_C_FAILURE_EVENT_INCOMPLETE = 8,
+    /** A capacity answerer answered a status other than WEIVEL_C_STATUS_OK, so its question was left unanswered. */
+    WEIVEL_C_FAILURE_CAPACITY_ANSWERER = 9,
+    /** A capacity answer could not be reported: the host has no clock to time it by, or the core did not take it. */
+    WEIVEL_C_FAILURE_CAPACITY_NOT_REPORTED = 10,
+    /** The core named a registration or an implementation the layer holds no object for: one made around it. */
+    WEIVEL_C_FAILURE_OBJECT_UNKNOWN = 11,
+    /** The host's log answered a status other than WEIVEL_C_STATUS_OK for a line. */
+    WEIVEL_C_FAILURE_LOG = 12
 } weivel_c_failure_kind;
 
 /** One failure, as the error sink is told it. Everything in it lives for the length of the sink's call. */
