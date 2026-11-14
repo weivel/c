@@ -30,7 +30,7 @@
 
 static const benchmark_sampling core_budget_sampling = {200000, 1000, 2000};
 static const benchmark_sampling pair_sampling = {100000, 1000, 501};
-static const benchmark_sampling same_language_sampling = {2000000, 10000, 301};
+static const benchmark_sampling same_language_sampling = {2000000, 1000000, 301};
 static const benchmark_sampling brief_sampling = {1000, 20, 21};
 
 static const char *platform_text(void) {
