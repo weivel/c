@@ -1064,7 +1064,8 @@ static weivel_c_status end_the_consumers_entries(void *data, weivel_c_core *core
 
 /**
  * A release made inside a dispatch, as a host makes it: the core's release, then the ending of the plugin's entries
- * deferred behind the events that release queued, then a late get and the revocation it earns, queued behind that.
+ * deferred behind the events that release queued, then a late reach the core refuses, whose report is queued behind
+ * that ending and so is not heard, and a late get whose service is then unregistered.
  */
 static weivel_c_status release_the_consumer(void *data, weivel_c_core *core) {
     releasing *self = data;
@@ -1073,6 +1074,8 @@ static weivel_c_status release_the_consumer(void *data, weivel_c_core *core) {
     self->records_after_release = records_of(self->in);
     self->lines_after_release = self->heard.count;
     CHECK(weivel_c_core_defer(core, &self->ending, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_get_service(self->consumer->context, "p:undeclared", &service, NULL) ==
+          WEIVEL_C_STATUS_REFUSED);
     CHECK(weivel_c_context_get_service(self->consumer->context, "p:a", &service, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(service == &first_object);
     CHECK(weivel_c_context_unregister_service(self->provider->context, self->registration, NULL) ==
