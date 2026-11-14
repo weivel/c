@@ -46,6 +46,9 @@ weivel_c_status weivel_c_context_get_service(weivel_c_context *context, const ch
     if (context == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_REFUSED;
+    }
     status = weivel_c_handles_reserve(context->contexts->handles);
     if (status != WEIVEL_C_STATUS_OK) {
         return status;
@@ -108,6 +111,9 @@ weivel_c_status weivel_c_context_want_service(weivel_c_context *context, const c
     if (!want_is_usable(context, id, options, callback)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_REFUSED;
+    }
     if (options != NULL) {
         status = encode_want(context, options, &encoded);
     }
@@ -144,6 +150,9 @@ weivel_c_status weivel_c_context_watch_service(weivel_c_context *context, const 
     if (context == NULL || !is_an_id(id) || watcher == NULL || watcher->hear == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_REFUSED;
+    }
     keeping.record = weivel_c_record_prepare(context, WEIVEL_C_RECORD_SERVICE_WATCH, id);
     if (keeping.record == NULL) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
@@ -168,6 +177,9 @@ weivel_c_status weivel_c_context_service_ids(weivel_c_context *context, weivel_s
     if (context == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_REFUSED;
+    }
     return weivel_c_core_service_ids(context->contexts->core, context->plugin, list, refusal);
 }
 
@@ -188,6 +200,9 @@ weivel_c_status weivel_c_context_register_service(weivel_c_context *context, con
     answer_handle(registration, 0, WEIVEL_C_STATUS_MISUSE);
     if (context == NULL || !is_an_id(id) || service == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
+    }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_REFUSED;
     }
     keeping.record = weivel_c_record_prepare(context, WEIVEL_C_RECORD_SERVICE, id);
     if (keeping.record == NULL) {

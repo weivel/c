@@ -394,6 +394,9 @@ weivel_c_status weivel_c_context_end_handle(weivel_c_context *context, weivel_ha
     if (context == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_REFUSED;
+    }
     if (!names_a_takeable_record(&asked)) {
         return WEIVEL_C_STATUS_NONE;
     }

@@ -517,6 +517,43 @@ static void a_listing_that_leaves_out_an_implementation_gives_back_the_room_it_k
     end_world(&in);
 }
 
+static void a_detached_context_reaches_the_core_no_more_and_leaves_its_handle_free(void) {
+    world in;
+    plugin provider;
+    plugin consumer;
+    settled_record settled = {0};
+    watched_record watched = {0};
+    weivel_c_want_callback callback = settling(&settled);
+    weivel_c_service_watcher watcher = watching_services(&watched);
+    weivel_c_implementations list = WEIVEL_INIT(weivel_c_implementations);
+    weivel_c_context *again = NULL;
+    void *service = &second_object;
+    begin_pair(&in, &provider, &consumer, 1);
+    CHECK(weivel_c_context_register_service(provider.context, "p:a", &first_object, NULL, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_get_service(consumer.context, "p:a", &service, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_release_plugin(in.core, consumer.handle, NULL) == WEIVEL_C_STATUS_OK);
+    end_entries_of(&in, &consumer);
+    CHECK(weivel_c_core_forget_plugin(in.core, consumer.handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_detach(consumer.context) == WEIVEL_C_STATUS_OK);
+    CHECK(entries_of(&in) == 2 && holdings_of(&in) == 0);
+    forget_every_crossing();
+    CHECK(weivel_c_context_get_service(consumer.context, "p:a", &service, NULL) == WEIVEL_C_STATUS_REFUSED);
+    CHECK(service == NULL);
+    CHECK(weivel_c_context_want_service(consumer.context, "p:a", NULL, &callback, NULL, NULL) ==
+          WEIVEL_C_STATUS_REFUSED);
+    CHECK(weivel_c_context_watch_service(consumer.context, "p:a", &watcher, NULL, NULL) == WEIVEL_C_STATUS_REFUSED);
+    CHECK(weivel_c_context_register_service(consumer.context, "c:x", &first_object, NULL, NULL, NULL) ==
+          WEIVEL_C_STATUS_REFUSED);
+    CHECK(weivel_c_context_all_capabilities(consumer.context, "screens", &list, NULL) == WEIVEL_C_STATUS_REFUSED);
+    CHECK(weivel_c_context_log(consumer.context, WEIVEL_LOG_ERROR, "still heard") == WEIVEL_C_STATUS_OK);
+    CHECK(every_crossing() == 0 && settled.count == 0 && in.log.count == 1);
+    CHECK(weivel_c_context_detach(consumer.context) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_detach(NULL) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_context_create(in.contexts, consumer.handle, NULL, &again) == WEIVEL_C_STATUS_OK);
+    end_world(&in);
+}
+
 #if !defined(WEIVEL_C_USING_SHARED)
 
 #define GRAVEYARD_BLOCKS 64
@@ -791,6 +828,7 @@ int main(int argument_count, char **arguments) {
     contexts_made_without_a_timer_take_a_timed_want_as_the_callers_mistake();
     freeing_the_contexts_leaves_no_entry_and_no_holding_in_the_table();
     a_listing_that_leaves_out_an_implementation_gives_back_the_room_it_kept_for_it();
+    a_detached_context_reaches_the_core_no_more_and_leaves_its_handle_free();
     run_the_tests_of_the_layers_own_seams();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("context endings");

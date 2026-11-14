@@ -269,6 +269,27 @@ weivel_c_status weivel_c_context_free(weivel_c_context *context) {
     return WEIVEL_C_STATUS_OK;
 }
 
+weivel_c_status weivel_c_context_detach(weivel_c_context *context) {
+    weivel_c_contexts *contexts;
+    if (context == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    contexts = context->contexts;
+    weivel_c_mutex_lock(&contexts->lock);
+    context->detached = 1;
+    end_the_plugins_entry(context);
+    weivel_c_mutex_unlock(&contexts->lock);
+    return WEIVEL_C_STATUS_OK;
+}
+
+int weivel_c_context_is_detached(weivel_c_context *context) {
+    int detached;
+    weivel_c_mutex_lock(&context->contexts->lock);
+    detached = context->detached != 0;
+    weivel_c_mutex_unlock(&context->contexts->lock);
+    return detached;
+}
+
 weivel_c_status weivel_c_context_manifest(weivel_c_context *context, const weivel_manifest **manifest) {
     if (context == NULL || manifest == NULL) {
         return WEIVEL_C_STATUS_MISUSE;

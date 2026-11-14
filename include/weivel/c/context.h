@@ -177,6 +177,18 @@ WEIVEL_C_API weivel_c_status weivel_c_context_token(weivel_c_context *context, u
 WEIVEL_C_API weivel_c_status weivel_c_context_end_entries(weivel_c_context *context);
 
 /**
+ * Detaches a context from its plugin once the core has forgotten the plugin: the plugin's entry and every holding of
+ * its leave the handles table, so the core may issue its handle to a plugin registered later, and from then on every
+ * call through the context that would reach the core answers WEIVEL_C_STATUS_REFUSED, with no refusal, and asks the
+ * core nothing, because the handle it would carry may by then name another plugin. Its log, its manifest and its
+ * listeners stay as they were. The context's memory stays until it is freed, so a plugin that calls it after its host
+ * forgot it reads nothing freed.
+ *
+ * @return WEIVEL_C_STATUS_OK, also for a context detached already; WEIVEL_C_STATUS_MISUSE.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_context_detach(weivel_c_context *context);
+
+/**
  * Frees a context, every record it still keeps, the plugin's entry in the handles table and every holding of the
  * plugin's. A record a callback is still being handed, or whose want is being settled, is freed by the dispatch once
  * that callback returns, so a callback may free its own context; a plugin listener of the context may not.

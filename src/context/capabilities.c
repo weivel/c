@@ -24,6 +24,9 @@ weivel_c_status weivel_c_context_provide_capability(weivel_c_context *context, c
     if (context == NULL || !is_an_id(id) || implementation == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_REFUSED;
+    }
     keeping.record = weivel_c_record_prepare(context, WEIVEL_C_RECORD_IMPLEMENTATION, id);
     if (keeping.record == NULL) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
@@ -144,6 +147,9 @@ weivel_c_status weivel_c_context_all_capabilities(weivel_c_context *context, con
     if (context == NULL || !list_is_ready(list)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_REFUSED;
+    }
     list->items = NULL;
     list->count = 0;
     status = list_into_room(&listed, id, &answered, refusal);
@@ -185,6 +191,9 @@ weivel_c_status weivel_c_context_watch_capability(weivel_c_context *context, con
     }
     if (context == NULL || !is_an_id(id) || watcher == NULL || watcher->hear == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
+    }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_REFUSED;
     }
     keeping.record = weivel_c_record_prepare(context, WEIVEL_C_RECORD_CAPABILITY_WATCH, id);
     if (keeping.record == NULL) {

@@ -90,6 +90,8 @@ struct weivel_c_context {
     uint32_t slot_count;
     uint32_t slot_capacity;
     uint64_t last_registration;
+    /** 1 once weivel_c_context_detach was called; guarded by the lock of the contexts. */
+    uint32_t detached;
 };
 
 /** @implNote `lock` guards every list and count here, each context's lists, and each record's flags. */
@@ -191,6 +193,9 @@ void weivel_c_records_discard(weivel_c_record *first);
  */
 weivel_c_status weivel_c_contexts_hold(weivel_c_contexts *contexts, weivel_handle plugin, weivel_handle handle,
                                        uint32_t kind, int reserved, void **object);
+
+/** 1 once the context was detached from its plugin, so no call through it may reach the core. */
+int weivel_c_context_is_detached(weivel_c_context *context);
 
 /** The context of `plugin`, or NULL. Only the dispatching thread may use what it answers. */
 weivel_c_context *weivel_c_contexts_context_of(weivel_c_contexts *contexts, weivel_handle plugin);

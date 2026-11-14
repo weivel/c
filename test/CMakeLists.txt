@@ -11,6 +11,13 @@ set_target_properties(partial_core PROPERTIES
     C_VISIBILITY_PRESET hidden
     ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/shared)
 
+add_library(entry_library SHARED host/entry_library.c)
+target_include_directories(entry_library PRIVATE ${PROJECT_SOURCE_DIR}/include ${WEIVEL_C_CORE_INCLUDE_DIRECTORY})
+weivel_c_strict_warnings(entry_library)
+set_target_properties(entry_library PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/shared)
+
 function(weivel_c_test name source library)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE ${library})
@@ -41,6 +48,14 @@ foreach(variant "" _shared)
             $<TARGET_FILE:weivel_core_shared>)
         add_dependencies(context_${suite}_test${variant} weivel_core_shared)
     endforeach()
+    foreach(suite host lifecycle threads)
+        weivel_c_test(host_${suite}_test${variant} host/${suite}_test.c weivel_c${variant}
+            $<TARGET_FILE:weivel_core_shared>)
+        add_dependencies(host_${suite}_test${variant} weivel_core_shared)
+    endforeach()
+    weivel_c_test(host_entry_test${variant} host/entry_test.c weivel_c${variant}
+        $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:entry_library> ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
+    add_dependencies(host_entry_test${variant} weivel_core_shared entry_library)
     weivel_c_test(core_sink_test${variant} core/sink_test.c weivel_c${variant}
         $<TARGET_FILE:weivel_core_shared> ${CMAKE_CURRENT_BINARY_DIR}/core_sink_test${variant}.standard_error)
     add_dependencies(core_sink_test${variant} weivel_core_shared)
