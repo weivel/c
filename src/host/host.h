@@ -15,6 +15,7 @@
  */
 
 #include <weivel/c/host.h>
+#include <weivel/c/host/library.h>
 
 #include "../core/mutex.h"
 #include "../core/wrapper.h"
@@ -126,6 +127,8 @@ struct weivel_c_host {
     weivel_c_completion *completions;
     host_service *services;
     host_start *starts;
+    /** The C libraries the host loaded, the last loaded first, unloaded ones kept until the host is freed. */
+    weivel_c_library *libraries;
     uint32_t state;
     uint32_t releases_in_flight;
     uint32_t destroy_waits;
@@ -209,5 +212,18 @@ int weivel_c_host_destroy_may_end(weivel_c_host *host);
 
 /** Defers the destroy's last steps behind everything queued. */
 void weivel_c_host_end_the_destroy(weivel_c_host *host);
+
+/**
+ * The destroy's unloading of every C library the host loaded and has not unloaded, the last loaded first. Each is
+ * closed to calls and its binary closed once nothing holds it; a close the platform refuses is told to the sink and
+ * the rest still unload. No service is unregistered, since the core is destroyed next.
+ */
+void weivel_c_host_unload_every_library(weivel_c_host *host);
+
+/** Under the host's lock: 1 while a call runs in one of the host's libraries or bytes one answered are held. */
+int weivel_c_host_libraries_are_held(weivel_c_host *host);
+
+/** Frees every library record of a host whose libraries nothing holds. */
+void weivel_c_host_free_libraries(weivel_c_host *host);
 
 #endif

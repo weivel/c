@@ -170,14 +170,14 @@ static void close_every_library(weivel_c_host *host) {
 }
 
 /**
- * The destroy's last step, behind every event and step its releases left.
- *
- * @implNote C libraries loaded as host services are unloaded here, before the timer and the core, once the host loads
- * them; the plugins' own libraries close here too, those of plugins never opened among them.
+ * The destroy's last step, behind every event and step its releases left: unloads every C library loaded as host
+ * services, closes the plugins' own libraries, those of plugins never opened among them, then disarms the timer and
+ * destroys the core.
  */
 static weivel_c_status end_destroying(void *data, weivel_c_core *core) {
     weivel_c_host *host = data;
     (void)core;
+    weivel_c_host_unload_every_library(host);
     close_every_library(host);
     weivel_c_timer_destroy(host->timer);
     weivel_c_core_destroy(host->core);
@@ -243,11 +243,12 @@ weivel_c_status weivel_c_host_free(weivel_c_host *host) {
         return WEIVEL_C_STATUS_OK;
     }
     weivel_c_mutex_lock(&host->lock);
-    finished = host->destroy_finished != 0;
+    finished = host->destroy_finished != 0 && !weivel_c_host_libraries_are_held(host);
     weivel_c_mutex_unlock(&host->lock);
     if (!finished) {
         return WEIVEL_C_STATUS_MISUSE;
     }
+    weivel_c_host_free_libraries(host);
     free_the_records(host);
     free_the_parts(host);
     return WEIVEL_C_STATUS_OK;

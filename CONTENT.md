@@ -23,8 +23,8 @@ public name begins with `weivel_c_`, every public struct begins with its `size`,
 
 ## What is built
 
-The `core`, `handles`, `timer`, `context` and `host` modules, the host without C libraries as host services yet. The
-other three modules hold only a header saying what they are for.
+The `core`, `handles`, `timer`, `context` and `host` modules. The other three modules hold only a header saying what
+they are for.
 
 `weivel_c_core_load` opens the core's shared binary with the platform's loader and fills one table,
 `weivel_c_core_table`, with every function the core exports; a path that is no library and a library that lacks a
@@ -132,7 +132,8 @@ until the host is freed, and an entry.
   one step deferred behind the events. Where no dispatch runs, the release has finished when it returns. A
   deactivate that answers pending holds the core's release and everything after it until it finishes, however long.
 - `weivel_c_host_destroy` releases every plugin the host opened and has not released, the last opened first, one in
-  flight and one quarantined included; lets every event and step those releases left run; closes the plugins'
+  flight and one quarantined included; lets every event and step those releases left run; unloads every C library
+  it loaded, telling the sink of one whose binary does not close and unloading the rest; closes the plugins'
   libraries; then disarms the timer and destroys the core. It too is a deferred step, and finishes where no dispatch
   runs before it returns, unless a deactivate it waits on is pending. From then on every call on the host answers
   `WEIVEL_C_STATUS_DESTROYED`, quietly; `weivel_c_host_free` follows once it has finished.
@@ -140,11 +141,43 @@ until the host is freed, and an entry.
 No entry function, listener, log line or sink report runs under a lock of the layer's: the host's own lock guards its
 tables and is let go before it calls anything.
 
+### C libraries as host services
+
+`weivel_c_host_load_library` (`include/weivel/c/host/library.h`) loads a C library from a declaration value, the
+standard's published `weivel_standard_library`, whether the standard read it or the caller built it, and a path the
+caller gives, since a declaration names none. It binds the declared release symbol and each declared function of the
+bytes kind, and registers each declared service under `WEIVEL_HOST` as one `weivel_c_library_service`: the service
+id, the declared function names in order, and a `call` that takes the object, a function's index, the input and an
+answer. A consumer that resolves the service is answered that very object.
+
+- A call crosses no core call and takes no lock: the input is the caller's own pointer and length, handed to the
+  library for the call, and the output is answered in place, as a `weivel_c_bytes` holding the library's own
+  pointer. `weivel_c_bytes_release`, also reachable as the object's `release_bytes` for a plugin that links nothing of
+  the layer's, hands it to the library's release symbol once and empties it; releasing the emptied struct again does
+  nothing.
+- A status other than 0 answers `WEIVEL_C_STATUS_FAILED` with the status and the body, and `body_is_utf8` says
+  whether the body is well-formed UTF-8, so it reads as the text saying why.
+- A declaration the caller built with a function of another kind is the caller's mistake, `WEIVEL_C_STATUS_MISUSE`
+  naming the function, and told to nobody else. A library that is none, or lacks its release symbol or a function's,
+  is answered as a value naming what is missing.
+- `weivel_c_host_unload_library` unregisters every service of the library, and every later call through an object a
+  consumer still holds answers `WEIVEL_C_STATUS_UNLOADED`. Its binary closes only once no call runs in it and no bytes
+  it answered are held, on whichever of them ends last, so nothing ever calls into a closed library and bytes still
+  held stay readable. A call and each held body count themselves on one atomic word per library, which is also how
+  an unload is seen; the host's own lock guards only its list of libraries.
+- The destroy unloads every library after every plugin release and its events and steps, before the core is
+  destroyed, and `weivel_c_host_free` refuses while bytes a library answered are still held.
+
+The host includes the standard's `weivel/library.h` for its types and never links, loads or calls the standard's
+binary; a test reads the standard's headers and fails when any source of the layer names one of its functions.
+
 ## Building
 
 C11 and CMake, with no other dependency. The static library is the target `weivel_c` and the shared one
-`weivel_c_shared`. The layer is compiled against the core's `weivel/core.h` alone, found under
-`siblings/core/include` unless `WEIVEL_C_CORE_INCLUDE_DIRECTORY` says otherwise.
+`weivel_c_shared`. The layer is compiled against the core's `weivel/core.h`, found under
+`siblings/core/include` unless `WEIVEL_C_CORE_INCLUDE_DIRECTORY` says otherwise, and the standard's
+`weivel/library.h` for its declaration types alone, found under `siblings/standard/include` unless
+`WEIVEL_C_STANDARD_INCLUDE_DIRECTORY` says otherwise; it links neither.
 
 `.weivel/repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks them out there;
 locally, link or clone each checkout into `siblings/`. The tests build the pinned core as a shared library and load

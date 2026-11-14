@@ -80,7 +80,9 @@ typedef enum weivel_c_status {
     WEIVEL_C_STATUS_DESTROYED = 9,
     /** A failure with no status of its own: what a listener, a step or a hook answers when it failed, and what a
      * call answers when the core answered a status this layer does not know. */
-    WEIVEL_C_STATUS_FAILED = 10
+    WEIVEL_C_STATUS_FAILED = 10,
+    /** The C library a call was made through has been unloaded; nothing was called. */
+    WEIVEL_C_STATUS_UNLOADED = 11
 } weivel_c_status;
 
 /**
