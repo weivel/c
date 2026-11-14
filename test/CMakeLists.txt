@@ -381,3 +381,14 @@ weivel_c_benchmark(control_call_holds_the_cores_budget 0 "control-call-budget me
     control-budget ${benchmark_core} ${WEIVEL_C_KIT_BENCHMARKS}/budget.txt)
 set_tests_properties(benchmarks_measure_prints_every_measurement benchmarks_control_call_holds_the_cores_budget
     PROPERTIES LABELS release-benchmark)
+weivel_c_benchmark(control_call_holds_its_bound_over_the_bare_table_call 0
+    "control-call platform=[a-z]+ ratio_median=[0-9.]+ bound="
+    control-ratio ${benchmark_core} ${WEIVEL_C_KIT_BENCHMARKS}/c.txt)
+weivel_c_benchmark(library_call_holds_its_bound_over_a_direct_call 0
+    "library-call platform=[a-z]+ ratio_median=[0-9.]+ bound="
+    library-ratio ${benchmark_core} ${benchmark_library} ${WEIVEL_C_KIT_BENCHMARKS}/c.txt)
+weivel_c_benchmark(same_language_call_holds_the_noise_bounds 0 "same-language platform=[a-z]+ ratio=[0-9.]+ bound="
+    same-language ${benchmark_core} ${WEIVEL_C_KIT_BENCHMARKS}/c.txt)
+set_tests_properties(benchmarks_control_call_holds_its_bound_over_the_bare_table_call
+    benchmarks_library_call_holds_its_bound_over_a_direct_call benchmarks_same_language_call_holds_the_noise_bounds
+    PROPERTIES LABELS release-benchmark)
