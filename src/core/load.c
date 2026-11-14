@@ -5,6 +5,7 @@
 
 #include "binary.h"
 #include "functions.h"
+#include "load.h"
 
 typedef struct {
     const char *symbol;
@@ -59,8 +60,12 @@ static int is_writable(const weivel_c_core_load_failure *failure) {
 
 static int is_loadable(const char *path, const weivel_c_core_table *table,
                        const weivel_c_core_load_failure *failure) {
-    return path != NULL && table != NULL && table->size >= FIRST_TABLE_SIZE && table->library == NULL &&
+    return path != NULL && weivel_c_core_table_is_large_enough(table) && table->library == NULL &&
            (failure == NULL || is_writable(failure));
+}
+
+int weivel_c_core_table_is_large_enough(const weivel_c_core_table *table) {
+    return table != NULL && table->size >= FIRST_TABLE_SIZE;
 }
 
 static void report_missing(weivel_c_core_load_failure *failure, const char *symbol) {
@@ -99,7 +104,7 @@ weivel_c_status weivel_c_core_load(const char *path, weivel_c_core_table *table,
 weivel_c_status weivel_c_core_unload(weivel_c_core_table *table) {
     uint32_t size;
     int closed;
-    if (table == NULL || table->size < FIRST_TABLE_SIZE) {
+    if (!weivel_c_core_table_is_large_enough(table)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     if (table->library == NULL) {

@@ -55,3 +55,25 @@ add_test(NAME core_only_the_wrapper_calls
     COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
         -DFUNCTIONS=${PROJECT_SOURCE_DIR}/src/core/functions.h
         -P ${CMAKE_CURRENT_SOURCE_DIR}/core/only_the_wrapper_calls.cmake)
+
+function(weivel_c_evasion name stands_as expected)
+    add_test(NAME core_only_the_wrapper_calls_refuses_${name}
+        COMMAND ${CMAKE_COMMAND} -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
+            -DFUNCTIONS=${PROJECT_SOURCE_DIR}/src/core/functions.h
+            -DEVASION=${CMAKE_CURRENT_SOURCE_DIR}/core/evasions/${name}.c -DEVASION_STANDS_AS=${stands_as}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/core/only_the_wrapper_calls.cmake)
+    set_tests_properties(core_only_the_wrapper_calls_refuses_${name} PROPERTIES
+        PASS_REGULAR_EXPRESSION "${expected}"
+        FAIL_REGULAR_EXPRESSION "only the wrapper calls the")
+endfunction()
+
+weivel_c_evasion(field_named_through_a_macro src/context/dispatch.c
+    "src/context/dispatch.c names the table's advance 1 times where 0 are due")
+weivel_c_evasion(offset_into_the_table src/timer/timer.c
+    "src/timer/timer.c takes an offset into the table, which only src/core/load.c may")
+weivel_c_evasion(comment_between_operator_and_name src/core/calls.c
+    "src/core/calls.c names the table's core_destroy 1 times where 0 are due")
+weivel_c_evasion(pointer_copied_in_the_wrapper src/core/wrapper.c
+    "src/core/wrapper.c names the table's unregister 1 times where 0 are due")
+weivel_c_evasion(pointer_copied_in_the_calls src/core/calls.c
+    "src/core/calls.c names the table's release_plugin 2 times where 1 are due")

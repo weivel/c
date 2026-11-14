@@ -5,10 +5,10 @@
 #include <string.h>
 
 #include "events.h"
+#include "load.h"
 #include "mutex.h"
 
 #define END_OF(type, field) (offsetof(type, field) + sizeof(((type *)0)->field))
-#define FIRST_TABLE_SIZE END_OF(weivel_c_core_table, ledger_row_release)
 #define FIRST_OPTIONS_SIZE END_OF(weivel_c_core_options, listener)
 #define FIRST_HOOKS_SIZE END_OF(weivel_c_deadline_hooks, data)
 #define FIRST_STEP_SIZE END_OF(weivel_c_step, place)
@@ -764,8 +764,8 @@ weivel_c_status weivel_c_core_defer(weivel_c_core *core, weivel_c_step *step, ui
 }
 
 static int options_are_usable(const weivel_c_core_options *options) {
-    return options != NULL && options->size >= FIRST_OPTIONS_SIZE && options->table != NULL &&
-           options->table->size >= FIRST_TABLE_SIZE && options->table->library != NULL;
+    return options != NULL && options->size >= FIRST_OPTIONS_SIZE && weivel_c_core_table_is_large_enough(options->table) &&
+           options->table->library != NULL;
 }
 
 static void adopt_options(weivel_c_core *core, const weivel_c_core_options *options) {
