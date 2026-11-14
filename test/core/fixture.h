@@ -47,6 +47,8 @@ static int fail_event_release;
 static uint32_t fail_next_event_at;
 /** The kind an event had before a test bent it to one the core never sends, put back before the core releases it. */
 static uint32_t kind_before_bending;
+/** When not WEIVEL_STATUS_OK, what weivel_advance answers in place of the core, which is then not asked. */
+static weivel_status advance_answers;
 
 static weivel_status counted_core_create(const weivel_core_options *options, weivel_core **core,
                                          uint32_t *pending_events) {
@@ -103,6 +105,9 @@ static weivel_status counted_next_deadline(weivel_core *core, int64_t *deadline,
 static weivel_status counted_advance(weivel_core *core, int64_t now, uint32_t *pending_events) {
     crossed.advance++;
     crossed.advanced_to = now;
+    if (advance_answers != WEIVEL_STATUS_OK) {
+        return advance_answers;
+    }
     return real_table.advance(core, now, pending_events);
 }
 
@@ -140,6 +145,7 @@ static inline void forget_crossings(void) {
     fail_event_release = 0;
     fail_next_event_at = 0;
     kind_before_bending = 0;
+    advance_answers = WEIVEL_STATUS_OK;
 }
 
 typedef struct heard {

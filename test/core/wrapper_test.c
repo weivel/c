@@ -690,6 +690,15 @@ static weivel_handle want_for_a_hundred_milliseconds(weivel_c_core *core, weivel
     return want;
 }
 
+static void want_as_the_host_within(weivel_c_core *core, const char *id, int64_t timeout) {
+    weivel_want_options options = WEIVEL_INIT(weivel_want_options);
+    weivel_handle want = 0;
+    options.timed = WEIVEL_CHOICE_YES;
+    options.now = 0;
+    options.timeout_millis = timeout;
+    CHECK(weivel_c_core_want_service(core, WEIVEL_HOST, id, &options, &want, NULL) == WEIVEL_C_STATUS_OK);
+}
+
 /** What a listener that makes a timed want saw of the deadline hook around its own call. */
 typedef struct drain_time {
     clockwork *clock;
@@ -787,6 +796,100 @@ static void a_due_deadline_is_handed_to_the_core_before_the_call_and_never_check
     end_core(core);
 }
 
+static void the_advance_made_for_a_due_deadline_is_not_checked_again_while_a_later_one_waits(void) {
+    hearing listener = {0};
+    clockwork clock = {0};
+    weivel_c_deadline_hooks hooks = hooks_of(&clock);
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    weivel_handle found = 0;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    want_as_the_host_within(core, "sooner", 100);
+    want_as_the_host_within(core, "later", 500);
+    forget_crossings();
+    clock.clock_reads = 0;
+    clock.now = 150;
+    CHECK(weivel_c_core_get_service(core, WEIVEL_HOST, "sooner", &found, NULL) == WEIVEL_C_STATUS_NONE);
+    CHECK(clock.clock_reads == 1);
+    CHECK(crossed.advance == 1 && crossed.advanced_to == 150);
+    CHECK(count_heard(&listener, WEIVEL_EVENT_WANT_SETTLED) == 1);
+    CHECK(clock.followed_set == 1 && clock.followed_at == 500);
+    end_core(core);
+}
+
+static void a_deadline_is_due_at_the_very_time_it_names(void) {
+    hearing listener = {0};
+    clockwork clock = {0};
+    weivel_c_deadline_hooks hooks = hooks_of(&clock);
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    weivel_handle found = 0;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    want_as_the_host_within(core, "sooner", 100);
+    forget_crossings();
+    clock.now = 99;
+    CHECK(weivel_c_core_get_service(core, WEIVEL_HOST, "sooner", &found, NULL) == WEIVEL_C_STATUS_NONE);
+    CHECK(clock.clock_reads == 1 && crossed.advance == 0);
+    clock.now = 100;
+    CHECK(weivel_c_core_get_service(core, WEIVEL_HOST, "sooner", &found, NULL) == WEIVEL_C_STATUS_NONE);
+    CHECK(clock.clock_reads == 2 && crossed.advance == 1 && crossed.advanced_to == 100);
+    CHECK(count_heard(&listener, WEIVEL_EVENT_WANT_SETTLED) == 1 && clock.followed_set == 0);
+    end_core(core);
+}
+
+static void a_due_advance_the_core_does_not_take_goes_to_the_sink_and_is_made_again(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    clockwork clock = {0};
+    weivel_c_deadline_hooks hooks = hooks_of(&clock);
+    weivel_c_core *core = make_core(NULL, &listener, &sink);
+    weivel_handle found = 0;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    want_as_the_host_within(core, "sooner", 100);
+    forget_crossings();
+    clock.now = 150;
+    advance_answers = WEIVEL_STATUS_OUT_OF_MEMORY;
+    CHECK(weivel_c_core_get_service(core, WEIVEL_HOST, "sooner", &found, NULL) == WEIVEL_C_STATUS_NONE);
+    CHECK(crossed.advance == 1 && count_heard(&listener, WEIVEL_EVENT_WANT_SETTLED) == 0);
+    CHECK(sink.count == 1 && sink.items[0].failure.kind == WEIVEL_C_FAILURE_DUE_ADVANCE);
+    CHECK(sink.items[0].failure.status == WEIVEL_C_STATUS_OUT_OF_MEMORY);
+    advance_answers = WEIVEL_STATUS_OK;
+    CHECK(weivel_c_core_get_service(core, WEIVEL_HOST, "sooner", &found, NULL) == WEIVEL_C_STATUS_NONE);
+    CHECK(crossed.advance == 2 && count_heard(&listener, WEIVEL_EVENT_WANT_SETTLED) == 1);
+    CHECK(sink.count == 1);
+    end_core(core);
+}
+
+/** How often the `follow` hook had been called by the time a listener heard a deadline announced. */
+typedef struct followed_when_heard {
+    clockwork *clock;
+    uint32_t deadlines_heard;
+    uint32_t follows_by_then;
+} followed_when_heard;
+
+static weivel_c_status count_the_follows_before_a_deadline_is_heard(hearing *self, weivel_c_core *core,
+                                                                    const weivel_c_event *event) {
+    followed_when_heard *more = self->more;
+    (void)core;
+    if (event->kind == WEIVEL_EVENT_DEADLINE) {
+        more->deadlines_heard++;
+        more->follows_by_then = more->clock->follows;
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void a_deadline_is_followed_before_the_call_that_drained_it_dispatches_it(void) {
+    hearing listener = {0};
+    clockwork clock = {0};
+    followed_when_heard more = {&clock, 0, 0};
+    weivel_c_deadline_hooks hooks = hooks_of(&clock);
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    listener.react = count_the_follows_before_a_deadline_is_heard;
+    listener.more = &more;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    want_as_the_host_within(core, "sooner", 100);
+    CHECK(more.deadlines_heard == 1 && more.follows_by_then == 1 && clock.follows == 1);
+    end_core(core);
+}
+
 static void an_advance_the_caller_makes_is_not_preceded_by_the_check(void) {
     clockwork clock = {0};
     weivel_c_deadline_hooks hooks = hooks_of(&clock);
@@ -858,6 +961,51 @@ static void hooks_set_while_a_deadline_is_recorded_are_told_it_at_once(void) {
     CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
     CHECK(later.follows == 1 && later.followed_set == 1 && later.followed_at == 100);
     end_core(core);
+}
+
+/** A `follow` hook that ends the core it follows from inside one of its calls, and what the core answered it. */
+typedef struct ending_follower {
+    weivel_c_core *core;
+    uint32_t ends_at_follow;
+    uint32_t follows;
+    weivel_c_status destroyed;
+    weivel_c_status freed_inside;
+} ending_follower;
+
+static weivel_c_status destroy_and_free_inside_follow(void *data, int64_t at, uint32_t set) {
+    ending_follower *self = data;
+    (void)at;
+    (void)set;
+    self->follows++;
+    if (self->follows == self->ends_at_follow) {
+        self->destroyed = weivel_c_core_destroy(self->core);
+        self->freed_inside = weivel_c_core_free(self->core);
+        CHECK(self->freed_inside == WEIVEL_C_STATUS_MISUSE);
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+static weivel_c_deadline_hooks hooks_that_end_the_core(ending_follower *ender) {
+    weivel_c_deadline_hooks hooks = WEIVEL_INIT(weivel_c_deadline_hooks);
+    hooks.follow = destroy_and_free_inside_follow;
+    hooks.data = ender;
+    return hooks;
+}
+
+static void a_core_is_not_freed_while_its_follow_hook_is_being_told(void) {
+    ending_follower ender = {NULL, 1, 0, WEIVEL_C_STATUS_FAILED, WEIVEL_C_STATUS_FAILED};
+    weivel_c_deadline_hooks hooks = hooks_that_end_the_core(&ender);
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    ender.core = core;
+    want_for_a_hundred_milliseconds(core, consumer);
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    CHECK(ender.follows == 1 && ender.destroyed == WEIVEL_C_STATUS_OK);
+    CHECK(ender.freed_inside == WEIVEL_C_STATUS_MISUSE);
+    if (ender.freed_inside == WEIVEL_C_STATUS_MISUSE) {
+        CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_OK);
+    }
 }
 
 static void bend_a_watch_to_an_unknown_kind(weivel_event *event) {
@@ -1436,6 +1584,49 @@ static void more_failures_than_one_call_keeps_are_counted_for_the_sink(void) {
     CHECK(memory.held == 0);
 }
 
+static void a_core_is_not_freed_while_a_follow_asked_for_again_is_being_told(void) {
+    ending_follower ender = {NULL, 2, 0, WEIVEL_C_STATUS_FAILED, WEIVEL_C_STATUS_FAILED};
+    weivel_c_deadline_hooks hooks = hooks_that_end_the_core(&ender);
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    ender.core = core;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    want_for_a_hundred_milliseconds(core, consumer);
+    CHECK(ender.follows == 1);
+    CHECK(weivel_c_core_follow_deadline_again(core) == WEIVEL_C_STATUS_OK);
+    CHECK(ender.follows == 2 && ender.destroyed == WEIVEL_C_STATUS_OK);
+    CHECK(ender.freed_inside == WEIVEL_C_STATUS_MISUSE);
+    if (ender.freed_inside == WEIVEL_C_STATUS_MISUSE) {
+        CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_OK);
+    }
+}
+
+static void an_empty_text_stays_empty_and_a_missing_one_missing_in_an_incomplete_event(void) {
+    counting_memory memory = {0};
+    weivel_c_allocator allocator = {allocate_counted, release_counted, &memory};
+    weivel_c_queued_event *copy = NULL;
+    weivel_event source;
+    memset(&source, 0, sizeof source);
+    source.size = (uint32_t)sizeof source;
+    source.kind = WEIVEL_EVENT_REFUSAL;
+    source.data.refused.refusal.code = WEIVEL_REFUSAL_STALE_HANDLE;
+    source.data.refused.refusal.detail = "what happened";
+    source.data.refused.refusal.fix = "";
+    source.data.refused.subject = NULL;
+    memory.refuse_from_size = sizeof *copy + 1;
+    CHECK(weivel_c_event_copy(&allocator, &source, 7, &copy) == WEIVEL_C_COPIED_INCOMPLETE);
+    CHECK(copy != NULL && copy->event.incomplete == 1 && copy->event.sequence == 7);
+    if (copy != NULL) {
+        const weivel_refusal_event *refused = &copy->event.data.refused;
+        check_text(refused->refusal.detail, WEIVEL_C_TEXT_NOT_COPIED, "a detail that could not be copied");
+        check_text(refused->refusal.fix, "", "an empty fix that could not be copied");
+        CHECK(refused->subject == NULL && refused->refusal.code == WEIVEL_REFUSAL_STALE_HANDLE);
+        release_counted(&memory, copy);
+    }
+    CHECK(memory.held == 0);
+}
+
 static void a_core_says_whether_it_is_destroyed(void) {
     weivel_c_core *core = make_core(NULL, NULL, NULL);
     CHECK(weivel_c_core_is_destroyed(core) == 0);
@@ -1446,6 +1637,7 @@ static void a_core_says_whether_it_is_destroyed(void) {
 
 static void run_the_tests_that_fail_an_allocation(void) {
     a_core_says_whether_it_is_destroyed();
+    a_core_is_not_freed_while_a_follow_asked_for_again_is_being_told();
     a_deadline_whose_copy_fails_is_still_followed();
     more_failures_than_one_call_keeps_are_counted_for_the_sink();
     an_event_that_cannot_be_copied_goes_to_the_sink_and_the_rest_are_still_drained();
@@ -1454,6 +1646,7 @@ static void run_the_tests_that_fail_an_allocation(void) {
     an_event_with_no_memory_at_all_is_dropped_and_told_with_its_kind();
     a_refusal_that_cannot_be_copied_is_answered_with_its_code_and_a_fixed_sentence();
     a_listener_that_cannot_be_kept_is_answered_out_of_memory();
+    an_empty_text_stays_empty_and_a_missing_one_missing_in_an_incomplete_event();
 }
 
 #else
@@ -1463,11 +1656,7 @@ static void run_the_tests_that_fail_an_allocation(void) {
 
 #endif
 
-int main(int argument_count, char **arguments) {
-    if (argument_count != 2 || !load_tables(arguments[1])) {
-        fprintf(stderr, "usage: wrapper_test <core-library>\n");
-        return 2;
-    }
+static void run_the_tests_of_draining_and_answering(void) {
     a_call_that_reports_nothing_waiting_crosses_no_further();
     drains_once_for_each_event_the_core_reports_waiting();
     stops_at_none_when_the_core_holds_fewer_events_than_it_reported();
@@ -1481,27 +1670,52 @@ int main(int argument_count, char **arguments) {
     a_handle_that_names_nothing_is_answered_with_the_status_alone();
     malformed_from_a_call_the_layer_built_is_reported_as_the_layers_defect();
     malformed_for_a_struct_the_caller_built_is_the_callers_mistake();
+}
+
+static void run_the_tests_of_dispatching(void) {
     a_call_inside_a_listener_joins_the_end_and_never_re_enters_the_dispatcher();
     a_deferred_step_runs_in_queue_order_behind_what_was_already_drained();
     a_step_deferred_while_no_dispatch_runs_has_run_when_the_call_returns();
     a_step_runs_as_the_dispatcher_so_a_call_inside_it_joins_the_end();
     a_failing_listener_goes_to_the_sink_and_every_later_event_is_still_heard();
     listeners_hear_in_the_order_added_until_removed();
+    a_deferral_says_whether_the_step_was_dispatched_before_it_returned();
+}
+
+static void run_the_tests_of_deadlines(void) {
     a_deadline_is_followed_after_its_drain_and_before_its_dispatch();
+    a_deadline_is_followed_before_the_call_that_drained_it_dispatches_it();
     a_due_deadline_is_handed_to_the_core_before_the_call_and_never_checked_again();
+    the_advance_made_for_a_due_deadline_is_not_checked_again_while_a_later_one_waits();
+    a_deadline_is_due_at_the_very_time_it_names();
+    a_due_advance_the_core_does_not_take_goes_to_the_sink_and_is_made_again();
     an_advance_the_caller_makes_is_not_preceded_by_the_check();
     a_failing_deadline_hook_goes_to_the_sink_and_the_call_is_still_made();
     the_deadline_hooks_run_outside_the_layer_lock();
     hooks_set_while_a_deadline_is_recorded_are_told_it_at_once();
+    a_core_is_not_freed_while_its_follow_hook_is_being_told();
+}
+
+static void run_the_tests_of_defects_and_endings(void) {
     an_event_of_a_kind_the_layer_does_not_know_is_released_and_never_heard();
     each_defect_of_one_call_keeps_its_own_text();
     a_drain_the_core_refuses_midway_is_a_defect_and_the_rest_is_drained_by_the_next_call();
     an_array_whose_stride_cannot_be_read_leaves_its_event_incomplete();
-    a_deferral_says_whether_the_step_was_dispatched_before_it_returned();
     destroy_inside_a_step_drops_the_steps_behind_it();
     destroy_drops_what_was_not_dispatched_and_nothing_is_dispatched_after_it();
     a_core_that_is_not_destroyed_is_not_freed();
     refuses_a_misused_creation_and_creates_nothing();
+}
+
+int main(int argument_count, char **arguments) {
+    if (argument_count != 2 || !load_tables(arguments[1])) {
+        fprintf(stderr, "usage: wrapper_test <core-library>\n");
+        return 2;
+    }
+    run_the_tests_of_draining_and_answering();
+    run_the_tests_of_dispatching();
+    run_the_tests_of_deadlines();
+    run_the_tests_of_defects_and_endings();
     run_the_tests_that_fail_an_allocation();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("core wrapper");

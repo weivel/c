@@ -26,8 +26,9 @@ typedef struct listener_slot {
 /**
  * @implNote `lock` is the layer lock. It guards every field below it, is held across a call and its drain, and is
  * never held while a listener, a step, a hook or the sink runs. `dispatching` is 1 exactly while one thread delivers
- * the queue, and the queue is empty whenever it is 0, since whoever adds to it either finds a dispatch running or
- * becomes it under the same hold. `core` is NULL once destroyed.
+ * the queue. Whoever adds to the queue either finds a dispatch running or becomes it before it returns, so with no
+ * dispatch running the queue holds only what a thread still on its way out drained: one telling the `follow` hook
+ * first, whose entries the next thread to leave delivers if it gets there sooner. `core` is NULL once destroyed.
  *
  * `deadline_at` and `deadline_set` are the latest announcement drained, and `deadline_serial` counts every reason to
  * tell the `follow` hook again: an announcement, new hooks, a request to follow once more. `following` is 1 exactly
@@ -274,8 +275,8 @@ static int take_following_turn(weivel_c_core *core, following_turn *turn) {
 }
 
 /**
- * Tells the `follow` hook the latest announcement, outside the lock, and again for as long as a newer one was
- * drained meanwhile.
+ * Entered with the lock held and left with it held: tells the `follow` hook the latest announcement, outside the
+ * lock, and again for as long as a newer one was drained meanwhile.
  *
  * @implNote Only the thread that took the turn is here, so two calls of `follow` never overlap and never arrive out
  * of order. A thread that drains a newer announcement while the turn is taken leaves it to this loop, which cannot
@@ -284,7 +285,9 @@ static int take_following_turn(weivel_c_core *core, following_turn *turn) {
 static void follow_the_deadline(weivel_c_core *core, following_turn *turn) {
     int again = 1;
     while (again) {
-        weivel_c_status status = turn->follow(turn->data, turn->at, turn->set);
+        weivel_c_status status;
+        weivel_c_mutex_unlock(&core->lock);
+        status = turn->follow(turn->data, turn->at, turn->set);
         if (status != WEIVEL_C_STATUS_OK) {
             weivel_c_failure failure = failure_of(WEIVEL_C_FAILURE_DEADLINE_HOOK, status, NULL,
                                                   "the deadline hook answered a failure for an announced deadline");
@@ -294,25 +297,35 @@ static void follow_the_deadline(weivel_c_core *core, following_turn *turn) {
         core->followed_serial = turn->serial;
         core->following = 0;
         again = take_following_turn(core, turn);
-        weivel_c_mutex_unlock(&core->lock);
     }
 }
 
+/** Under the lock: makes this thread the dispatcher when something waits and no dispatch runs. */
+static int claim_the_dispatch(weivel_c_core *core) {
+    if (core->first == NULL || core->dispatching) {
+        return 0;
+    }
+    core->dispatching = 1;
+    return 1;
+}
+
 /**
- * Lets the lock go, tells the `follow` hook of a deadline this hold drained, tells the sink what the call met, and
+ * Tells the `follow` hook of a deadline this hold drained, lets the lock go, tells the sink what the call met, and
  * dispatches unless a dispatch is already running. Answers 1 when this thread dispatched.
+ *
+ * @implNote The dispatch is claimed only once `follow` has returned, under the hold it returns with. A thread that
+ * sits in `follow`, or goes round for the announcements others drain meanwhile, therefore keeps nobody's events
+ * waiting: the next thread to leave finds no dispatch running and delivers the queue itself, this thread's entries
+ * first.
  */
 static int leave(weivel_c_core *core, const call_notes *notes) {
     following_turn turn;
-    int follows = take_following_turn(core, &turn);
-    int claimed = core->first != NULL && !core->dispatching;
-    if (claimed) {
-        core->dispatching = 1;
-    }
-    weivel_c_mutex_unlock(&core->lock);
-    if (follows) {
+    int claimed;
+    if (take_following_turn(core, &turn)) {
         follow_the_deadline(core, &turn);
     }
+    claimed = claim_the_dispatch(core);
+    weivel_c_mutex_unlock(&core->lock);
     tell_notes(core, notes);
     if (claimed) {
         dispatch(core);
@@ -388,6 +401,21 @@ static void drain(weivel_c_core *core, uint32_t waiting, call_notes *notes, cons
     }
 }
 
+/**
+ * @implNote An advance the core did not take leaves the deadline recorded, so the next call hands the time over
+ * again: the sink is told each time, since nothing else would say why a want that is past its time still waits.
+ */
+static void note_an_advance_not_taken(call_notes *notes, weivel_status answered) {
+    if (answered == WEIVEL_STATUS_MALFORMED) {
+        note_defect(notes, "the core called the advance made for a due deadline malformed", NULL);
+    } else if (answered != WEIVEL_STATUS_OK) {
+        weivel_c_status status =
+            answered == WEIVEL_STATUS_OUT_OF_MEMORY ? WEIVEL_C_STATUS_OUT_OF_MEMORY : WEIVEL_C_STATUS_FAILED;
+        note(notes, failure_of(WEIVEL_C_FAILURE_DUE_ADVANCE, status, NULL,
+                               "the core did not take the time of a deadline that fell due, which stays due"));
+    }
+}
+
 /** Under the lock: hands the core the time `now` when the recorded deadline has fallen due, and drains that. */
 static int advance_when_due(weivel_c_core *core, int64_t now, call_notes *notes) {
     const weivel_c_event *unused = NULL;
@@ -395,9 +423,7 @@ static int advance_when_due(weivel_c_core *core, int64_t now, call_notes *notes)
     if (!core->deadline_set || now < core->deadline_at) {
         return 0;
     }
-    if (core->table.advance(core->core, now, &waiting) == WEIVEL_STATUS_MALFORMED) {
-        note_defect(notes, "the core called the advance made for a due deadline malformed", NULL);
-    }
+    note_an_advance_not_taken(notes, core->table.advance(core->core, now, &waiting));
     drain(core, waiting, notes, &unused);
     return 1;
 }
@@ -639,20 +665,27 @@ weivel_c_status weivel_c_core_remove_listener(weivel_c_core *core, uint64_t regi
     return status;
 }
 
+static int hooks_are_usable(const weivel_c_deadline_hooks *hooks) {
+    return hooks == NULL || hooks->size >= FIRST_HOOKS_SIZE;
+}
+
+static int has_hooks(const weivel_c_core *core) {
+    return core->hooks.now != NULL || core->hooks.follow != NULL;
+}
+
+static int has_these_hooks(const weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+    return has_hooks(core) && core->hooks.now == hooks->now && core->hooks.follow == hooks->follow &&
+           core->hooks.data == hooks->data;
+}
+
 /**
+ * Entered with the lock held and left without it: puts `hooks` in place, none for NULL.
+ *
  * @implNote Hooks set while a deadline is recorded are told it at once: the serial moves, so this call's own `leave`
  * takes the turn, or the thread that holds it goes round once more with the new hooks.
  */
-weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+static void put_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
     call_notes notes;
-    weivel_c_status status;
-    if (core == NULL || (hooks != NULL && hooks->size < FIRST_HOOKS_SIZE)) {
-        return WEIVEL_C_STATUS_MISUSE;
-    }
-    status = enter(core);
-    if (status != WEIVEL_C_STATUS_OK) {
-        return status;
-    }
     memset(&core->hooks, 0, sizeof core->hooks);
     if (hooks != NULL) {
         core->hooks = *hooks;
@@ -660,12 +693,50 @@ weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *core, const weiv
     core->deadline_serial += core->deadline_serial != 0;
     begin_notes(&notes);
     leave(core, &notes);
+}
+
+weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+    weivel_c_status status = core == NULL || !hooks_are_usable(hooks) ? WEIVEL_C_STATUS_MISUSE : enter(core);
+    if (status == WEIVEL_C_STATUS_OK) {
+        put_hooks(core, hooks);
+    }
+    return status;
+}
+
+weivel_c_status weivel_c_core_install_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+    weivel_c_status status;
+    if (core == NULL || hooks == NULL || !hooks_are_usable(hooks)) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    status = enter(core);
+    if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    if (has_hooks(core)) {
+        weivel_c_mutex_unlock(&core->lock);
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    put_hooks(core, hooks);
+    return WEIVEL_C_STATUS_OK;
+}
+
+weivel_c_status weivel_c_core_remove_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
+    weivel_c_status status = core == NULL || hooks == NULL ? WEIVEL_C_STATUS_MISUSE : enter(core);
+    if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    if (!has_these_hooks(core, hooks)) {
+        weivel_c_mutex_unlock(&core->lock);
+        return WEIVEL_C_STATUS_NONE;
+    }
+    put_hooks(core, NULL);
     return WEIVEL_C_STATUS_OK;
 }
 
 /**
  * @implNote A step is a queue entry like an event, whoever defers it, so a step and a listener never run at once:
- * with no dispatch running the queue is empty, and `leave` makes the caller the dispatcher of this one entry.
+ * with no dispatch running `leave` makes the caller the dispatcher, of this one entry and of whatever a thread still
+ * telling the `follow` hook drained ahead of it.
  */
 weivel_c_status weivel_c_core_defer(weivel_c_core *core, weivel_c_step *step, uint32_t *dispatched_here) {
     call_notes notes;
@@ -808,7 +879,7 @@ weivel_c_status weivel_c_core_free(weivel_c_core *core) {
         return WEIVEL_C_STATUS_OK;
     }
     weivel_c_mutex_lock(&core->lock);
-    idle = core->core == NULL && !core->dispatching;
+    idle = core->core == NULL && !core->dispatching && !core->following;
     weivel_c_mutex_unlock(&core->lock);
     if (!idle) {
         return WEIVEL_C_STATUS_MISUSE;

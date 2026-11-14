@@ -586,6 +586,89 @@ static void a_timer_made_while_the_core_waits_on_a_deadline_is_armed_at_once(voi
     end_rig(&tested);
 }
 
+/** A `follow` hook that is nobody's timer, and what it was told. */
+typedef struct plain_follower {
+    uint32_t follows;
+    int64_t at;
+    uint32_t set;
+} plain_follower;
+
+static weivel_c_status follow_plainly(void *data, int64_t at, uint32_t set) {
+    plain_follower *self = data;
+    self->follows++;
+    self->at = at;
+    self->set = set;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void set_plain_hooks(weivel_c_core *core, plain_follower *follower) {
+    weivel_c_deadline_hooks hooks = WEIVEL_INIT(weivel_c_deadline_hooks);
+    hooks.follow = follow_plainly;
+    hooks.data = follower;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+}
+
+static void a_second_timer_that_keeps_time_is_refused_and_the_first_still_follows(void) {
+    rig tested;
+    owned_scheduler other_time;
+    weivel_c_scheduler scheduler = scheduler_of(&tested.time);
+    weivel_c_scheduler other = scheduler_of(&other_time);
+    weivel_c_timer *second = (weivel_c_timer *)&other_time;
+    memset(&other_time, 0, sizeof other_time);
+    begin_rig(&tested, &scheduler);
+    CHECK(weivel_c_timer_create(tested.core, &other, &second) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(second == NULL);
+    want_within(&tested, tested.consumer, "accounts", 1000);
+    CHECK(waits_for_one_task_at(&tested.time, 1000) && armed_deadline(tested.timer) == 1000);
+    CHECK(other_time.schedules == 0 && other_time.clock_reads == 0);
+    end_rig(&tested);
+}
+
+static void a_destroyed_timer_takes_only_its_own_hooks_off_the_core(void) {
+    rig tested;
+    plain_follower follower = {0, 0, 0};
+    weivel_c_scheduler scheduler = scheduler_of(&tested.time);
+    begin_rig(&tested, &scheduler);
+    set_plain_hooks(tested.core, &follower);
+    CHECK(weivel_c_timer_destroy(tested.timer) == WEIVEL_C_STATUS_OK);
+    want_within(&tested, tested.consumer, "accounts", 1000);
+    CHECK(follower.follows == 1 && follower.set == 1 && follower.at == 1000);
+    CHECK(tested.time.schedules == 0);
+    end_rig(&tested);
+}
+
+static void a_timer_without_a_scheduler_leaves_the_hooks_of_the_core_alone(void) {
+    rig tested;
+    plain_follower follower = {0, 0, 0};
+    weivel_c_timer *second = NULL;
+    begin_rig(&tested, NULL);
+    set_plain_hooks(tested.core, &follower);
+    CHECK(weivel_c_timer_create(tested.core, NULL, &second) == WEIVEL_C_STATUS_OK);
+    want_within(&tested, tested.consumer, "accounts", 1000);
+    CHECK(follower.follows == 1 && follower.at == 1000);
+    CHECK(weivel_c_timer_destroy(second) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_timer_free(second) == WEIVEL_C_STATUS_OK);
+    register_accounts(&tested);
+    CHECK(follower.follows == 2 && follower.set == 0);
+    end_rig(&tested);
+}
+
+static void an_advance_the_core_does_not_take_from_the_task_goes_to_the_sink(void) {
+    rig tested;
+    weivel_c_scheduler scheduler = scheduler_of(&tested.time);
+    begin_rig(&tested, &scheduler);
+    want_within(&tested, tested.consumer, "accounts", 1000);
+    advance_answers = WEIVEL_STATUS_OUT_OF_MEMORY;
+    run_rig_to(&tested, 1000);
+    advance_answers = WEIVEL_STATUS_OK;
+    CHECK(tested.time.fired_count == 1 && crossed.advance == 1 && !timed_out(&tested));
+    CHECK(tested.sink.count == 1 && tested.sink.items[0].failure.kind == WEIVEL_C_FAILURE_DEADLINE_HOOK);
+    CHECK(tested.sink.items[0].failure.status == WEIVEL_C_STATUS_OUT_OF_MEMORY);
+    register_accounts(&tested);
+    CHECK(crossed.advance == 2 && timed_out(&tested) && tested.sink.count == 1);
+    end_rig(&tested);
+}
+
 static void a_misused_creation_makes_no_timer(void) {
     owned_scheduler time;
     weivel_c_scheduler scheduler = scheduler_of(&time);
@@ -928,6 +1011,10 @@ int main(int argument_count, char **arguments) {
     a_task_that_runs_before_schedule_answers_is_never_cancelled_afterwards();
     a_scheduler_that_cannot_schedule_goes_to_the_sink_and_the_wrapper_still_hands_over_the_time();
     a_timer_made_while_the_core_waits_on_a_deadline_is_armed_at_once();
+    a_second_timer_that_keeps_time_is_refused_and_the_first_still_follows();
+    a_destroyed_timer_takes_only_its_own_hooks_off_the_core();
+    a_timer_without_a_scheduler_leaves_the_hooks_of_the_core_alone();
+    an_advance_the_core_does_not_take_from_the_task_goes_to_the_sink();
     a_misused_creation_makes_no_timer();
     a_timed_want_arms_the_timer_at_its_deadline();
     a_settled_want_disarms_the_timer();

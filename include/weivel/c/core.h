@@ -311,7 +311,12 @@ typedef enum weivel_c_failure_kind {
     /** The core named a registration or an implementation the layer holds no object for: one made around it. */
     WEIVEL_C_FAILURE_OBJECT_UNKNOWN = 11,
     /** The host's log answered a status other than WEIVEL_C_STATUS_OK for a line. */
-    WEIVEL_C_FAILURE_LOG = 12
+    WEIVEL_C_FAILURE_LOG = 12,
+    /**
+     * The core did not take the time the wrapper handed it for a deadline that fell due. The call the wrapper was
+     * asked for is still made, the deadline stays due, and the time is handed over again before the next call.
+     */
+    WEIVEL_C_FAILURE_DUE_ADVANCE = 13
 } weivel_c_failure_kind;
 
 /** One failure, as the error sink is told it. Everything in it lives for the length of the sink's call. */
@@ -404,8 +409,9 @@ typedef struct weivel_c_deadline_hooks {
      * One thread calls it at a time, and what it is told last is always the latest announcement drained, whichever
      * thread drained it: a thread that drains a newer one while another is in `follow` leaves it to that thread,
      * which calls `follow` again before it goes on. That second thread may so begin dispatching before `follow` has
-     * returned for its announcement. Hooks set while a deadline is recorded are told it at once. A status other than
-     * WEIVEL_C_STATUS_OK is reported to the error sink.
+     * returned for its announcement, and it then dispatches what the thread in `follow` drained as well, so a slow
+     * `follow` holds back only the call that is telling it. Hooks set while a deadline is recorded are told it at
+     * once. A status other than WEIVEL_C_STATUS_OK is reported to the error sink.
      */
     weivel_c_status (*follow)(void *data, int64_t at, uint32_t set);
     void *data;
@@ -450,6 +456,10 @@ WEIVEL_C_API weivel_c_status weivel_c_core_create(const weivel_c_core_options *o
  * The object itself stays until weivel_c_core_free, and every later call on it answers WEIVEL_C_STATUS_DESTROYED.
  * It may be called inside a listener or a step: the dispatch it runs in then ends with that listener or step.
  *
+ * The deadline hooks are taken off, and `follow` is never told that no deadline is left: whoever follows a core's
+ * deadline disarms itself as it destroys the core. A thread that had already taken its turn to call `follow` when
+ * this was called still calls it, once and possibly after this returns, with the deadline it had read by then.
+ *
  * @return WEIVEL_C_STATUS_OK, also for a core destroyed already; WEIVEL_C_STATUS_MISUSE for NULL.
  * Threading: any thread; a call in flight on another thread finishes first. The one event or step another thread's
  * dispatch had already taken from the queue may still be running when this returns.
@@ -459,8 +469,9 @@ WEIVEL_C_API weivel_c_status weivel_c_core_destroy(weivel_c_core *core);
 /**
  * Frees a destroyed core's object.
  *
- * @return WEIVEL_C_STATUS_OK, also for NULL; WEIVEL_C_STATUS_MISUSE, freeing nothing, for a core not destroyed or
- * one whose dispatch is still running, which is where a listener or a step that destroyed it still is.
+ * @return WEIVEL_C_STATUS_OK, also for NULL; WEIVEL_C_STATUS_MISUSE, freeing nothing, for a core not destroyed, for
+ * one whose dispatch is still running, which is where a listener or a step that destroyed it still is, and for one
+ * whose `follow` hook is still being told a deadline, which is where a hook that destroyed it still is.
  * Threading: no call on this object may be in flight or follow.
  */
 WEIVEL_C_API weivel_c_status weivel_c_core_free(weivel_c_core *core);
@@ -503,9 +514,9 @@ WEIVEL_C_API weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *cor
  * Runs a step once every event drained so far has been dispatched. A step is a queue entry like an event: it joins
  * the end of the queue and is run by the one thread dispatching, in queue order, so no step runs while a listener or
  * another step does. While a dispatch runs, on this thread or on another, that dispatch runs it, possibly after this
- * returns. While none runs, every event drained so far has been dispatched already, so the calling thread becomes
- * the dispatcher and the step has run when this returns; a call it makes is then a call made inside a dispatch, its
- * events heard after the step returns and before this does.
+ * returns. While none runs, the calling thread becomes the dispatcher and the step has run when this returns, behind
+ * whatever a call still telling the `follow` hook on another thread had drained; a call it makes is then a call made
+ * inside a dispatch, its events heard after the step returns and before this does.
  *
  * @param step an idle step, as WEIVEL_INIT or its last run leaves it. Required.
  * @param dispatched_here receives 1 when the calling thread was the dispatcher, so the step has run, or a destroy

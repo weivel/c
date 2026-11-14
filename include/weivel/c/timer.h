@@ -48,6 +48,12 @@ typedef void (*weivel_c_task_callback)(void *callback_data);
  *   into the core, and what that queues calls `cancel` and `schedule` from inside the callback.
  * - Whatever lock `now`, `schedule` or `cancel` take is never held while calling into the core.
  * - It stays usable until the timer is freed.
+ *
+ * A scheduler whose `cancel` answers 0 for a task it did take out can never show the timer that the task's callback
+ * is past, so the timer keeps what that callback would be called with, and makes more for each task it schedules
+ * after: the timer's memory then grows with every deadline it follows, until weivel_c_timer_free. The host of such a
+ * scheduler has the same burden: it keeps the timer until it knows by its own means that no callback can still
+ * arrive. A scheduler that can tell answers 1 whenever it took the task out, and costs neither.
  */
 typedef struct weivel_c_scheduler {
     uint32_t size;
@@ -78,24 +84,33 @@ typedef struct weivel_c_scheduler {
 typedef struct weivel_c_timer weivel_c_timer;
 
 /**
- * Makes the timer of a core and installs it as the core's deadline hooks, replacing any set before; a deadline the
- * core already waits on is armed at once. A core has one timer, and its hooks are the timer's while the timer lives.
+ * Makes the timer of a core. With a scheduler it installs itself as the core's deadline hooks, and a deadline the
+ * core already waits on is armed at once.
+ *
+ * A core is followed by one thing at a time, and a timer displaces nothing: on a core that already has deadline
+ * hooks, another timer's or ones set with weivel_c_core_set_deadline_hooks, a timer with a scheduler is refused and
+ * the hooks in place stay. Whoever wants another scheduler destroys the first timer, or removes the hooks, first.
+ * Hooks set over a timer's afterwards replace them, and the timer then follows nothing; destroying it leaves those
+ * hooks alone.
+ *
+ * A timer without a scheduler installs nothing, so it is never refused and leaves whatever hooks the core has.
  *
  * @param core the core to follow. Required. It must not be freed before the timer is destroyed.
  * @param scheduler the caller's clock and scheduler, copied; NULL for a timer that arms nothing and reads no clock.
  * @param timer receives the timer, owned by the caller until weivel_c_timer_free. Required; NULL on every answer but
  * OK.
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE for a NULL `core` or `timer`, a scheduler smaller than its first
- * shape or missing a function, or a negative `maximum_wait`; WEIVEL_C_STATUS_OUT_OF_MEMORY;
- * WEIVEL_C_STATUS_DESTROYED for a destroyed core.
+ * shape or missing a function, a negative `maximum_wait`, or a scheduler given for a core that already has deadline
+ * hooks; WEIVEL_C_STATUS_OUT_OF_MEMORY; WEIVEL_C_STATUS_DESTROYED for a destroyed core.
  * Threading: any thread.
  */
 WEIVEL_C_API weivel_c_status weivel_c_timer_create(weivel_c_core *core, const weivel_c_scheduler *scheduler,
                                                    weivel_c_timer **timer);
 
 /**
- * Disarms the timer for good: it cancels the one task it holds and takes its hooks off the core, so nothing of the
- * layer's is left for the scheduler to run. An owner calls it before it destroys the core.
+ * Disarms the timer for good: it cancels the one task it holds and takes its hooks off the core, when the core's
+ * hooks are still the timer's own, so nothing of the layer's is left for the scheduler to run. An owner calls it
+ * before it destroys the core.
  *
  * A callback of the timer's that the scheduler begins all the same, because it had begun before the cancel or
  * because the scheduler could not take it out, takes the timer's lock, sees the timer destroyed and does nothing: it
