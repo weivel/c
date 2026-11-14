@@ -4,6 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define END_OF(type, field) (offsetof(type, field) + sizeof(((type *)0)->field))
+#define FIRST_MANIFEST_SIZE offsetof(weivel_manifest, permissions)
+#define FIRST_OFFER_SIZE END_OF(weivel_service_offer, id)
+#define FIRST_WANT_SIZE END_OF(weivel_service_want, degradable)
+#define FIRST_NUMBER_SIZE END_OF(weivel_number, value)
+
 /** The strictest alignment any part of a manifest's copy needs. */
 typedef union widest {
     double number;
@@ -148,6 +154,68 @@ static void copy_into(copier *self, const weivel_manifest *given) {
     if (made != NULL) {
         *made = copy;
     }
+}
+
+/** 1 when a list's elements each declare the stride its first declares, at least `first_size`; a NULL list counts. */
+static int list_is_whole(const void *items, uint32_t count, size_t first_size) {
+    size_t stride;
+    uint32_t index;
+    if (items == NULL || count == 0) {
+        return 1;
+    }
+    stride = *(const uint32_t *)items;
+    if (stride < first_size) {
+        return 0;
+    }
+    for (index = 1; index < count; index++) {
+        if (*(const uint32_t *)element_at(items, index, stride) != stride) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int offers_are_whole(weivel_service_offers given) {
+    uint32_t index;
+    if (!list_is_whole(given.items, given.count, FIRST_OFFER_SIZE)) {
+        return 0;
+    }
+    for (index = 0; given.items != NULL && index < given.count; index++) {
+        weivel_service_offer offer;
+        read_element(&offer, sizeof offer, element_at(given.items, index, given.items->size), given.items->size);
+        if (!list_is_whole(offer.attributes.items, offer.attributes.count, FIRST_NUMBER_SIZE)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int wants_are_whole(weivel_service_wants given) {
+    uint32_t index;
+    if (!list_is_whole(given.items, given.count, FIRST_WANT_SIZE)) {
+        return 0;
+    }
+    for (index = 0; given.items != NULL && index < given.count; index++) {
+        weivel_service_want want;
+        read_element(&want, sizeof want, element_at(given.items, index, given.items->size), given.items->size);
+        if (!list_is_whole(want.constraints.items, want.constraints.count, FIRST_NUMBER_SIZE)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/**
+ * @implNote The first shapes are the core's: each ends where the core's header says the struct's appended fields
+ * begin, and a number has none appended.
+ */
+int weivel_c_host_manifest_is_whole(const weivel_manifest *given) {
+    weivel_manifest read;
+    if (given->size < FIRST_MANIFEST_SIZE) {
+        return 0;
+    }
+    read_element(&read, sizeof read, given, given->size);
+    return offers_are_whole(read.services.provides) && wants_are_whole(read.services.consumes);
 }
 
 /**

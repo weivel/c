@@ -139,13 +139,14 @@ static void forget_unkept(weivel_c_host *host, host_plugin *made) {
  * activate: building it at the open could fail for want of memory after the core had opened the plugin, and here such
  * a failure is answered to the caller with nothing left registered.
  */
-static weivel_c_status register_into(weivel_c_host *host, host_plugin *made, const weivel_manifest *manifest,
-                                     weivel_c_refusal *refusal) {
-    weivel_c_status status = weivel_c_core_register_manifest(host->core, manifest, &made->handle, refusal);
+static weivel_c_status register_into(weivel_c_host *host, host_plugin *made, const weivel_manifest *given,
+                                     const weivel_manifest *copy, weivel_c_refusal *refusal) {
+    const weivel_manifest *registered = weivel_c_host_manifest_is_whole(given) ? copy : given;
+    weivel_c_status status = weivel_c_core_register_manifest(host->core, registered, &made->handle, refusal);
     if (status != WEIVEL_C_STATUS_OK) {
         return status;
     }
-    status = weivel_c_context_create(host->contexts, made->handle, manifest, &made->context);
+    status = weivel_c_context_create(host->contexts, made->handle, copy, &made->context);
     if (status != WEIVEL_C_STATUS_OK) {
         undo_the_registration(host, made->handle);
     }
@@ -173,7 +174,7 @@ weivel_c_status weivel_c_host_register(weivel_c_host *host, const weivel_manifes
         free(made);
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
-    status = register_into(host, made, copy, refusal);
+    status = register_into(host, made, manifest, copy, refusal);
     if (status != WEIVEL_C_STATUS_OK) {
         free(copy);
         free(made);
