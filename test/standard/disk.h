@@ -23,8 +23,14 @@
 
 #define DISK_PATH 1024
 
-static inline void disk_join(char *path, const char *directory, const char *name) {
-    snprintf(path, DISK_PATH, "%s/%s", directory, name);
+/** Answers 1 when the joined path fits whole, and 0, the path emptied, when it would be cut. */
+static inline int disk_join(char *path, const char *directory, const char *name) {
+    int written = snprintf(path, DISK_PATH, "%s/%s", directory, name);
+    if (written < 0 || written >= DISK_PATH) {
+        path[0] = '\0';
+        return 0;
+    }
+    return 1;
 }
 
 static inline int disk_make_directory(const char *path) {

@@ -17,8 +17,13 @@ void lifecycle_record(lifecycle_run *run, const char *first, const char *second,
         conformance_world_fail(run->world, "the run records more lines than the driver holds", first);
         return;
     }
-    snprintf(run->trace[run->trace_count++], LIFECYCLE_TEXT, "%s %s%s%s", first, second, third[0] == '\0' ? "" : " ",
-             third);
+    int written = snprintf(run->trace[run->trace_count], LIFECYCLE_TEXT, "%s %s%s%s", first, second,
+                           third[0] == '\0' ? "" : " ", third);
+    if (written < 0 || written >= LIFECYCLE_TEXT) {
+        conformance_world_fail(run->world, "the run records a line longer than the driver holds", first);
+        return;
+    }
+    run->trace_count++;
 }
 
 void lifecycle_get(lifecycle_run *run, const char *name, weivel_c_context *context, const char *id) {
@@ -45,12 +50,17 @@ static weivel_c_status want_ended(void *data, const weivel_c_settlement *settlem
     const char *name = want->owner->plugin->name;
     char ending[LIFECYCLE_TEXT];
     const char *code = conformance_code_name(settlement->refusal.code);
+    int written;
     want->ended = 1;
     if (settlement->service != NULL) {
         lifecycle_record(run, "settled", name, want->id);
     } else {
-        snprintf(ending, sizeof ending, "%s %s", want->id, code == NULL ? "unknown" : code);
-        lifecycle_record(run, "rejected", name, ending);
+        written = snprintf(ending, sizeof ending, "%s %s", want->id, code == NULL ? "unknown" : code);
+        if (written < 0 || (size_t)written >= sizeof ending) {
+            conformance_world_fail(run->world, "the run records a line longer than the driver holds", name);
+        } else {
+            lifecycle_record(run, "rejected", name, ending);
+        }
     }
     if (want->awaiting != NULL && !want->awaiting->inside_the_entry) {
         go_on(want->awaiting);

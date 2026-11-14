@@ -52,10 +52,22 @@ static int ends_with_json(const char *name) {
 
 static int walk_into(id_storage *storage, const char *root, const char *relative);
 
+static int path_too_long(id_storage *storage, const char *root, const char *name) {
+    int written = snprintf(storage->problem, CONFORMANCE_PROBLEM, "a path under %s, at %s, is longer than %u bytes",
+                           root, name, 4095u);
+    if (written >= CONFORMANCE_PROBLEM) {
+        memcpy(storage->problem + CONFORMANCE_PROBLEM - 4, "...", 4);
+    }
+    return 0;
+}
+
 static int visit_entry(void *data, const char *name, int is_directory) {
     walk *at = data;
     char joined[4096];
-    snprintf(joined, sizeof joined, "%s%s%s", at->relative, at->relative[0] == '\0' ? "" : "/", name);
+    int written = snprintf(joined, sizeof joined, "%s%s%s", at->relative, at->relative[0] == '\0' ? "" : "/", name);
+    if (written < 0 || (size_t)written >= sizeof joined) {
+        return path_too_long(at->storage, at->root, name);
+    }
     if (is_directory) {
         return walk_into(at->storage, at->root, joined);
     }
@@ -69,7 +81,10 @@ static int visit_entry(void *data, const char *name, int is_directory) {
 static int walk_into(id_storage *storage, const char *root, const char *relative) {
     char directory[4096];
     walk at = {storage, root, relative};
-    snprintf(directory, sizeof directory, "%s%s%s", root, relative[0] == '\0' ? "" : "/", relative);
+    int written = snprintf(directory, sizeof directory, "%s%s%s", root, relative[0] == '\0' ? "" : "/", relative);
+    if (written < 0 || (size_t)written >= sizeof directory) {
+        return path_too_long(storage, root, relative);
+    }
     return conformance_walk_directory(directory, visit_entry, &at, storage->problem);
 }
 

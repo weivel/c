@@ -35,9 +35,10 @@ static inline void start_trace(trace *self) {
 
 static inline void trace_line(trace *self, const char *first, const char *second, const char *third) {
     lock_test_mutex(&self->mutex);
-    if (self->count < HOST_WORLD_LINES) {
+    if (self->count < HOST_WORLD_LINES &&
         snprintf(self->lines[self->count], HOST_WORLD_TEXT, "%s %s%s%s", first, second, third[0] == '\0' ? "" : " ",
-                 third);
+                 third) >= HOST_WORLD_TEXT) {
+        self->lines[self->count][0] = '\0';
     }
     self->count++;
     unlock_test_mutex(&self->mutex);
@@ -371,8 +372,10 @@ static inline weivel_c_status trace_settlement(void *data, const weivel_c_settle
         trace_line(&self->in->heard, "settled", self->manifest.import_name, settlement->id);
     } else {
         char line[HOST_WORLD_TEXT];
-        snprintf(line, sizeof line, "%s %s", settlement->id,
-                 settlement->refusal.code == WEIVEL_REFUSAL_STOPPED ? "stopped" : "refused");
+        if (snprintf(line, sizeof line, "%s %s", settlement->id,
+                     settlement->refusal.code == WEIVEL_REFUSAL_STOPPED ? "stopped" : "refused") >= HOST_WORLD_TEXT) {
+            line[0] = '\0';
+        }
         trace_line(&self->in->heard, "rejected", self->manifest.import_name, line);
     }
     return WEIVEL_C_STATUS_OK;
