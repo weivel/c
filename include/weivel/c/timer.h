@@ -75,6 +75,10 @@ typedef struct weivel_c_scheduler {
     /**
      * The longest the scheduler can wait, in milliseconds; 0, or a field beyond `size`, when it can wait any time.
      * A deadline further away is waited for in steps of this length, the clock read once as each step is scheduled.
+     * The contract's "the clock is read when the timer schedules a wait that ends short of the deadline" reads in C as
+     * "each time it schedules while `maximum_wait` is not 0": whether a wait ends short is known only from the time
+     * now, so a bounded scheduler costs one clock read per scheduling even for a deadline within its reach, and an
+     * unbounded one none.
      */
     int64_t maximum_wait;
 } weivel_c_scheduler;
