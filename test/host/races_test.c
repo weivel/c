@@ -362,7 +362,9 @@ static void finish_the_late_activation(void *argument) {
 
 /**
  * Stops a settling on its way into the verify, once the release no longer answers that activation, while the destroy
- * releases its plugin and would end: the settling's outcome must still be queued before the core is destroyed.
+ * releases its plugin and would end: the settling's outcome must still be queued before the core is destroyed. Another
+ * thread's dispatch runs meanwhile, so the settling is not a step of a dispatch of its own and the destroy's first step
+ * runs in that dispatch while the settling is held.
  */
 static void an_activate_settling_while_the_destroy_ends_is_still_told_its_outcome(void) {
     test_plugin *only[1];
@@ -373,10 +375,12 @@ static void an_activate_settling_while_the_destroy_ends_is_still_told_its_outcom
     register_test_plugin(&racing.late);
     only[0] = &racing.late;
     CHECK(activate_in_order(&racing.in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    hold_another_threads_dispatch(&racing);
     arm_the_stop(&racing, 1);
     CHECK(start_test_thread(&racing.runner, finish_the_late_activation, &racing));
     pass_gate(&racing.reached);
     CHECK(weivel_c_host_destroy(racing.in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 0);
+    let_the_held_dispatch_go(&racing);
     CHECK(weivel_c_completion_finish(racing.early.deactivation, WEIVEL_C_ENTRY_DONE, NULL) == WEIVEL_C_STATUS_OK);
     open_gate(&racing.free_to_go);
     join_test_thread(&racing.runner);

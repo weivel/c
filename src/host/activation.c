@@ -372,7 +372,7 @@ weivel_c_status weivel_c_host_quarantine(host_ending *ending, const weivel_quara
     return status;
 }
 
-weivel_c_status weivel_c_host_verify_plugin(host_ending *ending, weivel_c_refusal *refusal) {
+static weivel_c_status verify_then_quarantine(host_ending *ending, weivel_c_refusal *refusal) {
     host_plugin *plugin = ending->plugin;
     weivel_c_host *host = plugin->host;
     weivel_c_status verified = weivel_c_core_verify_activation(host->core, plugin->handle, refusal);
@@ -390,6 +390,42 @@ weivel_c_status weivel_c_host_verify_plugin(host_ending *ending, weivel_c_refusa
         weivel_c_host_quarantine(ending, NULL);
     }
     return verified;
+}
+
+/** A verify and the quarantine its refusal makes, run as one step of a dispatch. */
+typedef struct host_verifying {
+    weivel_c_step step;
+    host_ending *ending;
+    weivel_c_refusal *refusal;
+    weivel_c_status verified;
+} host_verifying;
+
+static weivel_c_status verify_as_a_step(void *data, weivel_c_core *core) {
+    host_verifying *verifying = data;
+    (void)core;
+    verifying->verified = verify_then_quarantine(verifying->ending, verifying->refusal);
+    return WEIVEL_C_STATUS_OK;
+}
+
+/**
+ * @implNote Where no dispatch runs, the verify and its quarantine are one step this thread dispatches, so the events
+ * of the verification are heard only once the quarantine is made. Inside a dispatch they queue behind it anyway.
+ */
+weivel_c_status weivel_c_host_verify_plugin(host_ending *ending, weivel_c_refusal *refusal) {
+    host_verifying verifying;
+    uint32_t ran = 0;
+    verifying.step = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
+    verifying.step.run = verify_as_a_step;
+    verifying.step.data = &verifying;
+    verifying.ending = ending;
+    verifying.refusal = refusal;
+    verifying.verified = WEIVEL_C_STATUS_FAILED;
+    if (weivel_c_core_run_as_the_dispatcher(ending->plugin->host->core, &verifying.step, &ran) ==
+            WEIVEL_C_STATUS_OK &&
+        ran) {
+        return verifying.verified;
+    }
+    return verify_then_quarantine(ending, refusal);
 }
 
 /** 1 while the plugin is in the opened list, so a quarantine of it is the host's to make and a release ends it. */

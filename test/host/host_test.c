@@ -304,6 +304,65 @@ static void a_refused_verify_quarantines_the_plugin_in_the_same_step(void) {
     end_host_world(&with.in);
 }
 
+/** What a listener the caller added to the core saw of a plugin when the core's refusal of its verify was heard. */
+typedef struct refusal_watch {
+    screens *with;
+    uint32_t refusals;
+    uint32_t state_when_heard;
+} refusal_watch;
+
+static weivel_c_status note_the_state_at_the_refusal(void *data, weivel_c_core *core, const weivel_c_event *event) {
+    refusal_watch *self = data;
+    (void)core;
+    if (event->kind == WEIVEL_EVENT_REFUSAL && event->data.refused.subject != NULL &&
+        strcmp(event->data.refused.subject, "flaky") == 0) {
+        self->refusals++;
+        self->state_when_heard = state_of(&self->with->in, &self->with->flaky);
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+/** Opens the screens with a listener of the caller's on the core, and readies flaky's verify to be refused. */
+static void ready_a_refused_verify(screens *with, refusal_watch *watch) {
+    weivel_c_listener listener = {note_the_state_at_the_refusal, watch};
+    weivel_c_core *core = NULL;
+    uint64_t registration = 0;
+    memset(with, 0, sizeof *with);
+    memset(watch, 0, sizeof *watch);
+    watch->with = with;
+    begin_host_world(&with->in);
+    open_screens(with);
+    CHECK(weivel_c_host_core(with->in.host, &core) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_add_listener(core, &listener, &registration) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_provide_capability(with->flaky.context, "screens", &flaky_screen, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+}
+
+static void check_quarantined_before_the_refusal_was_heard(screens *with, refusal_watch *watch) {
+    CHECK(watch->refusals == 1 && watch->state_when_heard == WEIVEL_C_PLUGIN_QUARANTINED);
+    CHECK(state_of(&with->in, &with->flaky) == WEIVEL_C_PLUGIN_QUARANTINED);
+    CHECK(sink_count(&with->in) == 0);
+    end_host_world(&with->in);
+}
+
+/** A verify the caller asks for at the top level quarantines before any event of the verification is dispatched. */
+static void a_refused_verify_asked_for_is_quarantined_before_its_refusal_is_heard(void) {
+    screens with;
+    refusal_watch watch;
+    ready_a_refused_verify(&with, &watch);
+    CHECK(weivel_c_host_verify(with.in.host, with.flaky.handle, NULL) == WEIVEL_C_STATUS_REFUSED);
+    check_quarantined_before_the_refusal_was_heard(&with, &watch);
+}
+
+/** An activate finished on a thread with no dispatch: its refused verify is quarantined before the refusal is heard. */
+static void a_refused_verify_of_a_later_finish_is_quarantined_before_its_refusal_is_heard(void) {
+    screens with;
+    refusal_watch watch;
+    ready_a_refused_verify(&with, &watch);
+    CHECK(weivel_c_completion_finish(with.flaky.activation, WEIVEL_C_ENTRY_DONE, NULL) == WEIVEL_C_STATUS_OK);
+    check_quarantined_before_the_refusal_was_heard(&with, &watch);
+}
+
 #if !defined(WEIVEL_C_USING_SHARED)
 /** An allocator that refuses the allocation of the given number, counting from 1, and makes every other. */
 typedef struct refusing_allocator {
@@ -703,6 +762,8 @@ int main(int argument_count, char **arguments) {
     an_open_that_fails_for_no_refusal_is_answered_failed_and_leaves_nothing_open_in_the_core();
     an_awaited_want_does_not_hold_back_a_later_plugin();
     a_refused_verify_quarantines_the_plugin_in_the_same_step();
+    a_refused_verify_asked_for_is_quarantined_before_its_refusal_is_heard();
+    a_refused_verify_of_a_later_finish_is_quarantined_before_its_refusal_is_heard();
     verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing();
     a_manifest_is_copied_so_its_caller_may_free_it_once_it_is_registered();
     every_broken_shape_is_answered_as_the_core_answers_it();
