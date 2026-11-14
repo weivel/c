@@ -103,6 +103,32 @@ WEIVEL_C_API weivel_c_status weivel_c_handles_add(weivel_c_handles *handles, con
                                                   uint64_t *token);
 
 /**
+ * Reserves the room one later addition takes, an entry or a holding, so that addition needs no memory and cannot
+ * fail for want of it. It is what a caller does before it asks the core for a handle: the entry is then made, with
+ * weivel_c_handles_add_reserved, by a step that has no way to fail, and the core never holds an object whose handle
+ * the table lacks. A reservation that was not used is given back with weivel_c_handles_unreserve.
+ *
+ * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_OUT_OF_MEMORY, nothing reserved; WEIVEL_C_STATUS_MISUSE for NULL.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_handles_reserve(weivel_c_handles *handles);
+
+/**
+ * Gives back one reservation that was not used.
+ *
+ * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE for NULL or when nothing is reserved.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_handles_unreserve(weivel_c_handles *handles);
+
+/**
+ * weivel_c_handles_add into room a reservation holds, which it uses up whatever it answers. It allocates nothing.
+ *
+ * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE as weivel_c_handles_add answers it, and when nothing is
+ * reserved. Never WEIVEL_C_STATUS_OUT_OF_MEMORY.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_handles_add_reserved(weivel_c_handles *handles,
+                                                           const weivel_c_handle_entry *entry, uint64_t *token);
+
+/**
  * Answers the entry of a handle. It allocates nothing and costs one probe of a hash table on average.
  *
  * @param entry receives the entry; required, with its `size` set.
@@ -150,6 +176,15 @@ WEIVEL_C_API weivel_c_status weivel_c_handles_end_owned(weivel_c_handles *handle
  */
 WEIVEL_C_API weivel_c_status weivel_c_handles_hold(weivel_c_handles *handles, weivel_handle plugin,
                                                    weivel_handle implementation, void *object);
+
+/**
+ * weivel_c_handles_hold into room a reservation holds, which it uses up whatever it answers. It allocates nothing.
+ *
+ * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE as weivel_c_handles_hold answers it, and when nothing is
+ * reserved. Never WEIVEL_C_STATUS_OUT_OF_MEMORY.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_handles_hold_reserved(weivel_c_handles *handles, weivel_handle plugin,
+                                                            weivel_handle implementation, void *object);
 
 /**
  * Answers the object `plugin` was handed for `implementation`.
