@@ -7,16 +7,26 @@ void weivel_c_references_start(weivel_c_references *references) {
     InterlockedExchange(&references->word, 2);
 }
 
-int weivel_c_references_take(weivel_c_references *references) {
+#if defined(WEIVEL_C_TESTING)
+void weivel_c_references_start_holding(weivel_c_references *references, uint32_t held) {
+    InterlockedExchange(&references->word, (LONG)held * 2);
+}
+#endif
+
+weivel_c_reference_answer weivel_c_references_take(weivel_c_references *references) {
     LONG seen = InterlockedOr(&references->word, 0);
     while ((seen & 1) == 0) {
-        LONG found = InterlockedCompareExchange(&references->word, seen + 2, seen);
+        LONG found;
+        if ((uint32_t)seen / 2u >= WEIVEL_C_REFERENCES_MOST) {
+            return WEIVEL_C_REFERENCE_FULL;
+        }
+        found = InterlockedCompareExchange(&references->word, seen + 2, seen);
         if (found == seen) {
-            return 1;
+            return WEIVEL_C_REFERENCE_TAKEN;
         }
         seen = found;
     }
-    return 0;
+    return WEIVEL_C_REFERENCE_CLOSED;
 }
 
 int weivel_c_references_close(weivel_c_references *references) {

@@ -10,6 +10,27 @@
 #define END_OF(type, field) (offsetof(type, field) + sizeof(((type *)0)->field))
 #define FIRST_DECLARATION_SIZE END_OF(weivel_standard_library, storage)
 #define FIRST_FAILURE_SIZE END_OF(weivel_c_library_load_failure, wrong_kind)
+#define TAKEN_ID_FAILURE_SIZE END_OF(weivel_c_library_load_failure, taken_id)
+
+#if defined(WEIVEL_C_TESTING)
+/**
+ * When not 0, how many registrations of a library's services from now the one refused as out of memory is: 1 refuses
+ * the next. The seam a test fails a later service's registration through.
+ */
+uint32_t weivel_c_testing_registration_to_refuse;
+
+static int is_refused_for_testing(void) {
+    if (weivel_c_testing_registration_to_refuse == 0) {
+        return 0;
+    }
+    weivel_c_testing_registration_to_refuse--;
+    return weivel_c_testing_registration_to_refuse == 0;
+}
+#else
+static int is_refused_for_testing(void) {
+    return 0;
+}
+#endif
 
 static int is_text(const char *text) {
     return text != NULL && text[0] != '\0';
@@ -19,8 +40,14 @@ static int is_writable(const weivel_c_library_load_failure *failure) {
     return failure != NULL && failure->size >= FIRST_FAILURE_SIZE;
 }
 
-static int holds_its_items(const void *items, size_t count) {
-    return (items != NULL || count == 0) && count <= UINT32_MAX;
+static int holds_some_items(const void *items, size_t count) {
+    return items != NULL && count > 0 && count <= UINT32_MAX;
+}
+
+static void tell_taken_id(weivel_c_library_load_failure *failure, const char *id) {
+    if (failure != NULL && failure->size >= TAKEN_ID_FAILURE_SIZE) {
+        failure->taken_id = id;
+    }
 }
 
 static weivel_c_status check_function(const weivel_standard_library_function *function,
@@ -41,7 +68,7 @@ static weivel_c_status check_service(const weivel_standard_library_service *serv
                                      weivel_c_library_load_failure *failure) {
     weivel_c_status status = WEIVEL_C_STATUS_OK;
     size_t at;
-    if (!is_text(service->id) || !holds_its_items(service->functions, service->function_count)) {
+    if (!is_text(service->id) || !holds_some_items(service->functions, service->function_count)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     for (at = 0; at < service->function_count && status == WEIVEL_C_STATUS_OK; at++) {
@@ -50,17 +77,41 @@ static weivel_c_status check_service(const weivel_standard_library_service *serv
     return status;
 }
 
-/** Checks everything of the declaration the host relies on before anything is opened: the caller's mistakes. */
+/**
+ * Checks everything of the declaration the host relies on before anything is opened: the caller's mistakes.
+ *
+ * @implNote A declaration of no service, or a service of no function, is refused, as the standard's reader refuses
+ * both, so a declaration the caller builds cannot load what a read one never could.
+ */
 static weivel_c_status check_declaration(const weivel_standard_library *declaration,
                                          weivel_c_library_load_failure *failure) {
     weivel_c_status status = WEIVEL_C_STATUS_OK;
+    const char *repeated;
     size_t at;
     if (declaration->size < FIRST_DECLARATION_SIZE || !is_text(declaration->release) ||
-        !holds_its_items(declaration->services, declaration->service_count)) {
+        !holds_some_items(declaration->services, declaration->service_count)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     for (at = 0; at < declaration->service_count && status == WEIVEL_C_STATUS_OK; at++) {
         status = check_service(&declaration->services[at], failure);
+    }
+    repeated = status == WEIVEL_C_STATUS_OK ? weivel_c_host_repeated_id(declaration) : NULL;
+    if (repeated != NULL) {
+        tell_taken_id(failure, repeated);
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    return status;
+}
+
+static weivel_c_status check_before_opening(weivel_c_host *host, const weivel_standard_library *declaration,
+                                            weivel_c_library_load_failure *failure) {
+    const char *held = NULL;
+    weivel_c_status status = check_declaration(declaration, failure);
+    status = status == WEIVEL_C_STATUS_OK && !weivel_c_host_is_running(host) ? WEIVEL_C_STATUS_DESTROYED : status;
+    status = status == WEIVEL_C_STATUS_OK ? weivel_c_host_find_held_id(host, declaration, &held) : status;
+    if (status == WEIVEL_C_STATUS_OK && held != NULL) {
+        tell_taken_id(failure, held);
+        return WEIVEL_C_STATUS_MISUSE;
     }
     return status;
 }
@@ -102,8 +153,8 @@ static weivel_c_status build_service(library_service *made, weivel_c_library *li
     size_t at;
     made->library = library;
     made->id = copy_text(declared->id);
-    made->functions = calloc(count == 0 ? 1 : count, sizeof *made->functions);
-    made->names = calloc(count == 0 ? 1 : count, sizeof *made->names);
+    made->functions = calloc(count, sizeof *made->functions);
+    made->names = calloc(count, sizeof *made->names);
     if (made->id == NULL || made->functions == NULL || made->names == NULL) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
@@ -133,7 +184,7 @@ static weivel_c_status build_library(weivel_c_library *made, const weivel_standa
         return status;
     }
     made->release = (library_release)release;
-    made->services = calloc(declaration->service_count == 0 ? 1 : declaration->service_count, sizeof *made->services);
+    made->services = calloc(declaration->service_count, sizeof *made->services);
     if (made->services == NULL) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
@@ -163,16 +214,24 @@ static void free_library(weivel_c_library *library) {
     free(library);
 }
 
+static weivel_c_status register_one(library_service *service, weivel_c_refusal *refusal) {
+    weivel_c_status status;
+    if (is_refused_for_testing()) {
+        return WEIVEL_C_STATUS_OUT_OF_MEMORY;
+    }
+    status = weivel_c_host_register_service(service->library->host, service->id, &service->object, NULL,
+                                            &service->registration, refusal);
+    service->registered = status == WEIVEL_C_STATUS_OK;
+    return status;
+}
+
 static weivel_c_status register_services(weivel_c_library *library, weivel_c_refusal *refusal) {
     uint32_t at;
     for (at = 0; at < library->service_count; at++) {
-        library_service *service = &library->services[at];
-        weivel_c_status status = weivel_c_host_register_service(library->host, service->id, &service->object, NULL,
-                                                                &service->registration, refusal);
+        weivel_c_status status = register_one(&library->services[at], refusal);
         if (status != WEIVEL_C_STATUS_OK) {
             return status;
         }
-        service->registered = 1;
     }
     return WEIVEL_C_STATUS_OK;
 }
@@ -190,29 +249,45 @@ static void unregister_services(weivel_c_library *library) {
     }
 }
 
-/** Under the host's lock, keeps a library on the host's list, unless the host has begun to be destroyed. */
-static int keep_library(weivel_c_library *library) {
+/**
+ * Keeps a library on the host's list before anything of it is registered, so every later ending of it finds it, the
+ * destroy's among them, unless the host has begun to be destroyed or another live library declares one of its ids.
+ *
+ * @implNote The check and the keeping are one step under the host's lock, so two loads declaring one id cannot both
+ * be kept.
+ */
+static weivel_c_status keep_library(weivel_c_library *library, const weivel_standard_library *declaration,
+                                    weivel_c_library_load_failure *failure) {
     weivel_c_host *host = library->host;
-    int kept;
+    const library_service *taken;
+    weivel_c_status status;
     weivel_c_mutex_lock(&host->lock);
-    kept = host->state == HOST_RUNNING;
-    if (kept) {
+    taken = weivel_c_host_service_another_library_declares(host, library);
+    status = host->state != HOST_RUNNING ? WEIVEL_C_STATUS_DESTROYED
+             : taken != NULL             ? WEIVEL_C_STATUS_MISUSE
+                                         : WEIVEL_C_STATUS_OK;
+    if (status == WEIVEL_C_STATUS_OK) {
         library->next = host->libraries;
         host->libraries = library;
     }
     weivel_c_mutex_unlock(&host->lock);
-    return kept;
+    if (status == WEIVEL_C_STATUS_MISUSE) {
+        tell_taken_id(failure, declaration->services[taken - library->services].id);
+    }
+    return status;
 }
 
-/** Undoes a load that did not finish: what it registered, what it built and the binary it opened. */
-static void abandon(weivel_c_host *host, weivel_c_library *made, void *binary) {
-    if (made != NULL) {
-        unregister_services(made);
+/** Undoes a load that kept and registered nothing: frees what it built and closes the binary it opened. */
+static void discard(weivel_c_host *host, weivel_c_library *made, void *binary) {
+    int closed;
+    if (made == NULL) {
+        closed = weivel_c_binary_close(binary);
+    } else {
+        closed = weivel_c_host_close_service_library(made);
         free_library(made);
     }
-    if (!weivel_c_binary_close(binary)) {
-        weivel_c_host_report(host, WEIVEL_C_FAILURE_UNLOAD, WEIVEL_C_STATUS_NOT_UNLOADED,
-                             "a C library whose load the host undid could not be closed");
+    if (!closed) {
+        weivel_c_host_report_unclosed(host, "a C library whose load the host undid could not be closed");
     }
 }
 
@@ -237,39 +312,8 @@ static void clear_failure(weivel_c_library_load_failure *failure) {
     if (is_writable(failure)) {
         failure->missing_symbol = NULL;
         failure->wrong_kind = NULL;
+        tell_taken_id(failure, NULL);
     }
-}
-
-weivel_c_status weivel_c_host_load_library(weivel_c_host *host, const char *path,
-                                           const weivel_standard_library *declaration, weivel_c_library **library,
-                                           weivel_c_library_load_failure *failure, weivel_c_refusal *refusal) {
-    weivel_c_library *made = NULL;
-    void *binary = NULL;
-    weivel_c_status status;
-    if (library == NULL) {
-        return WEIVEL_C_STATUS_MISUSE;
-    }
-    *library = NULL;
-    clear_failure(failure);
-    if (host == NULL || !is_text(path) || declaration == NULL || (failure != NULL && !is_writable(failure))) {
-        return WEIVEL_C_STATUS_MISUSE;
-    }
-    status = check_declaration(declaration, failure);
-    status = status == WEIVEL_C_STATUS_OK && !weivel_c_host_is_running(host) ? WEIVEL_C_STATUS_DESTROYED : status;
-    if (status != WEIVEL_C_STATUS_OK) {
-        return status;
-    }
-    status = open_and_build(host, path, declaration, &made, failure, &binary);
-    status = status == WEIVEL_C_STATUS_OK ? register_services(made, refusal) : status;
-    status = status == WEIVEL_C_STATUS_OK && !keep_library(made) ? WEIVEL_C_STATUS_DESTROYED : status;
-    if (status != WEIVEL_C_STATUS_OK) {
-        if (binary != NULL) {
-            abandon(host, made, binary);
-        }
-        return status;
-    }
-    *library = made;
-    return WEIVEL_C_STATUS_OK;
 }
 
 /** Drops the host's own reference, closing the binary now when nothing else holds the library. */
@@ -277,7 +321,7 @@ static weivel_c_status close_once_unheld(weivel_c_library *library) {
     if (!weivel_c_references_drop(&library->references)) {
         return WEIVEL_C_STATUS_OK;
     }
-    return weivel_c_host_close_library_binary(library->binary) ? WEIVEL_C_STATUS_OK : WEIVEL_C_STATUS_NOT_UNLOADED;
+    return weivel_c_host_close_service_library(library) ? WEIVEL_C_STATUS_OK : WEIVEL_C_STATUS_NOT_UNLOADED;
 }
 
 static int take_for_unloading(weivel_c_library *library) {
@@ -290,6 +334,65 @@ static int take_for_unloading(weivel_c_library *library) {
     return taken;
 }
 
+/** Closes a library to calls, unregisters what it registered, and closes its binary once nothing holds it. */
+static weivel_c_status unload_taken(weivel_c_library *library) {
+    weivel_c_references_close(&library->references);
+    unregister_services(library);
+    return close_once_unheld(library);
+}
+
+/**
+ * Undoes a load the host kept, through the unload path, unless the destroy took the library first and unloads it
+ * itself. Its record stays until weivel_c_host_free, since a consumer told of one of its objects may still hold it.
+ */
+static void undo_kept(weivel_c_library *library) {
+    if (take_for_unloading(library) && unload_taken(library) != WEIVEL_C_STATUS_OK) {
+        weivel_c_host_report_unclosed(library->host, "a C library whose load the host undid could not be closed");
+    }
+}
+
+static weivel_c_status load_checked(weivel_c_host *host, const char *path, const weivel_standard_library *declaration,
+                                    weivel_c_library **library, weivel_c_library_load_failure *failure,
+                                    weivel_c_refusal *refusal) {
+    weivel_c_library *made = NULL;
+    void *binary = NULL;
+    weivel_c_status status = open_and_build(host, path, declaration, &made, failure, &binary);
+    status = status == WEIVEL_C_STATUS_OK ? keep_library(made, declaration, failure) : status;
+    if (status != WEIVEL_C_STATUS_OK) {
+        if (binary != NULL) {
+            discard(host, made, binary);
+        }
+        return status;
+    }
+    status = register_services(made, refusal);
+    status = status == WEIVEL_C_STATUS_OK && !weivel_c_host_is_running(host) ? WEIVEL_C_STATUS_DESTROYED : status;
+    if (status != WEIVEL_C_STATUS_OK) {
+        undo_kept(made);
+        return status;
+    }
+    *library = made;
+    return WEIVEL_C_STATUS_OK;
+}
+
+weivel_c_status weivel_c_host_load_library(weivel_c_host *host, const char *path,
+                                           const weivel_standard_library *declaration, weivel_c_library **library,
+                                           weivel_c_library_load_failure *failure, weivel_c_refusal *refusal) {
+    weivel_c_status status;
+    if (library == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    *library = NULL;
+    clear_failure(failure);
+    if (host == NULL || !is_text(path) || declaration == NULL || (failure != NULL && !is_writable(failure))) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    status = check_before_opening(host, declaration, failure);
+    if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    return load_checked(host, path, declaration, library, failure, refusal);
+}
+
 weivel_c_status weivel_c_host_unload_library(weivel_c_host *host, weivel_c_library *library) {
     if (host == NULL || library == NULL || library->host != host) {
         return WEIVEL_C_STATUS_MISUSE;
@@ -300,9 +403,7 @@ weivel_c_status weivel_c_host_unload_library(weivel_c_host *host, weivel_c_libra
     if (!take_for_unloading(library)) {
         return WEIVEL_C_STATUS_NONE;
     }
-    weivel_c_references_close(&library->references);
-    unregister_services(library);
-    return close_once_unheld(library);
+    return unload_taken(library);
 }
 
 static weivel_c_library *next_to_unload(weivel_c_host *host) {

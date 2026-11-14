@@ -52,7 +52,8 @@ typedef struct weivel_c_bytes {
 /**
  * Releases bytes a library function answered: hands them to the library's declared release symbol, once, and empties
  * `bytes`. A library unloaded while the bytes were held closes now if they were the last thing keeping it open; a
- * close the platform refuses is told to the error sink.
+ * close the platform refuses is told to the error sink, unless the host has been destroyed, after which it is told to
+ * nobody.
  *
  * @return WEIVEL_C_STATUS_OK, also as a no-op for empty bytes, a second release of the same struct among them;
  * WEIVEL_C_STATUS_MISUSE for NULL or a struct smaller than its first shape.
@@ -68,10 +69,14 @@ typedef struct weivel_c_library_answer {
     int32_t status;
     /**
      * For a failure, 1 when `body` is well-formed UTF-8, so it reads as the English text saying why, and 0 when it is
-     * not, so it is only bytes. 0 for a result, whose bytes are never inspected.
+     * not, so it is only bytes. A failure with an empty or absent body answers 1, since no bytes are well-formed UTF-8.
+     * 0 for a result, whose bytes are never inspected.
      */
     uint32_t body_is_utf8;
-    /** The result, or the failure's body, answered in place; empty when the function answered none. */
+    /**
+     * The result, or the failure's body, answered in place; empty when the function answered none. A `size` of 0, as
+     * WEIVEL_INIT of this struct leaves it, is taken as the layer's own size and set to it by a call.
+     */
     weivel_c_bytes body;
 } weivel_c_library_answer;
 
@@ -84,12 +89,13 @@ typedef struct weivel_c_library_service weivel_c_library_service;
  * @param function the function's index in `service->function_names`.
  * @param input the caller's bytes, handed to the library unchanged for the length of the call; NULL only with a
  * length of 0.
- * @param answer the caller's struct with `size` set and an empty `body`; filled on OK and on FAILED, and left with an
- * empty body on every other answer.
+ * @param answer the caller's struct with `size` set and an empty `body`, as WEIVEL_INIT of it alone leaves it; filled
+ * on OK and on FAILED, and left with an empty body on every other answer.
  * @return WEIVEL_C_STATUS_OK for a status of 0; WEIVEL_C_STATUS_FAILED for any other status, which `answer->status`
  * holds with its body; WEIVEL_C_STATUS_UNLOADED, with nothing called, once the library is unloaded;
- * WEIVEL_C_STATUS_MISUSE (a NULL service or answer, an answer smaller than its first shape or still holding a body, an
- * index past the last function, or NULL input with a length).
+ * WEIVEL_C_STATUS_OUT_OF_MEMORY, with nothing called, while the library already holds as many calls and bodies as its
+ * count of them can hold; WEIVEL_C_STATUS_MISUSE (a NULL service or answer, an answer smaller than its first shape or
+ * still holding a body, an index past the last function, or NULL input with a length).
  */
 typedef weivel_c_status (*weivel_c_library_call)(const weivel_c_library_service *service, uint32_t function,
                                                   const uint8_t *input, size_t input_length,
@@ -130,6 +136,12 @@ typedef struct weivel_c_library_load_failure {
      * name, the declaration's own text. NULL otherwise.
      */
     const char *wrong_kind;
+    /**
+     * After WEIVEL_C_STATUS_MISUSE for a service id the declaration lists twice, or one that a registration under this
+     * host holds already (a plugin's, another live library's or the host's own), that id, the declaration's own text.
+     * NULL otherwise.
+     */
+    const char *taken_id;
 } weivel_c_library_load_failure;
 
 /**
@@ -139,17 +151,24 @@ typedef struct weivel_c_library_load_failure {
  * separator is searched for by the platform, so give an absolute path to load exactly one file. Binds the declared
  * release symbol and every declared function's symbol, then registers each service through the host's own context.
  *
+ * A load that does not finish once a service is registered is undone as an unload is: its services are closed to
+ * calls and unregistered, and its binary closes once nothing holds it, so an object a consumer was told of meanwhile
+ * stays readable until weivel_c_host_free and answers WEIVEL_C_STATUS_UNLOADED.
+ *
  * @param path the library, UTF-8; the declaration names none. Read only during the call. Required.
  * @param declaration read only during the call: every text the host keeps it copies. Required, with a release symbol,
- * each service with an id, and each function with a name, a symbol and the kind WEIVEL_STANDARD_FUNCTION_BYTES.
+ * at least one service, each with an id no other service of it repeats and at least one function, and each function
+ * with a name, a symbol and the kind WEIVEL_STANDARD_FUNCTION_BYTES.
  * @param library receives the loaded library. Required; NULL on every answer but OK.
  * @param failure receives what a status alone cannot say; may be NULL. Cleared first when given and large enough.
  * @param refusal the core's refusal of a service's registration; may be NULL.
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE (a NULL or empty path, a NULL argument, a declaration or failure
- * smaller than its first shape, an empty text the declaration needs, or a function of another kind, the caller's
- * mistake that is told to nobody else); WEIVEL_C_STATUS_NOT_A_LIBRARY; WEIVEL_C_STATUS_MISSING_SYMBOL;
- * WEIVEL_C_STATUS_REFUSED with the core's refusal of a registration; WEIVEL_C_STATUS_OUT_OF_MEMORY;
- * WEIVEL_C_STATUS_DESTROYED. Nothing stays loaded or registered on any answer but OK.
+ * smaller than its first shape, an empty text or list the declaration needs, a function of another kind, an id it
+ * lists twice, or an id a registration under this host holds already, a plugin's, another live library's or the
+ * host's own, since registering it under WEIVEL_HOST would replace that registration; each the caller's mistake that
+ * is told to nobody else); WEIVEL_C_STATUS_NOT_A_LIBRARY; WEIVEL_C_STATUS_MISSING_SYMBOL; WEIVEL_C_STATUS_REFUSED with
+ * the core's refusal of a registration; WEIVEL_C_STATUS_OUT_OF_MEMORY; WEIVEL_C_STATUS_DESTROYED. Nothing stays
+ * loaded or registered on any answer but OK.
  */
 WEIVEL_C_API weivel_c_status weivel_c_host_load_library(weivel_c_host *host, const char *path,
                                                         const weivel_standard_library *declaration,

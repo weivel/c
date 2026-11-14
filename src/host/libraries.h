@@ -55,10 +55,37 @@ weivel_c_status weivel_c_host_call_library(const weivel_c_library_service *servi
                                            const uint8_t *input, size_t input_length,
                                            weivel_c_library_answer *answer);
 
-/** Closes a library's binary. Answers 1, or 0 when the platform refused. */
+/** Closes the binary of a library, a plugin entry's or one loaded as host services. Answers 1, or 0 when refused. */
 int weivel_c_host_close_library_binary(void *binary);
 
-/** Drops a reference on a library, closing its binary when it was the last one, and tells the sink when that fails. */
+/** Closes the binary of a library loaded as host services, as weivel_c_host_close_library_binary answers. */
+int weivel_c_host_close_service_library(weivel_c_library *library);
+
+/** Tells the sink that a library's binary did not close, unless the host has been destroyed, which is quiet after. */
+void weivel_c_host_report_unclosed(weivel_c_host *host, const char *text);
+
+/** Drops a reference on a library, closing its binary when it was the last one, and reports when that fails. */
 void weivel_c_host_drop_library_reference(weivel_c_library *library);
+
+/** The id a later service of the declaration repeats from an earlier one, the declaration's own text, or NULL. */
+const char *weivel_c_host_repeated_id(const weivel_standard_library *declaration);
+
+/**
+ * Finds a declared id that a registration under the host holds now, whoever owns it, by a get as WEIVEL_HOST, which
+ * reaches every id: `*held` is the declaration's own text, or NULL when none is held.
+ *
+ * @implNote A get that finds an id leaves the host holding that registration, as any get does; the load is refused
+ * then, so a load that goes on leaves nothing held.
+ * @return WEIVEL_C_STATUS_OK, whether or not one is held; any other status the get answered.
+ */
+weivel_c_status weivel_c_host_find_held_id(weivel_c_host *host, const weivel_standard_library *declaration,
+                                           const char **held);
+
+/**
+ * Under the host's lock: the service of `library` whose id another library on the host's list, not yet unloaded,
+ * declares too, or NULL. It covers a library whose load has kept it and not finished registering, which no get sees.
+ */
+const library_service *weivel_c_host_service_another_library_declares(weivel_c_host *host,
+                                                                      const weivel_c_library *library);
 
 #endif

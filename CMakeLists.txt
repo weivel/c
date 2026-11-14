@@ -40,7 +40,7 @@ set(WEIVEL_C_SOURCES
     src/context/contexts.c src/context/records.c src/context/services.c src/context/capabilities.c
     src/context/capacity.c src/context/dispatch.c
     src/host/entry.c src/host/plugins.c src/host/activation.c src/host/release.c src/host/lifetime.c
-    src/host/libraries.c src/host/library_calls.c src/host/manifests.c)
+    src/host/libraries.c src/host/library_calls.c src/host/library_ids.c src/host/manifests.c)
 if(WIN32)
     list(APPEND WEIVEL_C_SOURCES src/core/binary_windows.c src/core/mutex_windows.c src/host/references_windows.c)
 else()

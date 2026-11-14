@@ -31,11 +31,31 @@ typedef struct weivel_c_references {
 
 #endif
 
+/**
+ * The most references a library may hold at once: twice it plus the closed bit still fits the word on every platform,
+ * a Windows LONG included, so taking one more is refused rather than overflowing the count.
+ */
+#define WEIVEL_C_REFERENCES_MOST 0x3FFFFFFEu
+
+/** What weivel_c_references_take answers. */
+typedef enum weivel_c_reference_answer {
+    /** The library is closed to calls, so no reference was taken. */
+    WEIVEL_C_REFERENCE_CLOSED = 0,
+    WEIVEL_C_REFERENCE_TAKEN = 1,
+    /** WEIVEL_C_REFERENCES_MOST are held already, so none was taken. */
+    WEIVEL_C_REFERENCE_FULL = 2
+} weivel_c_reference_answer;
+
 /** Starts the count with one reference, the host's, and open to calls. */
 void weivel_c_references_start(weivel_c_references *references);
 
-/** Takes a reference unless the library is closed to calls. Answers 1 when it took one. */
-int weivel_c_references_take(weivel_c_references *references);
+#if defined(WEIVEL_C_TESTING)
+/** Starts the count with `held` references and open to calls: the seam a test reaches the most through. */
+void weivel_c_references_start_holding(weivel_c_references *references, uint32_t held);
+#endif
+
+/** Takes a reference unless the library is closed to calls or holds the most already. */
+weivel_c_reference_answer weivel_c_references_take(weivel_c_references *references);
 
 /** Closes the library to calls. Answers 1 when this call closed it, 0 when it was closed already. */
 int weivel_c_references_close(weivel_c_references *references);

@@ -79,6 +79,10 @@ weivel_c_test(host_library_test host/library_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library> $<TARGET_FILE:echo_library>
     ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt)
 add_dependencies(host_library_test weivel_core_shared service_library echo_library)
+weivel_c_test(host_library_loading_test host/library_loading_test.c weivel_c_testing
+    $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library> $<TARGET_FILE:echo_library>)
+add_dependencies(host_library_loading_test weivel_core_shared service_library echo_library)
+weivel_c_test(host_references_test host/references_test.c weivel_c_testing)
 weivel_c_test(host_library_threads_test host/library_threads_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library>)
 add_dependencies(host_library_threads_test weivel_core_shared service_library)
