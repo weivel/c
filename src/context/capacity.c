@@ -51,15 +51,22 @@ static int ask_the_answerer(weivel_c_contexts *contexts, const weivel_c_event *e
  */
 void weivel_c_contexts_answer_capacity(weivel_c_contexts *contexts, const weivel_c_event *event) {
     weivel_capacity capacity = WEIVEL_INIT(weivel_capacity);
-    weivel_c_record registration;
-    if (event->incomplete ||
-        !weivel_c_record_read(contexts, event->data.capacity.registration, WEIVEL_C_RECORD_SERVICE, &registration)) {
+    weivel_c_record *registration;
+    int answered = 1;
+    if (event->incomplete) {
+        return;
+    }
+    registration = weivel_c_record_borrow(contexts, event->data.capacity.registration, WEIVEL_C_RECORD_SERVICE);
+    if (registration == NULL) {
         return;
     }
     capacity.request = event->data.capacity.request;
     capacity.serves = WEIVEL_CHOICE_YES;
-    if (registration.answerer.answer != NULL && !ask_the_answerer(contexts, event, &registration, &capacity)) {
-        return;
+    if (registration->answerer.answer != NULL) {
+        answered = ask_the_answerer(contexts, event, registration, &capacity);
     }
-    send_the_answer(contexts, event, &capacity);
+    weivel_c_record_put_back(registration);
+    if (answered) {
+        send_the_answer(contexts, event, &capacity);
+    }
 }

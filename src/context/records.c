@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "../core/calls.h"
+
 static uint32_t handle_kind_of(uint32_t kind) {
     switch (kind) {
     case WEIVEL_C_RECORD_SERVICE:
@@ -42,14 +44,32 @@ static void unlink_record(weivel_c_record *record) {
     record->next = NULL;
 }
 
+/** Frees a record and gives back the holding reservation a want still holds. */
 static void release_record(weivel_c_record *record) {
     weivel_c_contexts *contexts = record->contexts;
+    if (record->holding_reserved) {
+        weivel_c_handles_unreserve(contexts->handles);
+    }
     contexts->allocator.release(contexts->allocator.data, record);
+}
+
+/**
+ * Ends the record's entry while the table still keeps that very record under its handle.
+ *
+ * @implNote The core may issue a forgotten plugin's handle again, so an entry under the same handle can be another's.
+ */
+static void end_entry_of(weivel_c_record *record) {
+    weivel_c_handles *handles = record->contexts->handles;
+    weivel_c_handle_entry entry = WEIVEL_INIT(weivel_c_handle_entry);
+    if (record->handle != 0 && weivel_c_handles_find(handles, record->handle, &entry) == WEIVEL_C_STATUS_OK &&
+        entry.object == record) {
+        weivel_c_handles_end(handles, record->handle, NULL);
+    }
 }
 
 /** Under the lock of the contexts: takes a record out of the table and out of its list. */
 static void drop_record(weivel_c_record *record) {
-    weivel_c_handles_end(record->contexts->handles, record->handle, NULL);
+    end_entry_of(record);
     unlink_record(record);
     record->contexts->record_count--;
 }
@@ -86,18 +106,41 @@ static weivel_c_record *make_record(weivel_c_context *context, uint32_t kind, co
     return record;
 }
 
+/** Reserves the room of the one holding a want's settlement may hand over. Answers 0 when memory ran out. */
+static int reserve_the_settlements_holding(weivel_c_record *record) {
+    if (record->kind != WEIVEL_C_RECORD_WANT) {
+        return 1;
+    }
+    if (weivel_c_handles_reserve(record->contexts->handles) != WEIVEL_C_STATUS_OK) {
+        return 0;
+    }
+    record->holding_reserved = 1;
+    return 1;
+}
+
 weivel_c_record *weivel_c_record_prepare(weivel_c_context *context, uint32_t kind, const char *id) {
     weivel_c_record *record = make_record(context, kind, id);
-    if (record != NULL && weivel_c_handles_reserve(context->contexts->handles) != WEIVEL_C_STATUS_OK) {
+    weivel_c_handles *handles = context->contexts->handles;
+    if (record == NULL) {
+        return NULL;
+    }
+    if (weivel_c_handles_reserve(handles) != WEIVEL_C_STATUS_OK) {
+        release_record(record);
+        return NULL;
+    }
+    if (!reserve_the_settlements_holding(record)) {
+        weivel_c_handles_unreserve(handles);
         release_record(record);
         return NULL;
     }
     return record;
 }
 
-void weivel_c_record_abandon(weivel_c_record *record) {
-    weivel_c_handles_unreserve(record->contexts->handles);
-    release_record(record);
+void weivel_c_record_abandon(const weivel_c_keeping *keeping) {
+    if (!keeping->reservation_used) {
+        weivel_c_handles_unreserve(keeping->record->contexts->handles);
+    }
+    release_record(keeping->record);
 }
 
 weivel_c_status weivel_c_record_keep_answered(void *data) {
@@ -111,6 +154,7 @@ weivel_c_status weivel_c_record_keep_answered(void *data) {
     entry.owner = record->plugin;
     entry.object = record;
     weivel_c_mutex_lock(&contexts->lock);
+    keeping->reservation_used = entry.handle != 0;
     status = weivel_c_handles_add_reserved(contexts->handles, &entry, NULL);
     if (status == WEIVEL_C_STATUS_OK) {
         record->handle = entry.handle;
@@ -149,6 +193,35 @@ int weivel_c_record_read(weivel_c_contexts *contexts, weivel_handle handle, uint
     return found;
 }
 
+weivel_c_record *weivel_c_record_borrow(weivel_c_contexts *contexts, weivel_handle handle, uint32_t kind) {
+    weivel_c_record *record;
+    weivel_c_mutex_lock(&contexts->lock);
+    record = weivel_c_record_find(contexts, handle, kind);
+    if (record != NULL && record->ended) {
+        record = NULL;
+    }
+    if (record != NULL) {
+        record->calling = 1;
+    }
+    weivel_c_mutex_unlock(&contexts->lock);
+    return record;
+}
+
+void weivel_c_record_put_back(weivel_c_record *record) {
+    weivel_c_contexts *contexts = record->contexts;
+    int freeing;
+    weivel_c_mutex_lock(&contexts->lock);
+    record->calling = 0;
+    freeing = record->ended && !record->retiring;
+    if (freeing) {
+        drop_record(record);
+    }
+    weivel_c_mutex_unlock(&contexts->lock);
+    if (freeing) {
+        release_record(record);
+    }
+}
+
 weivel_c_record *weivel_c_record_claim(weivel_c_contexts *contexts, weivel_handle handle, uint32_t kind) {
     weivel_c_record *record;
     weivel_c_mutex_lock(&contexts->lock);
@@ -158,9 +231,20 @@ weivel_c_record *weivel_c_record_claim(weivel_c_contexts *contexts, weivel_handl
     }
     if (record != NULL) {
         record->ended = 1;
+        record->retiring = 1;
     }
     weivel_c_mutex_unlock(&contexts->lock);
     return record;
+}
+
+weivel_c_status weivel_c_record_hold_settled(weivel_c_record *want, weivel_handle plugin,
+                                             weivel_handle implementation, void **object) {
+    weivel_c_status held = weivel_c_contexts_hold(want->contexts, plugin, implementation, WEIVEL_C_RECORD_SERVICE,
+                                                  (int)want->holding_reserved, object);
+    if (held != WEIVEL_C_STATUS_FAILED) {
+        want->holding_reserved = 0;
+    }
+    return held;
 }
 
 static int is_takeable(const weivel_c_record *record, const weivel_c_context *context, uint32_t kind,
@@ -169,24 +253,8 @@ static int is_takeable(const weivel_c_record *record, const weivel_c_context *co
            record->plugin == context->plugin && !record->ended;
 }
 
-weivel_c_record *weivel_c_record_take(weivel_c_context *context, weivel_handle handle, uint32_t kind,
-                                      uint32_t other_kind) {
-    weivel_c_contexts *contexts = context->contexts;
-    weivel_c_record *record;
-    weivel_c_mutex_lock(&contexts->lock);
-    record = record_under(contexts, handle);
-    if (is_takeable(record, context, kind, other_kind)) {
-        record->ended = 1;
-        record->retiring = 1;
-    } else {
-        record = NULL;
-    }
-    weivel_c_mutex_unlock(&contexts->lock);
-    return record;
-}
-
 /** @implNote A destroyed core runs no step, so the record stays in its list for the frees that follow a destroy. */
-void weivel_c_record_retire(weivel_c_record *record) {
+static void retire(weivel_c_record *record) {
     weivel_c_contexts *contexts = record->contexts;
     if (weivel_c_core_defer(contexts->core, &record->step, NULL) == WEIVEL_C_STATUS_OK) {
         return;
@@ -194,21 +262,6 @@ void weivel_c_record_retire(weivel_c_record *record) {
     weivel_c_mutex_lock(&contexts->lock);
     record->retiring = 0;
     weivel_c_mutex_unlock(&contexts->lock);
-}
-
-void weivel_c_record_give_back(weivel_c_record *record) {
-    weivel_c_contexts *contexts = record->contexts;
-    int abandoned;
-    weivel_c_mutex_lock(&contexts->lock);
-    abandoned = record->abandoned != 0;
-    if (!abandoned) {
-        record->ended = 0;
-        record->retiring = 0;
-    }
-    weivel_c_mutex_unlock(&contexts->lock);
-    if (abandoned) {
-        weivel_c_record_retire(record);
-    }
 }
 
 void weivel_c_record_end_in_dispatch(weivel_c_record *record) {
@@ -227,14 +280,13 @@ static void orphan_record(weivel_c_record *record) {
 
 /** Under the lock of the contexts: ends one record, and answers it when it is the caller's to free. */
 static weivel_c_record *end_record(weivel_c_record *record, int freeing) {
-    weivel_c_handles_end(record->contexts->handles, record->handle, NULL);
+    end_entry_of(record);
     record->ended = 1;
-    if (!record->retiring) {
+    if (!record->retiring && !record->calling) {
         unlink_record(record);
         record->contexts->record_count--;
         return record;
     }
-    record->abandoned = 1;
     if (freeing) {
         orphan_record(record);
     }
@@ -268,6 +320,15 @@ void weivel_c_records_free(weivel_c_record *first) {
     }
 }
 
+void weivel_c_records_discard(weivel_c_record *first) {
+    while (first != NULL) {
+        weivel_c_record *next = first->next;
+        end_entry_of(first);
+        release_record(first);
+        first = next;
+    }
+}
+
 weivel_c_status weivel_c_contexts_hold(weivel_c_contexts *contexts, weivel_handle plugin, weivel_handle handle,
                                        uint32_t kind, int reserved, void **object) {
     weivel_c_status status = WEIVEL_C_STATUS_FAILED;
@@ -284,22 +345,61 @@ weivel_c_status weivel_c_contexts_hold(weivel_c_contexts *contexts, weivel_handl
     return status;
 }
 
+/** What an ending the core is asked for works on, and the record its answered step marked, if any. */
+typedef struct ending {
+    weivel_c_context *context;
+    weivel_handle handle;
+    uint32_t kind;
+    uint32_t other_kind;
+    weivel_c_record *marked;
+} ending;
+
+/**
+ * The answered step of an ending the core made: under the layer lock, before any event is dispatched, it marks the
+ * record ended and retiring.
+ *
+ * @implNote Marking only once the core answered OK is what lets a settlement the core queued before the ending still
+ * settle: the core refuses the ending of a want that settled, so no settlement can be waiting for a marked record.
+ */
+static weivel_c_status mark_ended(void *data) {
+    ending *ended = data;
+    weivel_c_contexts *contexts = ended->context->contexts;
+    weivel_c_record *record;
+    weivel_c_mutex_lock(&contexts->lock);
+    record = record_under(contexts, ended->handle);
+    if (is_takeable(record, ended->context, ended->kind, ended->other_kind)) {
+        record->ended = 1;
+        record->retiring = 1;
+        ended->marked = record;
+    }
+    weivel_c_mutex_unlock(&contexts->lock);
+    return WEIVEL_C_STATUS_OK;
+}
+
+static int names_a_takeable_record(const ending *asked) {
+    weivel_c_contexts *contexts = asked->context->contexts;
+    int takeable;
+    weivel_c_mutex_lock(&contexts->lock);
+    takeable =
+        is_takeable(record_under(contexts, asked->handle), asked->context, asked->kind, asked->other_kind);
+    weivel_c_mutex_unlock(&contexts->lock);
+    return takeable;
+}
+
 weivel_c_status weivel_c_context_end_handle(weivel_c_context *context, weivel_handle handle, uint32_t kind,
                                             uint32_t other_kind, weivel_c_refusal *refusal) {
-    weivel_c_record *record;
+    ending asked = {context, handle, kind, other_kind, NULL};
+    weivel_c_answered_step then = {mark_ended, &asked};
     weivel_c_status status;
     if (context == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
-    record = weivel_c_record_take(context, handle, kind, other_kind);
-    if (record == NULL) {
+    if (!names_a_takeable_record(&asked)) {
         return WEIVEL_C_STATUS_NONE;
     }
-    status = weivel_c_core_unregister(context->contexts->core, handle, refusal);
-    if (status == WEIVEL_C_STATUS_OK) {
-        weivel_c_record_retire(record);
-    } else {
-        weivel_c_record_give_back(record);
+    status = weivel_c_core_unregister_then(context->contexts->core, handle, refusal, &then);
+    if (asked.marked != NULL) {
+        retire(asked.marked);
     }
     return status;
 }

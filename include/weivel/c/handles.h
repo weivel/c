@@ -120,7 +120,9 @@ WEIVEL_C_API weivel_c_status weivel_c_handles_reserve(weivel_c_handles *handles)
 WEIVEL_C_API weivel_c_status weivel_c_handles_unreserve(weivel_c_handles *handles);
 
 /**
- * weivel_c_handles_add into room a reservation holds, which it uses up whatever it answers. It allocates nothing.
+ * weivel_c_handles_add into room a reservation holds. It allocates nothing. Once `handles` and `entry` pass the checks
+ * weivel_c_handles_add makes of them, it uses the reservation up whatever it answers; a NULL table or an entry those
+ * checks refuse answers WEIVEL_C_STATUS_MISUSE and uses nothing.
  *
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE as weivel_c_handles_add answers it, and when nothing is
  * reserved. Never WEIVEL_C_STATUS_OUT_OF_MEMORY.
@@ -178,7 +180,9 @@ WEIVEL_C_API weivel_c_status weivel_c_handles_hold(weivel_c_handles *handles, we
                                                    weivel_handle implementation, void *object);
 
 /**
- * weivel_c_handles_hold into room a reservation holds, which it uses up whatever it answers. It allocates nothing.
+ * weivel_c_handles_hold into room a reservation holds. It allocates nothing. Once its arguments pass the checks
+ * weivel_c_handles_hold makes of them, it uses the reservation up whatever it answers; arguments those checks refuse
+ * answer WEIVEL_C_STATUS_MISUSE and use nothing.
  *
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE as weivel_c_handles_hold answers it, and when nothing is
  * reserved. Never WEIVEL_C_STATUS_OUT_OF_MEMORY.
@@ -206,6 +210,15 @@ WEIVEL_C_API weivel_c_status weivel_c_handles_held(weivel_c_handles *handles, we
  */
 WEIVEL_C_API weivel_c_status weivel_c_handles_revoke(weivel_c_handles *handles, const weivel_c_event *event,
                                                      void **object);
+
+/**
+ * Drops every holding of `plugin`, whatever it holds: what its owner does once the plugin's own record is gone, so no
+ * holding is left pointing at what the plugin was handed.
+ *
+ * @return WEIVEL_C_STATUS_OK, also when the plugin holds nothing; WEIVEL_C_STATUS_MISUSE for a NULL table or a plugin
+ * of 0.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_handles_drop_holdings(weivel_c_handles *handles, weivel_handle plugin);
 
 /**
  * Answers how many entries and how many holdings the table holds.

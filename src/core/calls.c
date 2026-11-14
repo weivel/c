@@ -242,9 +242,15 @@ static weivel_status call_unregister(const weivel_c_core_table *table, weivel_co
     return table->unregister(core, given->handle, pending_events);
 }
 
-weivel_c_status weivel_c_core_unregister(weivel_c_core *core, weivel_handle handle, weivel_c_refusal *refusal) {
+weivel_c_status weivel_c_core_unregister_then(weivel_c_core *core, weivel_handle handle, weivel_c_refusal *refusal,
+                                              const weivel_c_answered_step *then) {
     unregister_arguments arguments = {handle};
-    return weivel_c_core_invoke(core, call_unregister, &arguments, WEIVEL_C_CALL_BUILT_BY_THE_LAYER, refusal);
+    return weivel_c_core_invoke_then(core, call_unregister, &arguments, WEIVEL_C_CALL_BUILT_BY_THE_LAYER, refusal,
+                                     then);
+}
+
+weivel_c_status weivel_c_core_unregister(weivel_c_core *core, weivel_handle handle, weivel_c_refusal *refusal) {
+    return weivel_c_core_unregister_then(core, handle, refusal, NULL);
 }
 
 typedef struct handle_state_arguments {

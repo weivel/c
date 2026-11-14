@@ -29,8 +29,9 @@ static void tell_degraded(weivel_c_contexts *contexts, const weivel_c_event *eve
 }
 
 /**
- * @implNote Claiming the record is what makes a want settle exactly once: a withdrawal that lost the race finds it
- * ended, and one that won left it ended for this.
+ * @implNote Claiming the record is what makes a want settle exactly once: a withdrawal the core took left it ended,
+ * and one the core refused, because the want had settled, never marked it. The claim also leaves the freeing to this
+ * dispatch, so a callback that ends its own entries or frees its context frees nothing under it.
  */
 static void settle_want(weivel_c_contexts *contexts, const weivel_c_event *event) {
     const weivel_want_event *settled = &event->data.want;
@@ -45,8 +46,7 @@ static void settle_want(weivel_c_contexts *contexts, const weivel_c_event *event
     settlement.degraded = settled->degraded;
     if (settled->implementation != 0) {
         report_unheld(contexts,
-                      weivel_c_contexts_hold(contexts, settled->plugin, settled->implementation,
-                                             WEIVEL_C_RECORD_SERVICE, 0, &settlement.service),
+                      weivel_c_record_hold_settled(want, settled->plugin, settled->implementation, &settlement.service),
                       event);
     }
     if (settled->degraded) {
@@ -57,53 +57,70 @@ static void settle_want(weivel_c_contexts *contexts, const weivel_c_event *event
     weivel_c_record_end_in_dispatch(want);
 }
 
+/** Answers 0, the sink told, when what a registration hands over has no object in the layer to hear it with. */
+static int hand_over_the_registered(weivel_c_contexts *contexts, const weivel_c_event *event,
+                                    weivel_c_service_change *change) {
+    const weivel_watch_event *heard = &event->data.watch;
+    weivel_c_status held;
+    if (heard->change != WEIVEL_CHANGE_REGISTERED) {
+        return 1;
+    }
+    held = weivel_c_contexts_hold(contexts, heard->plugin, heard->implementation, WEIVEL_C_RECORD_SERVICE, 0,
+                                  &change->service);
+    report_unheld(contexts, held, event);
+    return held != WEIVEL_C_STATUS_FAILED;
+}
+
 static void hear_service(weivel_c_contexts *contexts, const weivel_c_event *event) {
     const weivel_watch_event *heard = &event->data.watch;
     weivel_c_service_change change = WEIVEL_INIT(weivel_c_service_change);
-    weivel_c_record watch;
-    if (!weivel_c_record_read(contexts, heard->watch, WEIVEL_C_RECORD_SERVICE_WATCH, &watch)) {
+    weivel_c_record *watch = weivel_c_record_borrow(contexts, heard->watch, WEIVEL_C_RECORD_SERVICE_WATCH);
+    if (watch == NULL) {
         return;
     }
     change.watch = heard->watch;
-    change.id = watch.id;
+    change.id = watch->id;
     change.change = heard->change;
-    if (heard->change == WEIVEL_CHANGE_REGISTERED) {
-        weivel_c_status held = weivel_c_contexts_hold(contexts, heard->plugin, heard->implementation,
-                                                      WEIVEL_C_RECORD_SERVICE, 0, &change.service);
-        report_unheld(contexts, held, event);
-        if (held == WEIVEL_C_STATUS_FAILED) {
-            return;
-        }
+    if (hand_over_the_registered(contexts, event, &change)) {
+        weivel_c_contexts_called_back(contexts, watch->service_watcher.hear(watch->service_watcher.data, &change),
+                                      event);
     }
-    weivel_c_contexts_called_back(contexts, watch.service_watcher.hear(watch.service_watcher.data, &change), event);
+    weivel_c_record_put_back(watch);
+}
+
+/** Answers 0, the sink told, when the implementation a change names has no object in the layer to hear it with. */
+static int find_the_changed_implementation(weivel_c_contexts *contexts, const weivel_c_event *event,
+                                           weivel_c_capability_change *change) {
+    const weivel_capability_event *heard = &event->data.capability;
+    weivel_c_status held = WEIVEL_C_STATUS_OK;
+    weivel_c_record provided;
+    if (heard->change == WEIVEL_CAPABILITY_PROVIDED) {
+        held = weivel_c_contexts_hold(contexts, heard->plugin, heard->implementation, WEIVEL_C_RECORD_IMPLEMENTATION,
+                                      0, &change->implementation);
+    } else if (weivel_c_record_read(contexts, heard->implementation, WEIVEL_C_RECORD_IMPLEMENTATION, &provided)) {
+        change->implementation = provided.object;
+    } else {
+        held = WEIVEL_C_STATUS_FAILED;
+    }
+    report_unheld(contexts, held, event);
+    return held != WEIVEL_C_STATUS_FAILED;
 }
 
 static void hear_capability(weivel_c_contexts *contexts, const weivel_c_event *event) {
     const weivel_capability_event *heard = &event->data.capability;
     weivel_c_capability_change change = WEIVEL_INIT(weivel_c_capability_change);
-    weivel_c_status held = WEIVEL_C_STATUS_OK;
-    weivel_c_record watch;
-    weivel_c_record provided;
-    if (!weivel_c_record_read(contexts, heard->watch, WEIVEL_C_RECORD_CAPABILITY_WATCH, &watch)) {
-        return;
-    }
-    if (heard->change == WEIVEL_CAPABILITY_PROVIDED) {
-        held = weivel_c_contexts_hold(contexts, heard->plugin, heard->implementation, WEIVEL_C_RECORD_IMPLEMENTATION,
-                                      0, &change.implementation);
-    } else if (weivel_c_record_read(contexts, heard->implementation, WEIVEL_C_RECORD_IMPLEMENTATION, &provided)) {
-        change.implementation = provided.object;
-    } else {
-        held = WEIVEL_C_STATUS_FAILED;
-    }
-    report_unheld(contexts, held, event);
-    if (held == WEIVEL_C_STATUS_FAILED) {
+    weivel_c_record *watch = weivel_c_record_borrow(contexts, heard->watch, WEIVEL_C_RECORD_CAPABILITY_WATCH);
+    if (watch == NULL) {
         return;
     }
     change.watch = heard->watch;
-    change.id = watch.id;
+    change.id = watch->id;
     change.change = heard->change;
-    weivel_c_contexts_called_back(contexts, watch.capability_watcher.hear(watch.capability_watcher.data, &change),
-                                  event);
+    if (find_the_changed_implementation(contexts, event, &change)) {
+        weivel_c_contexts_called_back(
+            contexts, watch->capability_watcher.hear(watch->capability_watcher.data, &change), event);
+    }
+    weivel_c_record_put_back(watch);
 }
 
 /**

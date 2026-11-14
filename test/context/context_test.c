@@ -514,11 +514,6 @@ static void *allocate_unless_refused(void *data, size_t size) {
     return self->refuse_from_size != 0 && size >= self->refuse_from_size ? NULL : malloc(size);
 }
 
-static void release_plainly(void *data, void *memory) {
-    (void)data;
-    free(memory);
-}
-
 static void an_incomplete_question_is_left_unanswered_and_the_sink_told(void) {
     world in;
     constrained_pair pair;
@@ -578,19 +573,6 @@ static void an_incomplete_question_is_not_answered_for_a_registration_without_an
     end_world(&in);
 }
 
-/** An allocator that fails the one allocation it is told to, and every one while `fails_all` is set. */
-typedef struct scarce_memory {
-    uint32_t allocations;
-    uint32_t fail_at;
-    int fails_all;
-} scarce_memory;
-
-static void *allocate_scarcely(void *data, size_t size) {
-    scarce_memory *self = data;
-    self->allocations++;
-    return self->fails_all || self->allocations == self->fail_at ? NULL : malloc(size);
-}
-
 /** What a listener found in the handles table for the handles an event named, as the event was heard. */
 typedef struct naming {
     weivel_c_handles *handles;
@@ -616,24 +598,6 @@ static weivel_c_status look_up_what_an_event_names(hearing *self, weivel_c_core 
     return WEIVEL_C_STATUS_OK;
 }
 
-/** Fills the table until its next addition must grow it, so the next allocation it makes is one a test can fail. */
-static void bring_the_table_to_the_brink(world *in, scarce_memory *memory) {
-    weivel_c_handle_entry filler = WEIVEL_INIT(weivel_c_handle_entry);
-    weivel_c_status reserved = WEIVEL_C_STATUS_OK;
-    filler.kind = WEIVEL_C_HANDLE_WATCH;
-    filler.object = &first_object;
-    while (reserved == WEIVEL_C_STATUS_OK) {
-        memory->fails_all = 1;
-        reserved = weivel_c_handles_reserve(in->handles);
-        memory->fails_all = 0;
-        if (reserved == WEIVEL_C_STATUS_OK) {
-            filler.handle += 1;
-            CHECK(weivel_c_handles_add_reserved(in->handles, &filler, NULL) == WEIVEL_C_STATUS_OK);
-        }
-    }
-    CHECK(reserved == WEIVEL_C_STATUS_OUT_OF_MEMORY);
-}
-
 enum { SCARCE_REGISTER = 0, SCARCE_WANT = 1, SCARCE_WATCH = 2, SCARCE_OPERATIONS = 3 };
 
 static weivel_c_status make_scarcely(uint32_t operation, plugin *provider, plugin *consumer, settled_record *settled,
@@ -654,6 +618,32 @@ static weivel_c_status make_scarcely(uint32_t operation, plugin *provider, plugi
  * was made, and then every event that named its handle found the entry; and 0 when it failed, and then before the
  * core was asked anything.
  */
+/** A provider of `p:a` and `p:b` and a consumer of both, the table and the contexts on `allocator`. */
+static void begin_scarcely(world *in, plugin *provider, plugin *consumer, const weivel_c_allocator *allocator) {
+    begin_world(in, NULL, 1);
+    weivel_c_handles_replace_allocator(in->handles, allocator);
+    weivel_c_contexts_replace_allocator(in->contexts, allocator);
+    name_plugin(provider, "p");
+    provides(provider, "p:a");
+    provides(provider, "p:b");
+    name_plugin(consumer, "c");
+    consumes(consumer, "p:a");
+    consumes(consumer, "p:b");
+    open_in(in, provider);
+    open_in(in, consumer);
+}
+
+/** What must stand for an operation to be heard: a watch of a registration, and a registration for a want. */
+static void prepare_scarcely(uint32_t operation, plugin *provider, plugin *consumer, watched_record *watched) {
+    weivel_c_service_watcher watcher = watching_services(watched);
+    if (operation == SCARCE_REGISTER) {
+        CHECK(weivel_c_context_watch_service(consumer->context, "p:a", &watcher, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    } else if (operation == SCARCE_WANT) {
+        CHECK(weivel_c_context_register_service(provider->context, "p:a", &first_object, NULL, NULL, NULL) ==
+              WEIVEL_C_STATUS_OK);
+    }
+}
+
 static int is_made_whole_or_not_at_all(uint32_t operation, uint32_t failing) {
     world in;
     plugin provider;
@@ -663,25 +653,9 @@ static int is_made_whole_or_not_at_all(uint32_t operation, uint32_t failing) {
     naming names = {NULL, 0, 0};
     settled_record settled = {0};
     watched_record watched = {0};
-    weivel_c_service_watcher watcher = watching_services(&watched);
     weivel_c_status status;
-    begin_world(&in, NULL, 1);
-    weivel_c_handles_replace_allocator(in.handles, &allocator);
-    weivel_c_contexts_replace_allocator(in.contexts, &allocator);
-    name_plugin(&provider, "p");
-    provides(&provider, "p:a");
-    provides(&provider, "p:b");
-    name_plugin(&consumer, "c");
-    consumes(&consumer, "p:a");
-    consumes(&consumer, "p:b");
-    open_in(&in, &provider);
-    open_in(&in, &consumer);
-    if (operation == SCARCE_REGISTER) {
-        CHECK(weivel_c_context_watch_service(consumer.context, "p:a", &watcher, NULL, NULL) == WEIVEL_C_STATUS_OK);
-    } else if (operation == SCARCE_WANT) {
-        CHECK(weivel_c_context_register_service(provider.context, "p:a", &first_object, NULL, NULL, NULL) ==
-              WEIVEL_C_STATUS_OK);
-    }
+    begin_scarcely(&in, &provider, &consumer, &allocator);
+    prepare_scarcely(operation, &provider, &consumer, &watched);
     bring_the_table_to_the_brink(&in, &memory);
     names.handles = in.handles;
     in.events.react = look_up_what_an_event_names;
@@ -759,13 +733,35 @@ static void begin_screens(world *in, screens *with) {
     open_in(in, &with->stranger);
 }
 
+/** Releases the first provider of `screens`: its implementation leaves, and a stranger still may not reach any. */
+static void check_the_capability_once_its_first_provider_left(world *in, screens *with, watched_record *heard,
+                                                               weivel_handle watch) {
+    weivel_c_implementations list = WEIVEL_INIT(weivel_c_implementations);
+    weivel_c_refusal refusal = WEIVEL_INIT(weivel_c_refusal);
+    CHECK(weivel_c_core_release_plugin(in->core, with->first.handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(heard->count == 3);
+    CHECK(heard->changes[2] == WEIVEL_CAPABILITY_WITHDRAWN && heard->objects[2] == &first_object);
+    CHECK(weivel_c_context_all_capabilities(with->consumer.context, "screens", &list, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(list.count == 1 && list.items[0] == &second_object);
+    CHECK(weivel_c_implementations_release(&list) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_all_capabilities(with->stranger.context, "screens", &list, &refusal) ==
+          WEIVEL_C_STATUS_REFUSED);
+    CHECK(list.count == 0 && refusal.code == WEIVEL_REFUSAL_UNDECLARED);
+    check_text(refusal.subject, "screens", "the subject of a refused capability reach");
+    CHECK(weivel_c_refusal_release(&refusal) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_stop_watching(with->consumer.context, watch, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_release_plugin(in->core, with->second.handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(heard->count == 3);
+    CHECK(in->sink.count == 0);
+    end_world(in);
+}
+
 static void a_plugin_provides_lists_and_watches_the_implementations_of_a_capability(void) {
     world in;
     screens with;
     watched_record heard = {0};
     weivel_c_capability_watcher watcher = watching_capabilities(&heard);
     weivel_c_implementations list = WEIVEL_INIT(weivel_c_implementations);
-    weivel_c_refusal refusal = WEIVEL_INIT(weivel_c_refusal);
     weivel_handle watch = 0;
     weivel_handle provided = 0;
     begin_screens(&in, &with);
@@ -791,22 +787,21 @@ static void a_plugin_provides_lists_and_watches_the_implementations_of_a_capabil
     }
     CHECK(weivel_c_context_all_capabilities(with.consumer.context, "screens", &list, NULL) == WEIVEL_C_STATUS_MISUSE);
     CHECK(weivel_c_implementations_release(&list) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_release_plugin(in.core, with.first.handle, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(heard.count == 3);
-    CHECK(heard.changes[2] == WEIVEL_CAPABILITY_WITHDRAWN && heard.objects[2] == &first_object);
-    CHECK(weivel_c_context_all_capabilities(with.consumer.context, "screens", &list, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(list.count == 1 && list.items[0] == &second_object);
-    CHECK(weivel_c_implementations_release(&list) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_context_all_capabilities(with.stranger.context, "screens", &list, &refusal) ==
-          WEIVEL_C_STATUS_REFUSED);
-    CHECK(list.count == 0 && refusal.code == WEIVEL_REFUSAL_UNDECLARED);
-    check_text(refusal.subject, "screens", "the subject of a refused capability reach");
-    CHECK(weivel_c_refusal_release(&refusal) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_context_stop_watching(with.consumer.context, watch, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_release_plugin(in.core, with.second.handle, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(heard.count == 3);
-    CHECK(in.sink.count == 0);
-    end_world(&in);
+    check_the_capability_once_its_first_provider_left(&in, &with, &heard, watch);
+}
+/** The screens of begin_screens, a provider `p` of `p:a`, and the consumer opened again consuming `p:a` too. */
+static void begin_screens_and_a_service(world *in, screens *with, plugin *provider) {
+    begin_screens(in, with);
+    name_plugin(provider, "p");
+    provides(provider, "p:a");
+    open_in(in, provider);
+    CHECK(weivel_c_core_release_plugin(in->core, with->consumer.handle, NULL) == WEIVEL_C_STATUS_OK);
+    end_entries_of(in, &with->consumer);
+    free_context_of(in, &with->consumer);
+    name_plugin(&with->consumer, "c");
+    consumes(&with->consumer, "p:a");
+    with->consumer.capabilities_consumed[with->consumer.capabilities_consumed_count++] = "screens";
+    open_in(in, &with->consumer);
 }
 
 static void a_plugin_hears_which_object_it_holds_was_revoked(void) {
@@ -817,17 +812,7 @@ static void a_plugin_hears_which_object_it_holds_was_revoked(void) {
     weivel_c_implementations list = WEIVEL_INIT(weivel_c_implementations);
     weivel_handle registration = 0;
     void *service = NULL;
-    begin_screens(&in, &with);
-    name_plugin(&provider, "p");
-    provides(&provider, "p:a");
-    open_in(&in, &provider);
-    CHECK(weivel_c_core_release_plugin(in.core, with.consumer.handle, NULL) == WEIVEL_C_STATUS_OK);
-    end_entries_of(&in, &with.consumer);
-    free_context_of(&in, &with.consumer);
-    name_plugin(&with.consumer, "c");
-    consumes(&with.consumer, "p:a");
-    with.consumer.capabilities_consumed[with.consumer.capabilities_consumed_count++] = "screens";
-    open_in(&in, &with.consumer);
+    begin_screens_and_a_service(&in, &with, &provider);
     listen_to(&with.consumer, &reported);
     CHECK(weivel_c_context_register_service(provider.context, "p:a", &first_object, NULL, &registration, NULL) ==
           WEIVEL_C_STATUS_OK);
@@ -1083,6 +1068,24 @@ static weivel_c_status release_the_consumer(void *data, weivel_c_core *core) {
     return WEIVEL_C_STATUS_OK;
 }
 
+/** A provider `p` of `p:a` and a consumer `c` of it and of `q:never`, with what releasing the consumer records. */
+static void begin_releasing(world *in, plugin *provider, plugin *consumer, releasing *release) {
+    begin_world(in, NULL, 1);
+    name_plugin(provider, "p");
+    provides(provider, "p:a");
+    name_plugin(consumer, "c");
+    consumes(consumer, "p:a");
+    consumes(consumer, "q:never");
+    open_in(in, provider);
+    open_in(in, consumer);
+    release->in = in;
+    release->provider = provider;
+    release->consumer = consumer;
+    release->ending = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
+    release->ending.run = end_the_consumers_entries;
+    release->ending.data = release;
+}
+
 static void a_released_plugin_hears_what_its_release_queued_and_nothing_queued_after(void) {
     world in;
     plugin provider;
@@ -1094,20 +1097,7 @@ static void a_released_plugin_hears_what_its_release_queued_and_nothing_queued_a
     weivel_c_plugin_listener listener = {trace_plugin_event, &release};
     uint64_t registration = 0;
     void *service = NULL;
-    begin_world(&in, NULL, 1);
-    name_plugin(&provider, "p");
-    provides(&provider, "p:a");
-    name_plugin(&consumer, "c");
-    consumes(&consumer, "p:a");
-    consumes(&consumer, "q:never");
-    open_in(&in, &provider);
-    open_in(&in, &consumer);
-    release.in = &in;
-    release.provider = &provider;
-    release.consumer = &consumer;
-    release.ending = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
-    release.ending.run = end_the_consumers_entries;
-    release.ending.data = &release;
+    begin_releasing(&in, &provider, &consumer, &release);
     CHECK(weivel_c_context_register_service(provider.context, "p:a", &first_object, NULL, &release.registration,
                                             NULL) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_context_add_listener(consumer.context, &listener, &registration) == WEIVEL_C_STATUS_OK);
@@ -1297,69 +1287,89 @@ static void call_into_the_context(void *more) {
     self->inside = 0;
 }
 
+/** Every callback a plugin or the host gives, each calling into the context of the consumer as it is called. */
+typedef struct every_callback {
+    calling_in calling;
+    answering provider;
+    settled_record settled;
+    watched_record services;
+    watched_record capabilities;
+    reported_record reported;
+} every_callback;
+
+static void call_in_from_every_callback(every_callback *every, world *in, plugin *consumer) {
+    memset(every, 0, sizeof *every);
+    every->calling = (calling_in){in, consumer, 0, 0, 0};
+    every->provider.live = speed_of(9.0);
+    every->provider.serves = WEIVEL_CHOICE_YES;
+    every->provider.react = call_into_the_context;
+    every->provider.more = &every->calling;
+    every->settled.react = call_into_the_context;
+    every->settled.more = &every->calling;
+    every->services.react = call_into_the_context;
+    every->services.more = &every->calling;
+    every->capabilities.react = call_into_the_context;
+    every->capabilities.more = &every->calling;
+    every->reported.react = call_into_the_context;
+    every->reported.more = &every->calling;
+    in->log.react = call_into_the_context;
+    in->log.more = &every->calling;
+}
+
+/** A constrained pair whose consumer also consumes `p:b` and `screens`, and a maker `m` of screens. */
+static void begin_calling_in(world *in, constrained_pair *pair, plugin *maker) {
+    name_constrained_pair(pair);
+    consumes(&pair->consumer, "p:b");
+    provides(&pair->provider, "p:b");
+    pair->consumer.capabilities_consumed[pair->consumer.capabilities_consumed_count++] = "screens";
+    begin_constrained(in, pair);
+    name_plugin(maker, "m");
+    maker->capabilities_provided[maker->capabilities_provided_count++] = "screens";
+    open_in(in, maker);
+}
+
+static void hear_a_service_and_a_capability_while_calling_in(world *in, constrained_pair *pair, plugin *maker,
+                                                            every_callback *every) {
+    weivel_c_service_watcher service_watcher = watching_services(&every->services);
+    weivel_c_capability_watcher capability_watcher = watching_capabilities(&every->capabilities);
+    weivel_handle registration = 0;
+    CHECK(weivel_c_context_watch_service(pair->consumer.context, "p:b", &service_watcher, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_register_service(pair->provider.context, "p:b", &second_object, NULL, &registration,
+                                            NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_unregister_service(pair->provider.context, registration, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(every->services.count == 2 && every->reported.count == 1);
+    CHECK(weivel_c_context_watch_capability(pair->consumer.context, "screens", &capability_watcher, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_provide_capability(maker->context, "screens", &second_object, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_verify_activation(in->core, maker->handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(every->capabilities.count == 1);
+}
+
 static void no_callback_of_the_plugins_or_the_hosts_runs_under_a_lock_of_the_layers(void) {
     world in;
     constrained_pair pair;
     plugin maker;
-    calling_in calling = {0};
-    answering provider = {0};
-    weivel_c_capacity_answerer answerer = {answer_capacity, &provider};
-    settled_record settled = {0};
-    watched_record services = {0};
-    watched_record capabilities = {0};
-    reported_record reported = {0};
-    weivel_c_want_callback callback = settling(&settled);
-    weivel_c_service_watcher service_watcher = watching_services(&services);
-    weivel_c_capability_watcher capability_watcher = watching_capabilities(&capabilities);
+    every_callback every;
+    weivel_c_capacity_answerer answerer = {answer_capacity, &every.provider};
+    weivel_c_want_callback callback = settling(&every.settled);
     weivel_c_want_options options = polling_every(10);
-    weivel_handle registration = 0;
     void *service = NULL;
-    name_constrained_pair(&pair);
-    consumes(&pair.consumer, "p:b");
-    provides(&pair.provider, "p:b");
-    pair.consumer.capabilities_consumed[pair.consumer.capabilities_consumed_count++] = "screens";
-    begin_constrained(&in, &pair);
-    name_plugin(&maker, "m");
-    maker.capabilities_provided[maker.capabilities_provided_count++] = "screens";
-    open_in(&in, &maker);
-    calling = (calling_in){&in, &pair.consumer, 0, 0, 0};
-    provider.live = speed_of(9.0);
-    provider.serves = WEIVEL_CHOICE_YES;
+    begin_calling_in(&in, &pair, &maker);
+    call_in_from_every_callback(&every, &in, &pair.consumer);
     CHECK(weivel_c_context_register_service(pair.provider.context, "p:a", &first_object, &answerer, NULL, NULL) ==
           WEIVEL_C_STATUS_OK);
-    provider.react = call_into_the_context;
-    provider.more = &calling;
-    settled.react = call_into_the_context;
-    settled.more = &calling;
-    services.react = call_into_the_context;
-    services.more = &calling;
-    capabilities.react = call_into_the_context;
-    capabilities.more = &calling;
-    reported.react = call_into_the_context;
-    reported.more = &calling;
-    in.log.react = call_into_the_context;
-    in.log.more = &calling;
-    listen_to(&pair.consumer, &reported);
+    listen_to(&pair.consumer, &every.reported);
     CHECK(weivel_c_context_want_service(pair.consumer.context, "p:a", &options, &callback, NULL, NULL) ==
           WEIVEL_C_STATUS_OK);
-    CHECK(provider.count == 2 && settled.count == 1);
-    CHECK(weivel_c_context_watch_service(pair.consumer.context, "p:b", &service_watcher, NULL, NULL) ==
-          WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_context_register_service(pair.provider.context, "p:b", &second_object, NULL, &registration,
-                                            NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_context_unregister_service(pair.provider.context, registration, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(services.count == 2 && reported.count == 1);
-    CHECK(weivel_c_context_watch_capability(pair.consumer.context, "screens", &capability_watcher, NULL, NULL) ==
-          WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_context_provide_capability(maker.context, "screens", &second_object, NULL, NULL) ==
-          WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_verify_activation(in.core, maker.handle, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(capabilities.count == 1);
+    CHECK(every.provider.count == 2 && every.settled.count == 1);
+    hear_a_service_and_a_capability_while_calling_in(&in, &pair, &maker, &every);
     CHECK(weivel_c_context_get_service(pair.consumer.context, "p:undeclared", &service, NULL) ==
           WEIVEL_C_STATUS_REFUSED);
-    CHECK(reported.count == 2);
+    CHECK(every.reported.count == 2);
     CHECK(weivel_c_context_log(pair.consumer.context, WEIVEL_LOG_INFO, "outside") == WEIVEL_C_STATUS_OK);
-    CHECK(calling.calls == 9 && calling.failures == 0);
+    CHECK(every.calling.calls == 9 && every.calling.failures == 0);
     CHECK(in.sink.count == 0);
     end_world(&in);
 }
@@ -1381,6 +1391,20 @@ static weivel_c_status stop_then_end_then_free(void *data, weivel_c_core *core) 
     CHECK(weivel_c_context_free(self->consumer->context) == WEIVEL_C_STATUS_OK);
     self->consumer->context = NULL;
     return WEIVEL_C_STATUS_OK;
+}
+
+static void check_what_is_left_once_the_consumer_is_freed(world *in, plugin *provider, const settled_record *settled,
+                                                          const weivel_c_service_watcher *watcher) {
+    uint32_t contexts_made = 0;
+    CHECK(settled->count == 1 && records_of(in) == 0 && entries_of(in) == 1);
+    CHECK(weivel_c_contexts_count(in->contexts, &contexts_made, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(contexts_made == 1);
+    CHECK(weivel_c_context_register_service(provider->context, "p:a", &first_object, NULL, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_watch_service(provider->context, "p:a", watcher, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(records_of(in) == 2);
+    CHECK(in->sink.count == 0);
+    end_world(in);
 }
 
 static void every_record_is_freed_on_its_ending_on_end_entries_and_on_the_contexts_free(void) {
@@ -1416,15 +1440,7 @@ static void every_record_is_freed_on_its_ending_on_end_entries_and_on_the_contex
     CHECK(records_of(&in) == 2);
     stop.consumer = &consumer;
     in_dispatch(&in, stop_then_end_then_free, &stop);
-    CHECK(settled.count == 1 && records_of(&in) == 0 && entries_of(&in) == 1);
-    CHECK(weivel_c_contexts_count(in.contexts, &contexts_made, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(contexts_made == 1);
-    CHECK(weivel_c_context_register_service(provider.context, "p:a", &first_object, NULL, NULL, NULL) ==
-          WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_context_watch_service(provider.context, "p:a", &watcher, NULL, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(records_of(&in) == 2);
-    CHECK(in.sink.count == 0);
-    end_world(&in);
+    check_what_is_left_once_the_consumer_is_freed(&in, &provider, &settled, &watcher);
 }
 
 static void the_hosts_own_context_registers_and_is_answered_as_a_plugins_is(void) {
@@ -1485,11 +1501,7 @@ static void a_misused_creation_makes_nothing(void) {
     end_world(&in);
 }
 
-int main(int argument_count, char **arguments) {
-    if (argument_count != 2 || !load_every_table(arguments[1])) {
-        fprintf(stderr, "usage: context_test <core-library>\n");
-        return 2;
-    }
+static void run_the_tests_of_services(void) {
     a_get_answers_the_providers_own_pointer_and_absence_is_not_a_refusal();
     a_refusal_of_reach_answers_the_cores_refusal_with_its_code_subject_and_fix();
     a_want_settles_exactly_once_with_the_providers_pointer();
@@ -1505,6 +1517,9 @@ int main(int argument_count, char **arguments) {
     each_capacity_question_is_put_to_the_answerer_and_its_answer_reported();
     a_registration_that_offered_no_answerer_answers_at_once_nothing_live_and_that_it_serves();
     an_answerer_that_fails_goes_to_the_sink_and_its_question_is_left_unanswered();
+}
+
+static void run_the_tests_of_the_rest(void) {
     a_plugin_provides_lists_and_watches_the_implementations_of_a_capability();
     a_plugin_hears_which_object_it_holds_was_revoked();
     a_plugin_hears_a_refusal_of_reach_once();
@@ -1521,6 +1536,15 @@ int main(int argument_count, char **arguments) {
     every_record_is_freed_on_its_ending_on_end_entries_and_on_the_contexts_free();
     the_hosts_own_context_registers_and_is_answered_as_a_plugins_is();
     a_misused_creation_makes_nothing();
+}
+
+int main(int argument_count, char **arguments) {
+    if (argument_count != 2 || !load_every_table(arguments[1])) {
+        fprintf(stderr, "usage: context_test <core-library>\n");
+        return 2;
+    }
+    run_the_tests_of_services();
+    run_the_tests_of_the_rest();
     run_the_tests_of_the_layers_own_seams();
     CHECK(deadline_polls == 0);
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);

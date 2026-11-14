@@ -15,6 +15,10 @@
 #include "core/fixture.h"
 #include "threads.h"
 
+#if !defined(WEIVEL_C_USING_SHARED)
+#include "../../src/handles/table.h"
+#endif
+
 #define WORLD_RECORDS 32
 #define WORLD_TEXT 192
 
@@ -24,9 +28,12 @@ static uint32_t other_crossings;
 static weivel_want_options asked_options;
 static int asked_with_options;
 static uint32_t wants_asked;
-/** What the layer last reported as a capacity, and how often it reported one. */
+/** What the layer last reported as a capacity, the time it reported it at, and how often it reported one. */
 static weivel_capacity reported_capacity;
+static int64_t reported_now;
 static uint32_t capacities_reported;
+/** When not 0, the handle the core's next registration of a service is answered as, in place of its own. */
+static weivel_handle registration_answered_instead;
 
 #define COUNTED(name, parameters, arguments)        \
     static weivel_status every_##name parameters {  \
@@ -55,9 +62,6 @@ COUNTED(quarantine_plugin,
         (weivel_core *core, weivel_handle plugin, const weivel_quarantine_reason *reason, uint32_t *pending),
         (core, plugin, reason, pending))
 COUNTED(forget_plugin, (weivel_core *core, weivel_handle plugin, uint32_t *pending), (core, plugin, pending))
-COUNTED(register_service,
-        (weivel_core *core, weivel_handle owner, const char *id, weivel_handle *registration, uint32_t *pending),
-        (core, owner, id, registration, pending))
 COUNTED(unregister, (weivel_core *core, weivel_handle handle, uint32_t *pending), (core, handle, pending))
 COUNTED(get_service,
         (weivel_core *core, weivel_handle plugin, const char *id, weivel_handle *implementation, uint32_t *pending),
@@ -104,7 +108,20 @@ static weivel_status every_report_capacity(weivel_core *core, weivel_handle want
     other_crossings++;
     capacities_reported++;
     reported_capacity = *capacity;
+    reported_now = now;
     return real_table.report_capacity(core, want, registration, capacity, now, pending);
+}
+
+static weivel_status every_register_service(weivel_core *core, weivel_handle owner, const char *id,
+                                            weivel_handle *registration, uint32_t *pending) {
+    weivel_status status;
+    other_crossings++;
+    status = real_table.register_service(core, owner, id, registration, pending);
+    if (status == WEIVEL_STATUS_OK && registration_answered_instead != 0) {
+        *registration = registration_answered_instead;
+        registration_answered_instead = 0;
+    }
+    return status;
 }
 
 #define COUNT_EVERY(name) counting_table.name = every_##name;
@@ -156,19 +173,29 @@ static inline void forget_every_crossing(void) {
     wants_asked = 0;
     asked_with_options = 0;
     capacities_reported = 0;
+    reported_now = 0;
+    registration_answered_instead = 0;
     memset(&asked_options, 0, sizeof asked_options);
     memset(&reported_capacity, 0, sizeof reported_capacity);
 }
 
-/** A clock the test moves and a scheduler that keeps a task and never runs one. */
+/**
+ * A clock the test moves and a scheduler that keeps a task and never runs one. `on_read`, when set, runs each time the
+ * clock is read, outside every lock of the layer's, which is where a test holds a thread still between two steps.
+ */
 typedef struct world_clock {
     int64_t now;
     uint32_t reads;
+    void (*on_read)(void *more);
+    void *more;
 } world_clock;
 
 static int64_t world_now(void *data) {
     world_clock *self = data;
     self->reads++;
+    if (self->on_read != NULL) {
+        self->on_read(self->more);
+    }
     return self->now;
 }
 
@@ -259,10 +286,63 @@ static inline void begin_world(world *self, const weivel_core_options *core_opti
     begin_world_rest(self, with_clock);
 }
 
+#if !defined(WEIVEL_C_USING_SHARED)
+
+static inline void release_plainly(void *data, void *memory) {
+    (void)data;
+    free(memory);
+}
+
+/** An allocator that fails the one allocation it is told to, and every one while `fails_all` is set. */
+typedef struct scarce_memory {
+    uint32_t allocations;
+    uint32_t fail_at;
+    int fails_all;
+} scarce_memory;
+
+static inline void *allocate_scarcely(void *data, size_t size) {
+    scarce_memory *self = data;
+    self->allocations++;
+    return self->fails_all || self->allocations == self->fail_at ? NULL : malloc(size);
+}
+
+/** What the filler entries of a table brought to the brink stand for; only its address matters. */
+static int world_filler_object;
+
+/** Fills the table until its next addition must grow it, so the next allocation it makes is one a test can fail. */
+static inline void bring_the_table_to_the_brink(world *in, scarce_memory *memory) {
+    weivel_c_handle_entry filler = WEIVEL_INIT(weivel_c_handle_entry);
+    weivel_c_status reserved = WEIVEL_C_STATUS_OK;
+    filler.kind = WEIVEL_C_HANDLE_WATCH;
+    filler.object = &world_filler_object;
+    while (reserved == WEIVEL_C_STATUS_OK) {
+        memory->fails_all = 1;
+        reserved = weivel_c_handles_reserve(in->handles);
+        memory->fails_all = 0;
+        if (reserved == WEIVEL_C_STATUS_OK) {
+            filler.handle += 1;
+            CHECK(weivel_c_handles_add_reserved(in->handles, &filler, NULL) == WEIVEL_C_STATUS_OK);
+        }
+    }
+    CHECK(reserved == WEIVEL_C_STATUS_OUT_OF_MEMORY);
+}
+
+#endif
+
+/** In a build that reaches the table's seams, that nothing reserved in it is left unused once the contexts are freed. */
+static inline void check_no_reservation_is_left(world *self) {
+#if !defined(WEIVEL_C_USING_SHARED)
+    CHECK(weivel_c_handles_reserved(self->handles) == 0);
+#else
+    (void)self;
+#endif
+}
+
 static inline void end_world(world *self) {
     CHECK(weivel_c_timer_destroy(self->timer) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_core_destroy(self->core) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_contexts_free(self->contexts) == WEIVEL_C_STATUS_OK);
+    check_no_reservation_is_left(self);
     CHECK(weivel_c_timer_free(self->timer) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_core_free(self->core) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_handles_free(self->handles) == WEIVEL_C_STATUS_OK);

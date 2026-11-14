@@ -128,11 +128,25 @@ static void unlink_context(weivel_c_context *context) {
     contexts->context_count--;
 }
 
+/**
+ * Ends the plugin's entry while the table still keeps this very context under its handle, and drops what the plugin
+ * holds, which points at what it was handed.
+ *
+ * @implNote The core may issue a forgotten plugin's handle again, so an entry under the same handle can be another's.
+ */
+static void end_the_plugins_entry(weivel_c_context *context) {
+    weivel_c_handles *handles = context->contexts->handles;
+    weivel_c_handle_entry entry = WEIVEL_INIT(weivel_c_handle_entry);
+    if (weivel_c_handles_find(handles, context->plugin, &entry) == WEIVEL_C_STATUS_OK && entry.object == context) {
+        weivel_c_handles_end(handles, context->plugin, NULL);
+    }
+    weivel_c_handles_drop_holdings(handles, context->plugin);
+}
+
 /** Frees a context whose records' steps can no longer run, because the core is destroyed. */
 static void free_context_for_good(weivel_c_context *context) {
-    weivel_c_contexts *contexts = context->contexts;
-    weivel_c_handles_end(contexts->handles, context->plugin, NULL);
-    weivel_c_records_free(context->records);
+    end_the_plugins_entry(context);
+    weivel_c_records_discard(context->records);
     free(context->slots);
     free(context);
 }
@@ -149,7 +163,7 @@ weivel_c_status weivel_c_contexts_free(weivel_c_contexts *contexts) {
         contexts->first = context->next;
         free_context_for_good(context);
     }
-    weivel_c_records_free(contexts->orphans);
+    weivel_c_records_discard(contexts->orphans);
     weivel_c_mutex_end(&contexts->lock);
     free(contexts);
     return WEIVEL_C_STATUS_OK;
@@ -247,7 +261,7 @@ weivel_c_status weivel_c_context_free(weivel_c_context *context) {
     contexts = context->contexts;
     weivel_c_records_end(context, 1);
     weivel_c_mutex_lock(&contexts->lock);
-    weivel_c_handles_end(contexts->handles, context->plugin, NULL);
+    end_the_plugins_entry(context);
     unlink_context(context);
     weivel_c_mutex_unlock(&contexts->lock);
     free(context->slots);
