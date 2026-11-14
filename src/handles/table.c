@@ -41,6 +41,7 @@ typedef struct node {
 struct weivel_c_handles {
     weivel_c_mutex lock;
     weivel_c_allocator allocator;
+    weivel_c_handles_hash hash;
     node *nodes;
     uint32_t node_capacity;
     uint32_t nodes_begun;
@@ -73,8 +74,12 @@ static uint64_t mix(uint64_t value) {
     return value;
 }
 
+static uint64_t hash_plainly(uint32_t space, uint64_t first_key, uint64_t second_key) {
+    return mix(first_key ^ mix(second_key + space));
+}
+
 static uint32_t home_of(const weivel_c_handles *table, uint32_t space, uint64_t first_key, uint64_t second_key) {
-    return (uint32_t)(mix(first_key ^ mix(second_key + space)) & (table->bucket_count - 1));
+    return (uint32_t)(table->hash(space, first_key, second_key) & (table->bucket_count - 1));
 }
 
 static node *node_at(const weivel_c_handles *table, uint32_t position) {
@@ -342,6 +347,7 @@ weivel_c_status weivel_c_handles_create(weivel_c_handles **handles) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
     created->allocator = (weivel_c_allocator){allocate_plainly, release_plainly, NULL};
+    created->hash = hash_plainly;
     *handles = created;
     return WEIVEL_C_STATUS_OK;
 }
@@ -364,6 +370,12 @@ weivel_c_status weivel_c_handles_free(weivel_c_handles *handles) {
 void weivel_c_handles_replace_allocator(weivel_c_handles *handles, const weivel_c_allocator *allocator) {
     weivel_c_mutex_lock(&handles->lock);
     handles->allocator = *allocator;
+    weivel_c_mutex_unlock(&handles->lock);
+}
+
+void weivel_c_handles_replace_hash(weivel_c_handles *handles, weivel_c_handles_hash hash) {
+    weivel_c_mutex_lock(&handles->lock);
+    handles->hash = hash;
     weivel_c_mutex_unlock(&handles->lock);
 }
 

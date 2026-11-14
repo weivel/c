@@ -789,83 +789,135 @@ static void a_registration_past_an_unfired_deadline_loses(void) {
     end_rig(&tested);
 }
 
-#define RACING_SLOTS 256
+#define RACING_TASKS 65536
 #define RACING_ROUNDS 2000
 
-typedef struct racing_slot {
+/**
+ * One task of the racing scheduler, and what became of it.
+ *
+ * @implNote A task is never used for a second one. A cancel may arrive after the task's callback has returned, and
+ * with a reused task it would take out whichever task had been scheduled into the same place since.
+ */
+typedef struct racing_task {
     weivel_c_task_callback callback;
     void *callback_data;
-    int waiting;
-} racing_slot;
+    int state;
+    uint32_t asked_to_cancel;
+    /** How often its own callback read the clock: once when it was taken for the task waited for, else never. */
+    uint32_t clock_reads;
+} racing_task;
 
 /**
  * A scheduler other threads may use at once: its own mutex guards it and is never held while a callback runs. A
- * second thread runs whatever waits, whenever it likes, so a callback races the cancel and the scheduling of others.
+ * second thread, the runner, runs what waits, one task for each round the churning threads have made since its last,
+ * so a callback races the cancel and the scheduling of others while the tasks stay countable. Every task before
+ * `next_to_run` has left TASK_WAITING.
  */
 typedef struct racing_scheduler {
     test_mutex mutex;
-    racing_slot slots[RACING_SLOTS];
+    racing_task *tasks;
+    uint32_t begun;
+    uint32_t next_to_run;
     int64_t clock;
-    int stopping;
-    uint32_t ran;
+    uint32_t clock_reads;
+    uint32_t schedules;
     uint32_t refused;
+    uint32_t rounds_made;
+    uint32_t rounds_allowed;
+    uint32_t rounds_at_the_last_task;
+    int churning_ends;
+    int parking;
+    int parked;
+    int stopping;
+    int timer_is_destroyed;
+    uint32_t ran_after_the_destroy;
 } racing_scheduler;
+
+/** The task whose callback this thread is inside, which is how the clock knows who reads it. */
+static _Thread_local racing_task *task_in_callback;
 
 static int64_t racing_now(void *data) {
     racing_scheduler *self = data;
     int64_t now;
     lock_test_mutex(&self->mutex);
     now = self->clock;
+    self->clock_reads++;
+    if (task_in_callback != NULL) {
+        task_in_callback->clock_reads++;
+    }
     unlock_test_mutex(&self->mutex);
     return now;
 }
 
 static void *racing_schedule(void *data, int64_t at, weivel_c_task_callback callback, void *callback_data) {
     racing_scheduler *self = data;
-    racing_slot *taken = NULL;
-    int index;
+    racing_task *begun = NULL;
     (void)at;
     lock_test_mutex(&self->mutex);
-    for (index = 0; index < RACING_SLOTS && taken == NULL; index++) {
-        if (!self->slots[index].waiting) {
-            taken = &self->slots[index];
-            *taken = (racing_slot){callback, callback_data, 1};
-        }
+    self->schedules++;
+    if (self->begun < RACING_TASKS) {
+        begun = &self->tasks[self->begun++];
+        *begun = (racing_task){callback, callback_data, TASK_WAITING, 0, 0};
     }
-    self->refused += taken == NULL;
+    self->refused += begun == NULL;
     unlock_test_mutex(&self->mutex);
-    return taken;
+    return begun;
 }
 
 static int racing_cancel(void *data, void *token) {
     racing_scheduler *self = data;
-    racing_slot *slot = token;
+    racing_task *task = token;
     int taken_out;
     lock_test_mutex(&self->mutex);
-    taken_out = slot->waiting;
-    slot->waiting = 0;
+    task->asked_to_cancel++;
+    taken_out = task->state == TASK_WAITING;
+    if (taken_out) {
+        task->state = TASK_CANCELLED;
+    }
     unlock_test_mutex(&self->mutex);
     return taken_out;
 }
 
-static int run_one_waiting_task(racing_scheduler *self) {
-    racing_slot taken = {NULL, NULL, 0};
-    int stopping;
-    int index;
-    lock_test_mutex(&self->mutex);
-    for (index = 0; index < RACING_SLOTS && taken.callback == NULL; index++) {
-        if (self->slots[index].waiting) {
-            taken = self->slots[index];
-            self->slots[index].waiting = 0;
-            self->ran++;
-        }
+/** Under the mutex: whether the runner may run a task now. Once the churning ends it runs whatever is left. */
+static int runner_may_run(racing_scheduler *self) {
+    self->parked = self->parking;
+    if (self->parking) {
+        return 0;
     }
+    return self->churning_ends || self->rounds_made != self->rounds_at_the_last_task;
+}
+
+/** Under the mutex: takes the next waiting task for the runner; NULL when it may run none or none waits. */
+static racing_task *take_a_waiting_task(racing_scheduler *self) {
+    if (!runner_may_run(self)) {
+        return NULL;
+    }
+    while (self->next_to_run < self->begun && self->tasks[self->next_to_run].state != TASK_WAITING) {
+        self->next_to_run++;
+    }
+    if (self->next_to_run == self->begun) {
+        return NULL;
+    }
+    self->rounds_at_the_last_task = self->rounds_made;
+    self->ran_after_the_destroy += (uint32_t)self->timer_is_destroyed;
+    self->tasks[self->next_to_run].state = TASK_RAN;
+    return &self->tasks[self->next_to_run];
+}
+
+/** Answers 0 once the runner is told to stop and nothing it may run is left. */
+static int run_one_waiting_task(racing_scheduler *self) {
+    racing_task *taken;
+    int stopping;
+    lock_test_mutex(&self->mutex);
+    taken = take_a_waiting_task(self);
     stopping = self->stopping;
     unlock_test_mutex(&self->mutex);
-    if (taken.callback != NULL) {
-        taken.callback(taken.callback_data);
+    if (taken != NULL) {
+        task_in_callback = taken;
+        taken->callback(taken->callback_data);
+        task_in_callback = NULL;
     }
-    return !stopping;
+    return taken != NULL || !stopping;
 }
 
 static void run_waiting_tasks(void *argument) {
@@ -874,119 +926,283 @@ static void run_waiting_tasks(void *argument) {
     }
 }
 
-static uint32_t racing_waiting(racing_scheduler *self) {
-    uint32_t waiting = 0;
-    int index;
-    lock_test_mutex(&self->mutex);
-    for (index = 0; index < RACING_SLOTS; index++) {
-        waiting += (uint32_t)self->slots[index].waiting;
-    }
-    unlock_test_mutex(&self->mutex);
-    return waiting;
+static void begin_racing(racing_scheduler *self, weivel_c_scheduler *scheduler, int64_t clock) {
+    memset(self, 0, sizeof *self);
+    start_test_mutex(&self->mutex);
+    self->tasks = calloc(RACING_TASKS, sizeof *self->tasks);
+    self->clock = clock;
+    self->rounds_allowed = UINT32_MAX;
+    *scheduler = (weivel_c_scheduler)WEIVEL_INIT(weivel_c_scheduler);
+    scheduler->now = racing_now;
+    scheduler->schedule = racing_schedule;
+    scheduler->cancel = racing_cancel;
+    scheduler->data = self;
 }
 
+/** Has the runner take no further task, and waits until it is between two callbacks. */
+static void park_the_runner(racing_scheduler *self) {
+    int parked = 0;
+    while (!parked) {
+        lock_test_mutex(&self->mutex);
+        self->parking = 1;
+        parked = self->parked;
+        unlock_test_mutex(&self->mutex);
+        let_other_threads_run();
+    }
+}
+
+static uint32_t rounds_made(racing_scheduler *self) {
+    uint32_t made;
+    lock_test_mutex(&self->mutex);
+    made = self->rounds_made;
+    unlock_test_mutex(&self->mutex);
+    return made;
+}
+
+static void wait_for_rounds(racing_scheduler *self, uint32_t rounds) {
+    while (rounds_made(self) < rounds) {
+        let_other_threads_run();
+    }
+}
+
+/** Lets the churn that counts no rounds of its own go on until `rounds` are made in all. */
+static void allow_rounds(racing_scheduler *self, uint32_t rounds) {
+    lock_test_mutex(&self->mutex);
+    self->rounds_allowed = rounds;
+    unlock_test_mutex(&self->mutex);
+}
+
+static void end_the_churning(racing_scheduler *self) {
+    lock_test_mutex(&self->mutex);
+    self->churning_ends = 1;
+    unlock_test_mutex(&self->mutex);
+}
+
+/** Lets the runner run whatever still waits, and ends it. */
+static void end_the_runner(racing_scheduler *self, test_thread *runner) {
+    end_the_churning(self);
+    lock_test_mutex(&self->mutex);
+    self->parking = 0;
+    self->stopping = 1;
+    unlock_test_mutex(&self->mutex);
+    join_test_thread(runner);
+}
+
+/** What the scheduler saw the layer do, read once nothing runs any more. */
+typedef struct racing_tally {
+    /** Tasks neither run nor taken out: the layer left them scheduled. */
+    uint32_t left_waiting;
+    /** Tasks the timer asked to cancel whose callback it took for the task waited for all the same. */
+    uint32_t live_though_asked_to_cancel;
+    /** Tasks that ran while the timer still waited for them, having never asked to cancel them, and did nothing. */
+    uint32_t idle_though_waited_for;
+    uint32_t read_the_clock_twice;
+    uint32_t ran_after_the_destroy;
+    uint32_t refused;
+    uint32_t clock_reads;
+    uint32_t schedules;
+} racing_tally;
+
+static racing_tally tally_of(racing_scheduler *self) {
+    racing_tally tally = {0, 0, 0, 0, 0, 0, 0, 0};
+    uint32_t index;
+    lock_test_mutex(&self->mutex);
+    for (index = 0; index < self->begun; index++) {
+        const racing_task *task = &self->tasks[index];
+        int ran = task->state == TASK_RAN;
+        tally.left_waiting += task->state == TASK_WAITING;
+        tally.live_though_asked_to_cancel += task->asked_to_cancel != 0 && task->clock_reads != 0;
+        tally.idle_though_waited_for += ran && task->asked_to_cancel == 0 && task->clock_reads == 0;
+        tally.read_the_clock_twice += task->clock_reads > 1;
+    }
+    tally.ran_after_the_destroy = self->ran_after_the_destroy;
+    tally.refused = self->refused;
+    tally.clock_reads = self->clock_reads;
+    tally.schedules = self->schedules;
+    unlock_test_mutex(&self->mutex);
+    return tally;
+}
+
+static int is_what_a_sound_timer_leaves(const racing_tally *tally) {
+    return tally->left_waiting == 0 && tally->live_though_asked_to_cancel == 0 &&
+           tally->idle_though_waited_for == 0 && tally->read_the_clock_twice == 0 &&
+           tally->ran_after_the_destroy == 0 && tally->refused == 0;
+}
+
+/** One thread that makes a timed want and withdraws it, over and over. */
 typedef struct deadline_churn {
     weivel_c_core *core;
+    racing_scheduler *time;
     char id[16];
+    /** How many rounds to make; 0 to make as many as the scheduler allows, until its `churning_ends`. */
+    uint32_t rounds;
     uint32_t unexpected;
     /** 1 when the clock stands past every deadline, so a want may have timed out before it is withdrawn. */
     int wants_may_time_out;
 } deadline_churn;
 
+static void churn_one_round(deadline_churn *self, uint32_t round) {
+    weivel_want_options options = WEIVEL_INIT(weivel_want_options);
+    weivel_handle want = 0;
+    weivel_c_status status;
+    options.timed = WEIVEL_CHOICE_YES;
+    options.timeout_millis = 1000 + round % RACING_ROUNDS;
+    status = weivel_c_core_want_service(self->core, WEIVEL_HOST, self->id, &options, &want, NULL);
+    if (status == WEIVEL_C_STATUS_OK) {
+        status = weivel_c_core_unregister(self->core, want, NULL);
+    }
+    self->unexpected += status != WEIVEL_C_STATUS_OK && !(self->wants_may_time_out && status == WEIVEL_C_STATUS_REFUSED);
+}
+
+/** Waits until the scheduler allows another round. Answers 0 when the churning has ended instead. */
+static int is_allowed_another_round(racing_scheduler *time) {
+    int allowed = -1;
+    while (allowed < 0) {
+        lock_test_mutex(&time->mutex);
+        if (time->churning_ends) {
+            allowed = 0;
+        } else if (time->rounds_made < time->rounds_allowed) {
+            allowed = 1;
+        }
+        unlock_test_mutex(&time->mutex);
+        if (allowed < 0) {
+            let_other_threads_run();
+        }
+    }
+    return allowed;
+}
+
+static void count_a_round(racing_scheduler *time) {
+    lock_test_mutex(&time->mutex);
+    time->rounds_made++;
+    unlock_test_mutex(&time->mutex);
+}
+
 static void churn_the_deadline(void *argument) {
     deadline_churn *self = argument;
-    uint32_t round;
-    for (round = 0; round < RACING_ROUNDS; round++) {
-        weivel_want_options options = WEIVEL_INIT(weivel_want_options);
-        weivel_handle want = 0;
-        weivel_c_status status;
-        options.timed = WEIVEL_CHOICE_YES;
-        options.timeout_millis = 1000 + round;
-        status = weivel_c_core_want_service(self->core, WEIVEL_HOST, self->id, &options, &want, NULL);
-        if (status == WEIVEL_C_STATUS_OK) {
-            status = weivel_c_core_unregister(self->core, want, NULL);
-        }
-        self->unexpected += status != WEIVEL_C_STATUS_OK && status != WEIVEL_C_STATUS_DESTROYED &&
-                            !(self->wants_may_time_out && status == WEIVEL_C_STATUS_REFUSED);
+    uint32_t round = 0;
+    while (self->rounds != 0 ? round < self->rounds : is_allowed_another_round(self->time)) {
+        churn_one_round(self, round);
+        round++;
+        count_a_round(self->time);
     }
 }
 
+static deadline_churn churn_of(weivel_c_core *core, racing_scheduler *time, int index, uint32_t rounds) {
+    deadline_churn churn = {core, time, "", rounds, 0, 0};
+    snprintf(churn.id, sizeof churn.id, "r%d", index);
+    return churn;
+}
+
+/**
+ * The clock stands at 0, before every deadline, so no callback may hand the core the time: one taken for the task
+ * waited for reads the clock and arms again, and every other does nothing at all.
+ */
 static void a_callback_racing_a_re_arm_never_advances_before_the_deadline(void) {
-    static racing_scheduler time;
-    weivel_c_scheduler scheduler = WEIVEL_INIT(weivel_c_scheduler);
+    racing_scheduler time;
+    weivel_c_scheduler scheduler;
     deadline_churn churns[2];
     test_thread threads[2];
     test_thread runner;
+    racing_tally tally;
     weivel_c_timer *timer = NULL;
     weivel_c_core *core = make_core(NULL, NULL, NULL);
     int index;
-    memset(&time, 0, sizeof time);
-    start_test_mutex(&time.mutex);
-    scheduler.now = racing_now;
-    scheduler.schedule = racing_schedule;
-    scheduler.cancel = racing_cancel;
-    scheduler.data = &time;
+    begin_racing(&time, &scheduler, 0);
     CHECK(weivel_c_timer_create(core, &scheduler, &timer) == WEIVEL_C_STATUS_OK);
     forget_crossings();
     CHECK(start_test_thread(&runner, run_waiting_tasks, &time));
     for (index = 0; index < 2; index++) {
-        churns[index] = (deadline_churn){core, "", 0, 0};
-        snprintf(churns[index].id, sizeof churns[index].id, "r%d", index);
+        churns[index] = churn_of(core, &time, index, RACING_ROUNDS);
         CHECK(start_test_thread(&threads[index], churn_the_deadline, &churns[index]));
     }
     for (index = 0; index < 2; index++) {
         join_test_thread(&threads[index]);
         CHECK(churns[index].unexpected == 0);
     }
-    lock_test_mutex(&time.mutex);
-    time.stopping = 1;
-    unlock_test_mutex(&time.mutex);
-    join_test_thread(&runner);
-    CHECK(crossed.advance == 0);
-    CHECK(time.refused == 0);
-    CHECK(racing_waiting(&time) == 0);
+    park_the_runner(&time);
+    tally = tally_of(&time);
+    CHECK(crossed.advance == 0 && armed_deadline(timer) == DISARMED);
+    CHECK(tally.left_waiting == 0 && tally.schedules > 0);
+    end_the_runner(&time, &runner);
+    tally = tally_of(&time);
+    CHECK(is_what_a_sound_timer_leaves(&tally));
     CHECK(weivel_c_timer_destroy(timer) == WEIVEL_C_STATUS_OK);
     end_core(core);
     CHECK(weivel_c_timer_free(timer) == WEIVEL_C_STATUS_OK);
+    free(time.tasks);
 }
 
-static void a_destroy_racing_a_callback_and_a_re_arm_leaves_nothing_scheduled(void) {
-    static racing_scheduler time;
-    weivel_c_scheduler scheduler = WEIVEL_INIT(weivel_c_scheduler);
+/** A want of the host's whose deadline lies beyond the clock for the whole test, so the timer always has one. */
+static void want_far_ahead(weivel_c_core *core) {
+    weivel_want_options options = WEIVEL_INIT(weivel_want_options);
+    weivel_handle want = 0;
+    options.timed = WEIVEL_CHOICE_YES;
+    options.timeout_millis = 2000000000;
+    CHECK(weivel_c_core_want_service(core, WEIVEL_HOST, "far", &options, &want, NULL) == WEIVEL_C_STATUS_OK);
+}
+
+/** Marks the timer destroyed for the scheduler's own count, and answers what it had been asked by then. */
+static racing_tally note_the_destroy(racing_scheduler *self) {
+    lock_test_mutex(&self->mutex);
+    self->timer_is_destroyed = 1;
+    unlock_test_mutex(&self->mutex);
+    return tally_of(self);
+}
+
+/** Has the churn make RACING_ROUNDS more rounds, waits for them, and ends it. */
+static void churn_on_and_end(racing_scheduler *self, test_thread *thread) {
+    uint32_t rounds = rounds_made(self) + RACING_ROUNDS;
+    allow_rounds(self, rounds);
+    wait_for_rounds(self, rounds);
+    end_the_churning(self);
+    join_test_thread(thread);
+}
+
+/**
+ * The clock stands past every deadline of the churn, so callbacks hand the core the time, and one want lies far
+ * ahead, so the timer holds or is scheduling a task whenever the destroy lands.
+ *
+ * @implNote The runner is parked before the destroy, so a task still waiting afterwards was left by the layer and
+ * not merely not yet run. The churn goes on for a known number of rounds after the destroy, on a core that still
+ * waits on a deadline: the one call in flight may read the clock once and schedule one task it cancels itself, and
+ * nothing after it may touch the scheduler at all.
+ */
+static void a_destroy_racing_a_re_arm_leaves_nothing_scheduled_and_reads_no_clock_afterwards(void) {
+    racing_scheduler time;
+    weivel_c_scheduler scheduler;
     deadline_churn churn;
     test_thread thread;
     test_thread runner;
+    racing_tally at_the_destroy;
+    racing_tally afterwards;
     weivel_c_timer *timer = NULL;
     weivel_c_core *core = make_core(NULL, NULL, NULL);
-    uint32_t condition = 0;
-    int index;
-    memset(&time, 0, sizeof time);
-    start_test_mutex(&time.mutex);
-    time.clock = 1000000;
-    scheduler.now = racing_now;
-    scheduler.schedule = racing_schedule;
-    scheduler.cancel = racing_cancel;
-    scheduler.data = &time;
+    begin_racing(&time, &scheduler, 1000000);
     CHECK(weivel_c_timer_create(core, &scheduler, &timer) == WEIVEL_C_STATUS_OK);
-    churn = (deadline_churn){core, "d", 0, 1};
+    want_far_ahead(core);
+    churn = churn_of(core, &time, 0, 0);
+    churn.wants_may_time_out = 1;
+    allow_rounds(&time, 2 * RACING_ROUNDS);
     CHECK(start_test_thread(&runner, run_waiting_tasks, &time));
     CHECK(start_test_thread(&thread, churn_the_deadline, &churn));
-    for (index = 0; index < 50; index++) {
-        weivel_c_core_handle_state(core, 1, &condition, NULL);
-        let_other_threads_run();
-    }
+    wait_for_rounds(&time, RACING_ROUNDS);
+    park_the_runner(&time);
     CHECK(weivel_c_timer_destroy(timer) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_destroy(core) == WEIVEL_C_STATUS_OK);
-    join_test_thread(&thread);
-    CHECK(churn.unexpected == 0);
-    CHECK(racing_waiting(&time) == 0);
-    lock_test_mutex(&time.mutex);
-    time.stopping = 1;
-    unlock_test_mutex(&time.mutex);
-    join_test_thread(&runner);
-    CHECK(time.refused == 0);
-    CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_OK);
+    at_the_destroy = note_the_destroy(&time);
+    CHECK(armed_deadline(timer) == DISARMED);
+    churn_on_and_end(&time, &thread);
+    afterwards = tally_of(&time);
+    CHECK(churn.unexpected == 0 && afterwards.left_waiting == 0);
+    CHECK(afterwards.clock_reads - at_the_destroy.clock_reads <= 1);
+    CHECK(afterwards.schedules - at_the_destroy.schedules <= 1);
+    end_the_runner(&time, &runner);
+    CHECK(tally_of(&time).clock_reads == afterwards.clock_reads);
+    afterwards = tally_of(&time);
+    CHECK(is_what_a_sound_timer_leaves(&afterwards));
+    end_core(core);
     CHECK(weivel_c_timer_free(timer) == WEIVEL_C_STATUS_OK);
+    free(time.tasks);
 }
 
 int main(int argument_count, char **arguments) {
@@ -1021,7 +1237,7 @@ int main(int argument_count, char **arguments) {
     a_registration_at_the_deadline_loses();
     a_registration_past_an_unfired_deadline_loses();
     a_callback_racing_a_re_arm_never_advances_before_the_deadline();
-    a_destroy_racing_a_callback_and_a_re_arm_leaves_nothing_scheduled();
+    a_destroy_racing_a_re_arm_leaves_nothing_scheduled_and_reads_no_clock_afterwards();
     CHECK(deadline_polls == 0);
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("timer");
