@@ -13,6 +13,15 @@
 
 #include <weivel/core.h>
 
+static void keep_whole_if_cut(char *problem, int written) {
+    static const char cut[] = " (cut short)";
+    if (written < 0) {
+        memcpy(problem, "a problem whose text could not be written", 42);
+    } else if (written >= CONFORMANCE_PROBLEM) {
+        memcpy(problem + CONFORMANCE_PROBLEM - sizeof cut, cut, sizeof cut);
+    }
+}
+
 static long length_of(FILE *file) {
     long length;
     if (fseek(file, 0, SEEK_END) != 0) {
@@ -34,7 +43,7 @@ char *conformance_read_file(const char *path, size_t *length, char *problem) {
         fclose(file);
     }
     if (bytes == NULL) {
-        snprintf(problem, CONFORMANCE_PROBLEM, "the file %s cannot be read", path);
+        keep_whole_if_cut(problem, snprintf(problem, CONFORMANCE_PROBLEM, "the file %s cannot be read", path));
         return NULL;
     }
     bytes[measured] = '\0';
@@ -48,8 +57,9 @@ static weivel_json_value *parse_file(const char *path, char *problem) {
     char *text = conformance_read_file(path, &length, problem);
     weivel_json_value *document = text == NULL ? NULL : weivel_json_parse(text, length, &error);
     if (text != NULL && document == NULL) {
-        snprintf(problem, CONFORMANCE_PROBLEM, "%s is not JSON at line %d column %d: %s", path, error.line,
-                 error.column, error.message == NULL ? "" : error.message);
+        keep_whole_if_cut(problem, snprintf(problem, CONFORMANCE_PROBLEM, "%s is not JSON at line %d column %d: %s",
+                                            path, error.line, error.column,
+                                            error.message == NULL ? "" : error.message));
     }
     free(text);
     return document;
@@ -61,13 +71,16 @@ static int read_parts(conformance_vector *vector, const char *relative, const ch
     vector->given = weivel_json_object_get(vector->document, "given");
     vector->then = weivel_json_object_get(vector->document, "then");
     if (vector->id == NULL || strcmp(vector->id, relative) != 0) {
-        snprintf(problem, CONFORMANCE_PROBLEM, "the layer vector at %s names itself %s, where its path names %s",
-                 path, vector->id == NULL ? "nothing" : vector->id, relative);
+        keep_whole_if_cut(problem,
+                          snprintf(problem, CONFORMANCE_PROBLEM,
+                                   "the layer vector at %s names itself %s, where its path names %s", path,
+                                   vector->id == NULL ? "nothing" : vector->id, relative));
         return 0;
     }
     if (vector->op == NULL || weivel_json_kind_of(vector->given) != WEIVEL_JSON_OBJECT ||
         weivel_json_kind_of(vector->then) != WEIVEL_JSON_OBJECT) {
-        snprintf(problem, CONFORMANCE_PROBLEM, "the layer vector at %s lacks an op, a given or a then", path);
+        keep_whole_if_cut(problem, snprintf(problem, CONFORMANCE_PROBLEM,
+                                            "the layer vector at %s lacks an op, a given or a then", path));
         return 0;
     }
     return 1;
@@ -75,8 +88,15 @@ static int read_parts(conformance_vector *vector, const char *relative, const ch
 
 int conformance_read_vector(const char *directory, const char *relative, conformance_vector *vector, char *problem) {
     char path[4096];
+    int written;
     memset(vector, 0, sizeof *vector);
-    snprintf(path, sizeof path, "%s/%s.json", directory, relative);
+    written = snprintf(path, sizeof path, "%s/%s.json", directory, relative);
+    if (written < 0 || (size_t)written >= sizeof path) {
+        keep_whole_if_cut(problem, snprintf(problem, CONFORMANCE_PROBLEM,
+                                            "the path of the layer vector %s under %s is longer than %u bytes",
+                                            relative, directory, (unsigned)(sizeof path - 1)));
+        return 0;
+    }
     vector->document = parse_file(path, problem);
     if (vector->document == NULL) {
         return 0;
