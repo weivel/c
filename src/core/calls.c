@@ -279,13 +279,20 @@ static weivel_status call_get_service(const weivel_c_core_table *table, weivel_c
     return table->get_service(core, given->plugin, given->id, given->implementation, pending_events);
 }
 
-weivel_c_status weivel_c_core_get_service(weivel_c_core *core, weivel_handle plugin, const char *id,
-                                          weivel_handle *implementation, weivel_c_refusal *refusal) {
+weivel_c_status weivel_c_core_get_service_then(weivel_c_core *core, weivel_handle plugin, const char *id,
+                                               weivel_handle *implementation, weivel_c_refusal *refusal,
+                                               const weivel_c_answered_step *then) {
     get_service_arguments arguments = {plugin, id, implementation};
     if (!is_an_id(id) || implementation == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
-    return weivel_c_core_invoke(core, call_get_service, &arguments, WEIVEL_C_CALL_BUILT_BY_THE_LAYER, refusal);
+    return weivel_c_core_invoke_then(core, call_get_service, &arguments, WEIVEL_C_CALL_BUILT_BY_THE_LAYER, refusal,
+                                     then);
+}
+
+weivel_c_status weivel_c_core_get_service(weivel_c_core *core, weivel_handle plugin, const char *id,
+                                          weivel_handle *implementation, weivel_c_refusal *refusal) {
+    return weivel_c_core_get_service_then(core, plugin, id, implementation, refusal, NULL);
 }
 
 typedef struct want_service_arguments {
@@ -469,14 +476,20 @@ static weivel_status call_all_capabilities(const weivel_c_core_table *table, wei
     return table->all_capabilities(core, given->plugin, given->id, given->list, pending_events);
 }
 
-weivel_c_status weivel_c_core_all_capabilities(weivel_c_core *core, weivel_handle plugin, const char *id,
-                                               weivel_capability_list *list, weivel_c_refusal *refusal) {
+weivel_c_status weivel_c_core_all_capabilities_then(weivel_c_core *core, weivel_handle plugin, const char *id,
+                                                    weivel_capability_list *list, weivel_c_refusal *refusal,
+                                                    const weivel_c_answered_step *then) {
     all_capabilities_arguments arguments = {plugin, id, list};
     if (!is_an_id(id) || list == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
-    return weivel_c_core_invoke(core, call_all_capabilities, &arguments, WEIVEL_C_CALL_CARRIES_A_CALLERS_STRUCT,
-                                refusal);
+    return weivel_c_core_invoke_then(core, call_all_capabilities, &arguments, WEIVEL_C_CALL_CARRIES_A_CALLERS_STRUCT,
+                                     refusal, then);
+}
+
+weivel_c_status weivel_c_core_all_capabilities(weivel_c_core *core, weivel_handle plugin, const char *id,
+                                               weivel_capability_list *list, weivel_c_refusal *refusal) {
+    return weivel_c_core_all_capabilities_then(core, plugin, id, list, refusal, NULL);
 }
 
 typedef struct watch_capability_arguments {

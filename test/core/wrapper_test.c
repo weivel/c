@@ -1436,7 +1436,16 @@ static void more_failures_than_one_call_keeps_are_counted_for_the_sink(void) {
     CHECK(memory.held == 0);
 }
 
+static void a_core_says_whether_it_is_destroyed(void) {
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    CHECK(weivel_c_core_is_destroyed(core) == 0);
+    CHECK(weivel_c_core_destroy(core) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_is_destroyed(core) == 1);
+    CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_OK);
+}
+
 static void run_the_tests_that_fail_an_allocation(void) {
+    a_core_says_whether_it_is_destroyed();
     a_deadline_whose_copy_fails_is_still_followed();
     more_failures_than_one_call_keeps_are_counted_for_the_sink();
     an_event_that_cannot_be_copied_goes_to_the_sink_and_the_rest_are_still_drained();

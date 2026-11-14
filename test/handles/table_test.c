@@ -626,10 +626,120 @@ static void an_addition_that_runs_out_of_memory_changes_nothing(void) {
     CHECK(memory.held == 0);
 }
 
+static void a_reserved_addition_needs_no_memory_and_an_unused_reservation_is_given_back(void) {
+    scarce_memory memory = {0, 0, 0};
+    weivel_c_allocator allocator = {allocate_scarcely, release_scarcely, &memory};
+    weivel_c_handle_entry entry = entry_of(WEIVEL_C_HANDLE_WATCH, 5, 9, &watch_object);
+    weivel_c_handles *table = make_table();
+    uint32_t reserved = 0;
+    uint32_t index;
+    weivel_c_handles_replace_allocator(table, &allocator);
+    CHECK(weivel_c_handles_add_reserved(table, &entry, NULL) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_handles_hold_reserved(table, 9, 5, &watch_object) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_handles_unreserve(table) == WEIVEL_C_STATUS_MISUSE);
+    memory.fail_from = 1;
+    CHECK(weivel_c_handles_reserve(table) == WEIVEL_C_STATUS_OUT_OF_MEMORY);
+    memory.fail_from = 0;
+    for (index = 0; index < 40; index++) {
+        CHECK(weivel_c_handles_reserve(table) == WEIVEL_C_STATUS_OK);
+    }
+    memory.fail_from = memory.allocations + 1;
+    for (index = 0; index < 20; index++) {
+        entry.handle = 100 + index;
+        CHECK(weivel_c_handles_add_reserved(table, &entry, NULL) == WEIVEL_C_STATUS_OK);
+        CHECK(weivel_c_handles_hold_reserved(table, 9, 100 + index, &watch_object) == WEIVEL_C_STATUS_OK);
+    }
+    CHECK(entries_in(table) == 20 && holdings_in(table) == 20);
+    CHECK(holds(table, 119, WEIVEL_C_HANDLE_WATCH, 9, &watch_object));
+    CHECK(weivel_c_handles_add_reserved(table, &entry, NULL) == WEIVEL_C_STATUS_MISUSE);
+    memory.fail_from = 0;
+    CHECK(weivel_c_handles_reserve(table) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_unreserve(table) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_handles_unreserve(table) == WEIVEL_C_STATUS_MISUSE);
+    memory.fail_from = memory.allocations + 1;
+    while (weivel_c_handles_reserve(table) == WEIVEL_C_STATUS_OK) {
+        reserved++;
+    }
+    entry.handle = 500;
+    CHECK(reserved < 64 && weivel_c_handles_add(table, &entry, NULL) == WEIVEL_C_STATUS_OUT_OF_MEMORY);
+    for (index = 0; index < reserved; index++) {
+        entry.handle = 600 + index;
+        CHECK(weivel_c_handles_add_reserved(table, &entry, NULL) == WEIVEL_C_STATUS_OK);
+    }
+    CHECK(entries_in(table) == 20 + reserved);
+    weivel_c_handles_free(table);
+    CHECK(memory.held == 0);
+}
+
+/** What the step of a get or of a listing saw of the core's answer as it ran. */
+typedef struct seen_answer {
+    const weivel_handle *registration;
+    const weivel_capability_list *list;
+    uint32_t runs;
+    weivel_handle registration_seen;
+    uint32_t listed_seen;
+    uint32_t events_heard_before;
+    const hearing *listener;
+} seen_answer;
+
+static weivel_c_status see_the_answer(void *data) {
+    seen_answer *self = data;
+    self->runs++;
+    self->registration_seen = self->registration == NULL ? 0 : *self->registration;
+    self->listed_seen = self->list == NULL ? 0 : self->list->count;
+    self->events_heard_before = self->listener->count;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_event_is_heard(void) {
+    static const char *const CAPABILITY[] = {"screens"};
+    hearing listener = {0};
+    weivel_service_want consumed = want_of("p:a");
+    weivel_manifest manifest = WEIVEL_INIT(weivel_manifest);
+    weivel_capability_list list = WEIVEL_INIT(weivel_capability_list);
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    weivel_handle provider = open_plugin(core, "p", PROVIDED, 1, NULL, 0);
+    weivel_handle consumer = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    weivel_handle maker = 0;
+    weivel_handle registration = 0;
+    weivel_handle answered = 0;
+    weivel_handle implementation = 0;
+    seen_answer seen = {&answered, NULL, 0, 0, 0, 0, &listener};
+    weivel_c_answered_step then = {see_the_answer, &seen};
+    manifest.import_name = "m";
+    manifest.api = 1;
+    manifest.capabilities.provides.items = CAPABILITY;
+    manifest.capabilities.provides.count = 1;
+    manifest.capabilities.consumes.items = CAPABILITY;
+    manifest.capabilities.consumes.count = 1;
+    CHECK(weivel_c_core_get_service_then(core, consumer, "p:a", &answered, NULL, &then) == WEIVEL_C_STATUS_NONE);
+    CHECK(seen.runs == 0);
+    CHECK(weivel_c_core_get_service_then(core, consumer, "p:undeclared", &answered, NULL, &then) ==
+          WEIVEL_C_STATUS_REFUSED);
+    CHECK(seen.runs == 0);
+    CHECK(weivel_c_core_register_service(core, provider, "p:a", &registration, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_get_service_then(core, consumer, "p:a", &answered, NULL, &then) == WEIVEL_C_STATUS_OK);
+    CHECK(seen.runs == 1 && seen.registration_seen == registration && answered == registration);
+    CHECK(weivel_c_core_register_manifest(core, &manifest, &maker, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_open_plugin(core, maker, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_provide_capability(core, maker, "screens", &implementation, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_verify_activation(core, maker, NULL) == WEIVEL_C_STATUS_OK);
+    seen = (seen_answer){NULL, &list, 0, 0, 0, 0, &listener};
+    CHECK(weivel_c_core_all_capabilities_then(core, consumer, "screens", &list, NULL, &then) ==
+          WEIVEL_C_STATUS_REFUSED);
+    CHECK(seen.runs == 0 && seen.events_heard_before == 0);
+    CHECK(weivel_c_core_all_capabilities_then(core, maker, "screens", &list, NULL, &then) == WEIVEL_C_STATUS_OK);
+    CHECK(seen.runs == 1 && seen.listed_seen == 1 && list.count == 1);
+    CHECK(weivel_c_core_capability_list_release(core, &list) == WEIVEL_C_STATUS_OK);
+    end_core(core);
+}
+
 static void run_the_tests_of_the_layers_own_seams(void) {
     an_entry_made_as_the_core_answers_is_there_when_an_event_naming_the_handle_is_heard();
     a_step_runs_only_for_a_call_the_core_answered_and_its_failure_is_the_calls_answer();
     an_addition_that_runs_out_of_memory_changes_nothing();
+    a_reserved_addition_needs_no_memory_and_an_unused_reservation_is_given_back();
+    the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_event_is_heard();
 }
 
 #else

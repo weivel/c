@@ -51,6 +51,7 @@ struct weivel_c_handles {
     uint32_t buckets_in_use;
     uint32_t entries;
     uint32_t holdings;
+    uint32_t reserved;
 };
 
 static void *allocate_plainly(void *data, size_t size) {
@@ -140,15 +141,31 @@ static int grow_nodes(weivel_c_handles *table) {
     return 1;
 }
 
-/** Makes room for one addition before anything is changed, so an addition that runs out of memory changes nothing. */
+/**
+ * Makes room for one addition, beyond every addition already reserved, before anything is changed, so an addition
+ * that runs out of memory changes nothing and a reserved one never needs memory.
+ */
 static int has_room_for_an_addition(weivel_c_handles *table) {
-    uint32_t unused = table->node_capacity - table->nodes_begun + table->free_nodes;
-    if (unused < NODES_OF_ONE_ADDITION && !grow_nodes(table)) {
+    uint32_t needed = (table->reserved + 1) * NODES_OF_ONE_ADDITION;
+    while (table->node_capacity - table->nodes_begun + table->free_nodes < needed) {
+        if (!grow_nodes(table)) {
+            return 0;
+        }
+    }
+    while ((table->buckets_in_use + needed) * 2 > table->bucket_count) {
+        if (!grow_buckets(table)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/** Turns one reservation into the room the addition that follows takes. Answers 0 when nothing is reserved. */
+static int use_a_reservation(weivel_c_handles *table) {
+    if (table->reserved == 0) {
         return 0;
     }
-    if ((table->buckets_in_use + NODES_OF_ONE_ADDITION) * 2 > table->bucket_count) {
-        return grow_buckets(table);
-    }
+    table->reserved--;
     return 1;
 }
 
@@ -362,6 +379,45 @@ weivel_c_status weivel_c_handles_add(weivel_c_handles *handles, const weivel_c_h
     return status;
 }
 
+weivel_c_status weivel_c_handles_reserve(weivel_c_handles *handles) {
+    weivel_c_status status = WEIVEL_C_STATUS_OUT_OF_MEMORY;
+    if (handles == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    weivel_c_mutex_lock(&handles->lock);
+    if (has_room_for_an_addition(handles)) {
+        handles->reserved++;
+        status = WEIVEL_C_STATUS_OK;
+    }
+    weivel_c_mutex_unlock(&handles->lock);
+    return status;
+}
+
+weivel_c_status weivel_c_handles_unreserve(weivel_c_handles *handles) {
+    int reserved;
+    if (handles == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    weivel_c_mutex_lock(&handles->lock);
+    reserved = use_a_reservation(handles);
+    weivel_c_mutex_unlock(&handles->lock);
+    return reserved ? WEIVEL_C_STATUS_OK : WEIVEL_C_STATUS_MISUSE;
+}
+
+weivel_c_status weivel_c_handles_add_reserved(weivel_c_handles *handles, const weivel_c_handle_entry *entry,
+                                              uint64_t *token) {
+    weivel_c_status status = WEIVEL_C_STATUS_MISUSE;
+    if (handles == NULL || !is_addable(entry)) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    weivel_c_mutex_lock(&handles->lock);
+    if (use_a_reservation(handles)) {
+        status = add_entry(handles, entry, token);
+    }
+    weivel_c_mutex_unlock(&handles->lock);
+    return status;
+}
+
 weivel_c_status weivel_c_handles_find(weivel_c_handles *handles, weivel_handle handle,
                                       weivel_c_handle_entry *entry) {
     uint32_t position;
@@ -443,6 +499,20 @@ weivel_c_status weivel_c_handles_hold(weivel_c_handles *handles, weivel_handle p
     }
     weivel_c_mutex_lock(&handles->lock);
     status = hold(handles, plugin, implementation, object);
+    weivel_c_mutex_unlock(&handles->lock);
+    return status;
+}
+
+weivel_c_status weivel_c_handles_hold_reserved(weivel_c_handles *handles, weivel_handle plugin,
+                                               weivel_handle implementation, void *object) {
+    weivel_c_status status = WEIVEL_C_STATUS_MISUSE;
+    if (handles == NULL || plugin == 0 || implementation == 0 || object == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    weivel_c_mutex_lock(&handles->lock);
+    if (use_a_reservation(handles)) {
+        status = hold(handles, plugin, implementation, object);
+    }
     weivel_c_mutex_unlock(&handles->lock);
     return status;
 }

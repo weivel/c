@@ -75,6 +75,9 @@ weivel_c_status weivel_c_core_invoke_handing_time(weivel_c_core *core, weivel_c_
  */
 weivel_c_status weivel_c_core_follow_deadline_again(weivel_c_core *core);
 
+/** 1 once the core behind the object is destroyed, so that no listener and no step of it will be taken again. */
+int weivel_c_core_is_destroyed(weivel_c_core *core);
+
 /** One release of an answer the core filled: it makes exactly one call through `table`, which needs no core. */
 typedef weivel_status (*weivel_c_core_release)(const weivel_c_core_table *table, void *answer);
 

@@ -22,7 +22,8 @@ public name begins with `weivel_c_`, every public struct begins with its `size`,
 
 ## What is built
 
-The `core`, `handles` and `timer` modules. The other five modules hold only a header saying what they are for.
+The `core`, `handles`, `timer` and `context` modules. The other four modules hold only a header saying what they
+are for.
 
 `weivel_c_core_load` opens the core's shared binary with the platform's loader and fills one table,
 `weivel_c_core_table`, with every function the core exports; a path that is no library and a library that lacks a
@@ -53,7 +54,9 @@ service registration, capability implementation, watch and want, made when the c
 when what it stands for ends. A handle the table does not hold answers nothing. What a plugin holds of another's is
 kept by the pair of handles and dropped by the `WEIVEL_EVENT_REVOKED` that names it, and each entry has a token that
 reaches it without a search, which is what a plugin is opened with as its payload. The table has its own lock and
-calls nothing, so any thread may use it.
+calls nothing, so any thread may use it. `weivel_c_handles_reserve` takes the room of an addition ahead of time, so
+the entry for a handle is made, once the core has answered it, by a step that cannot fail, and the core never holds
+an object whose handle the table lacks.
 
 `weivel_c_timer_create` arms the core's deadline on the caller's `weivel_c_scheduler`: a clock, `now`, and
 `schedule` and `cancel` for one task. The layer owns no thread and no timer. The task is scheduled from the latest
@@ -64,6 +67,32 @@ and advances the core first when the deadline has passed, so a registration at o
 nothing even when the task has not run. `weivel_c_timer_destroy` cancels the task, so nothing of the layer's fires
 once its core is gone. A timer made without a scheduler arms nothing and reads no clock, and `weivel_c_timer_now`,
 where the layer takes the time for a want that needs it, then answers the caller's mistake.
+
+`weivel_c_contexts_create` makes what the contexts of one host share: the core, the handles table, the timer and
+the host's log, behind one listener that routes each event of the core to the plugin it names. The host builds a
+`weivel_c_context` for each plugin it opens, from the plugin's handle and its manifest value, which the context
+borrows, and opens the plugin with the context's token as its payload. Through its context a plugin:
+
+- gets a service registered now, wants one, watches one, lists the ids it may reach and registers its own. A service
+  is a `void *`: a get, a settled want and a watch hearing a registration answer the very pointer the provider
+  registered, so calling it is a plain call in C that crosses into nothing;
+- gives a callback for whatever comes later. A want settles exactly once through its callback, with the provider's
+  pointer or the core's refusal, a want that could be settled or had to be rejected at once included. It waits
+  without bound unless its options ask otherwise, and a timeout, a budget and a poll interval reach the core
+  unchanged with the host's time; on a host without a clock such a want is the caller's mistake and the core is not
+  asked;
+- may give an answerer when it registers a service, which is put each question a constrained want asks and whose
+  answer is reported to the core. A registration without one answers at once: nothing live, and that it serves;
+- provides an implementation of a capability, lists the verified ones and watches them join and leave;
+- hears what the core reports about it: which object it holds was revoked, a refusal of reach, a want that settled
+  degraded;
+- logs to the host's log, and reads its manifest value.
+
+A callback that answers a failure goes to the error sink and silences nothing, and no callback runs under a lock of
+the layer's, so each may call back into its context. A context decides nothing and keeps no answer of the core's.
+Once a plugin is released or quarantined its callbacks still hear what that call queued; its entries end when the
+host calls `weivel_c_context_end_entries`, from a step it defers behind those events, and a call the plugin still
+makes is answered as the core answers a late call.
 
 ## Building
 
