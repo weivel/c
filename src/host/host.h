@@ -144,6 +144,8 @@ struct weivel_c_host {
     uint32_t opens_in_flight;
     /** The settlings of activations taken while the host was running whose outcome is not yet queued. */
     uint32_t settles_in_flight;
+    /** The activations that found the host running and have not yet queued every started plugin's outcome. */
+    uint32_t activations_in_flight;
     uint32_t destroy_waits;
     uint32_t destroy_finished;
     weivel_c_step destroy_beginning;
@@ -258,8 +260,8 @@ weivel_c_status weivel_c_host_finish_release(void *data, weivel_c_core *core);
 weivel_c_status weivel_c_host_end_quarantined_entries(void *data, weivel_c_core *core);
 
 /**
- * Under the host's lock: whether the last release, open and settling a destroy waits on have finished, so its last
- * steps may run.
+ * Under the host's lock: whether the last release, open, settling and activation a destroy waits on have finished, so
+ * its last steps may run.
  */
 int weivel_c_host_destroy_may_end(weivel_c_host *host);
 
