@@ -17,15 +17,14 @@ the layer runs against whichever core binary its caller loads.
 `src/` holds the modules every language implementation of weivel holds, as the core's `MODULES` list names them:
 `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance` and `benchmarks`. A module's public header is
 `include/weivel/c/<module>.h`, with any further header of the module under `include/weivel/c/<module>/`,
-`include/weivel/c.h` includes them all but the optional `standard` module's, which is a library of its own, and its
-tests are in `test/<module>/`. Every
-public name begins with `weivel_c_`, every public struct begins with its `size`, and every call answers a
+`include/weivel/c.h` includes them all but the optional `standard` module's and the `conformance` module's, each a
+library of its own, and its tests are in `test/<module>/`. Every public name begins with `weivel_c_`, every public struct begins with its `size`, and every call answers a
 `weivel_c_status`.
 
 ## What is built
 
-The `core`, `handles`, `timer`, `context`, `host` and `standard` modules. The other two modules hold only a header
-saying what they are for.
+The `core`, `handles`, `timer`, `context`, `host`, `standard` and `conformance` modules. The `benchmarks` module holds
+only a header saying what it is for.
 
 `weivel_c_core_load` opens the core's shared binary with the platform's loader and fills one table,
 `weivel_c_core_table`, with every function the core exports; a path that is no library and a library that lacks a
@@ -124,6 +123,8 @@ contexts. It never links or loads the standard: `weivel_c_host_register` takes a
 whole, so its caller may free its own at once, and an entry.
 
 
+- `weivel_c_host_core` and `weivel_c_host_timer` answer the host's core, so its caller can read the ledger, and its
+  timer, so its caller can read what the layer says it armed.
 - `weivel_c_host_register_service` registers a service of the host's own under `WEIVEL_HOST`, offered to every plan
   as provided by the host and answered to a plugin as the very pointer given.
 - `weivel_c_host_activate` asks the core for the plan with the edge source its caller chooses, answers the plan at
@@ -191,8 +192,8 @@ answer. A consumer that resolves the service is answered that very object.
 The host includes the standard's `weivel/library.h` for its types and never links, loads or calls the standard's
 binary. A test reads every source outside the `standard` module as tokens, adjacent string literals joined, and fails
 on a name of a function the standard exports, a string spelling one or the start of the standard's names, or a token
-pasted onto a name of weivel's; and it reads the link graph the build writes and fails when any target but the
-`standard` module's library and tests reaches the standard.
+pasted onto a name of weivel's; and it reads the link graph the build writes and fails when any target reaches the
+standard but those it names exactly: the `standard` and `conformance` modules' libraries and their tests.
 
 ### The `standard` module, optional and its own library
 
@@ -221,6 +222,33 @@ The module holds no default of its own: a test reads its sources and header and 
 service id or placeholder macro of the standard's that would compile one of its values into this binary, and on a
 call that reads the environment or opens a file.
 
+### The `conformance` module: the layer suite's driver
+
+`include/weivel/c/conformance.h` is the driver for the layer suite, its own library `weivel_c_conformance`. It reads a
+layer vector of the kit with the standard's JSON reader, the one place a JSON document enters C, so it links the
+standard as the `standard` module does. `weivel_c_conformance_witness_vector` reads `<directory>/<id>.json`, refuses a
+vector that names itself another id, builds the vector's plugins as manifest values and entries, registers them through
+the host's public surface on the real core, writing no file, drives the vector's steps, and answers what the run
+showed as JSON in the shape of the vector's own `then`, which the standard's reader reads back and compares with
+`then` as a value. A `then` field, an op, a given key or a step kind the driver does not know is a problem, never a
+pass. `weivel_c_conformance_vector_ids` lists every vector under a directory at any depth.
+
+- The driver owns the clock and the scheduler the host is given: a task runs only when the driver moves time over its
+  due time, `fired` records each run, and a vector with `schedulerRunsBeforeRegistering` false moves the clock without
+  running a task. `timer` is what the host's timer says it is armed for, noted after every call and every task.
+- A `consume` vector's plugins are opened through the host's activation with an activate that stays pending, so none
+  is verified before a `verify` step asks. A listener that "throws" answers a status other than OK, which goes to the
+  error sink. A refusal of the run is a refusal a context call answered; a `verify` step's refusal is the check the
+  host acts on.
+- A `lifecycle` vector's entries record and run their actions as LAYER.md states; an awaited want answers pending and
+  goes on from the want's callback. A step "throws" when the host answers a status that is no answer to a well-made
+  call (anything but OK, REFUSED, NONE and DESTROYED), and a verify is `quiet` when it does not and nothing reached the
+  log or the sink meanwhile.
+
+`test/conformance/` holds one test per layer vector of the pinned kit, named by its id and reading the kit's file at
+run time, and a coverage test that lists the kit's vector directory and fails on a vector no test names. The kit's
+location comes from the build: `siblings/conformance`, or `WEIVEL_C_KIT_DIRECTORY`.
+
 ## Building
 
 C11 and CMake, with no other dependency. The static library is the target `weivel_c` and the shared one
@@ -230,7 +258,7 @@ C11 and CMake, with no other dependency. The static library is the target `weive
 `WEIVEL_C_STANDARD_INCLUDE_DIRECTORY` says otherwise; it links neither. When the standard's checkout is under
 `siblings/standard`, or `WEIVEL_C_STANDARD_SOURCE_DIRECTORY` names one, the optional `weivel_c_standard` and
 `weivel_c_standard_shared` are built from it as well, linking the standard's `weivel_standard` and
-`weivel_standard_shared`; the tests need it.
+`weivel_standard_shared`, and `weivel_c_conformance` linking `weivel_standard`; the tests need them.
 
 `.weivel/repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks them out there;
 locally, link or clone each checkout into `siblings/`. The tests build the pinned core as a shared library and load

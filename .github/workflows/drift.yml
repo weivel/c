@@ -13,5 +13,5 @@ jobs:
       kit_ref: 57174579727a01e3e3597fcc1e1fe99a2ee4ed84
       role: c
       language: c
-      checks: purity names parity
+      checks: purity names parity layers
       runners: '["ubuntu-latest","windows-latest","macos-latest"]'
