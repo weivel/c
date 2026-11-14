@@ -89,7 +89,9 @@ WEIVEL_C_API weivel_c_status weivel_c_host_create(const weivel_c_host_options *o
  * It is a step deferred behind everything already queued, and its last two steps a further step behind its own
  * releases' steps. Where no dispatch runs, it has finished when it returns, unless a deactivate it waits for is still
  * pending: the layer sets no timeout, and the destroy finishes on the thread that finishes the last such deactivate.
- * Inside a dispatch, or while another thread's dispatch runs, it finishes there.
+ * Inside a dispatch, or while another thread's dispatch runs, it finishes there. It also waits for every open, every
+ * settling of an activate and every activation begun while the host was running, and finishes on the thread that ends
+ * the last of them once each has queued its outcomes.
  *
  * From the moment it is called, every other call on the host answers WEIVEL_C_STATUS_DESTROYED, writing nothing to
  * the log or the sink. What the destroy sets off reaches the caller only as the outcome `released`, of an activation in
@@ -99,7 +101,6 @@ WEIVEL_C_API weivel_c_status weivel_c_host_create(const weivel_c_host_options *o
  * WEIVEL_C_FAILURE_LISTENER), a call the host makes into the core that answers a failure other than
  * WEIVEL_C_STATUS_DESTROYED (WEIVEL_C_FAILURE_HOST_CALL), and a C library's binary that does not close
  * (WEIVEL_C_FAILURE_UNLOAD).
-
  *
  * @param finished receives 1 once every step has run, else 0; may be NULL. The thread that ran the last step may still
  * be on its way out of the layer when another reads 1, and weivel_c_host_free answers WEIVEL_C_STATUS_MISUSE, freeing

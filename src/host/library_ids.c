@@ -55,19 +55,15 @@ static int another_library_declares(weivel_c_host *host, const weivel_c_library 
     return 0;
 }
 
-int weivel_c_host_a_live_library_declares(weivel_c_host *host, const char *id) {
-    int declared;
-    weivel_c_mutex_lock(&host->lock);
-    declared = another_library_declares(host, NULL, id);
-    weivel_c_mutex_unlock(&host->lock);
-    return declared;
+int weivel_c_host_a_live_library_declares_held(weivel_c_host *host, const char *id) {
+    return another_library_declares(host, NULL, id);
 }
 
-const library_service *weivel_c_host_service_another_library_declares(weivel_c_host *host,
-                                                                      const weivel_c_library *library) {
+const library_service *weivel_c_host_service_already_held(weivel_c_host *host, const weivel_c_library *library) {
     uint32_t at;
     for (at = 0; at < library->service_count; at++) {
-        if (another_library_declares(host, library, library->services[at].id)) {
+        const char *id = library->services[at].id;
+        if (another_library_declares(host, library, id) || weivel_c_host_holds_service_id(host, id)) {
             return &library->services[at];
         }
     }

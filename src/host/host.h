@@ -101,12 +101,20 @@ struct host_plugin {
     host_ending verify_ending;
 };
 
-/** A service the host registered under WEIVEL_HOST. Its id stays until the host is freed, since a plan reads it. */
+/**
+ * A service the host registered under WEIVEL_HOST, or is registering. Its id stays until the host is freed, since a
+ * plan reads it.
+ *
+ * @implNote A registration claims its id on the list, `pending`, under the same hold that found no live library
+ * declaring it and before the core is asked, so a library whose load is kept meanwhile finds the claim and is refused.
+ */
 typedef struct host_service {
     struct host_service *next;
     weivel_handle registration;
     /** 1 while the registration stands; guarded by the host's lock. */
     uint32_t live;
+    /** 1 from the claim until the core has answered the registration; guarded by the host's lock. */
+    uint32_t pending;
     char id[1];
 } host_service;
 
@@ -136,6 +144,8 @@ struct weivel_c_host {
     uint32_t opens_in_flight;
     /** The settlings of activations taken while the host was running whose outcome is not yet queued. */
     uint32_t settles_in_flight;
+    /** The activations that found the host running and have not yet queued every started plugin's outcome. */
+    uint32_t activations_in_flight;
     uint32_t destroy_waits;
     uint32_t destroy_finished;
     weivel_c_step destroy_beginning;
@@ -158,9 +168,11 @@ weivel_manifest *weivel_c_host_copy_manifest(const weivel_manifest *given);
  * Registers a service under WEIVEL_HOST as weivel_c_host_register_service does, but without refusing an id a live
  * library declares: how a library the host loads registers its own services.
  */
-weivel_c_status weivel_c_host_register_kept_service(weivel_c_host *host, const char *id, void *service,
-                                                    const weivel_c_capacity_answerer *answerer,
-                                                    weivel_handle *registration, weivel_c_refusal *refusal);
+weivel_c_status weivel_c_host_register_library_service(weivel_c_host *host, const char *id, void *service,
+                                                       weivel_handle *registration, weivel_c_refusal *refusal);
+
+/** Under the host's lock: 1 when a service the host registered or is registering holds `id`. */
+int weivel_c_host_holds_service_id(const weivel_c_host *host, const char *id);
 
 /** 1 while nothing has begun to destroy the host. */
 int weivel_c_host_is_running(weivel_c_host *host);
@@ -248,8 +260,8 @@ weivel_c_status weivel_c_host_finish_release(void *data, weivel_c_core *core);
 weivel_c_status weivel_c_host_end_quarantined_entries(void *data, weivel_c_core *core);
 
 /**
- * Under the host's lock: whether the last release, open and settling a destroy waits on have finished, so its last
- * steps may run.
+ * Under the host's lock: whether the last release, open, settling and activation a destroy waits on have finished, so
+ * its last steps may run.
  */
 int weivel_c_host_destroy_may_end(weivel_c_host *host);
 

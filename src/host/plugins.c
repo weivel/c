@@ -239,12 +239,87 @@ weivel_c_status weivel_c_host_timer(weivel_c_host *host, weivel_c_timer **timer)
     return WEIVEL_C_STATUS_OK;
 }
 
-static void keep_service(weivel_c_host *host, host_service *kept) {
+int weivel_c_host_holds_service_id(const weivel_c_host *host, const char *id) {
+    const host_service *kept;
+    for (kept = host->services; kept != NULL; kept = kept->next) {
+        if ((kept->live || kept->pending) && strcmp(kept->id, id) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Claims `kept`'s id on the host's list, unless the destroy has begun or, when `library_ids_refused`, a live library
+ * declares it. Answers what the registration answers when the claim is refused.
+ */
+static weivel_c_status claim_the_id(weivel_c_host *host, host_service *kept, int library_ids_refused) {
+    weivel_c_status status = WEIVEL_C_STATUS_OK;
     weivel_c_mutex_lock(&host->lock);
-    kept->live = 1;
-    kept->next = host->services;
-    host->services = kept;
+    if (host->state != HOST_RUNNING) {
+        status = WEIVEL_C_STATUS_DESTROYED;
+    } else if (library_ids_refused && weivel_c_host_a_live_library_declares_held(host, kept->id)) {
+        status = WEIVEL_C_STATUS_MISUSE;
+    } else {
+        kept->pending = 1;
+        kept->next = host->services;
+        host->services = kept;
+    }
     weivel_c_mutex_unlock(&host->lock);
+    return status;
+}
+
+/** Under the host's lock: takes a claim the core did not answer off the host's list. */
+static void unlink_the_claim(weivel_c_host *host, host_service *kept) {
+    host_service **link = &host->services;
+    while (*link != NULL && *link != kept) {
+        link = &(*link)->next;
+    }
+    if (*link == kept) {
+        *link = kept->next;
+    }
+}
+
+/** Ends a claim once the core answered: the registration stands, or the claim is dropped and freed. */
+static void settle_the_claim(weivel_c_host *host, host_service *kept, weivel_c_status registered) {
+    int stands = registered == WEIVEL_C_STATUS_OK;
+    weivel_c_mutex_lock(&host->lock);
+    kept->pending = 0;
+    kept->live = (uint32_t)stands;
+    if (!stands) {
+        unlink_the_claim(host, kept);
+    }
+    weivel_c_mutex_unlock(&host->lock);
+    if (!stands) {
+        free(kept);
+    }
+}
+
+static weivel_c_status register_claimed(weivel_c_host *host, const char *id, void *service,
+                                        const weivel_c_capacity_answerer *answerer, int library_ids_refused,
+                                        weivel_handle *registration, weivel_c_refusal *refusal) {
+    host_service *kept;
+    weivel_c_status status;
+    if (host == NULL || id == NULL || id[0] == '\0' || service == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    kept = calloc(1, sizeof *kept + strlen(id));
+    if (kept == NULL) {
+        return WEIVEL_C_STATUS_OUT_OF_MEMORY;
+    }
+    memcpy(kept->id, id, strlen(id) + 1);
+    status = claim_the_id(host, kept, library_ids_refused);
+    if (status != WEIVEL_C_STATUS_OK) {
+        free(kept);
+        return status;
+    }
+    status = weivel_c_context_register_service(host->own_context, id, service, answerer, &kept->registration,
+                                               refusal);
+    if (status == WEIVEL_C_STATUS_OK && registration != NULL) {
+        *registration = kept->registration;
+    }
+    settle_the_claim(host, kept, status);
+    return status;
 }
 
 weivel_c_status weivel_c_host_register_service(weivel_c_host *host, const char *id, void *service,
@@ -253,42 +328,15 @@ weivel_c_status weivel_c_host_register_service(weivel_c_host *host, const char *
     if (registration != NULL) {
         *registration = 0;
     }
-    if (host != NULL && id != NULL && weivel_c_host_a_live_library_declares(host, id)) {
-        return WEIVEL_C_STATUS_MISUSE;
-    }
-    return weivel_c_host_register_kept_service(host, id, service, answerer, registration, refusal);
+    return register_claimed(host, id, service, answerer, 1, registration, refusal);
 }
 
-weivel_c_status weivel_c_host_register_kept_service(weivel_c_host *host, const char *id, void *service,
-                                                    const weivel_c_capacity_answerer *answerer,
-                                                    weivel_handle *registration, weivel_c_refusal *refusal) {
-    host_service *kept;
-    weivel_c_status status;
+weivel_c_status weivel_c_host_register_library_service(weivel_c_host *host, const char *id, void *service,
+                                                       weivel_handle *registration, weivel_c_refusal *refusal) {
     if (registration != NULL) {
         *registration = 0;
     }
-    if (host == NULL || id == NULL || id[0] == '\0' || service == NULL) {
-        return WEIVEL_C_STATUS_MISUSE;
-    }
-    if (!weivel_c_host_is_running(host)) {
-        return WEIVEL_C_STATUS_DESTROYED;
-    }
-    kept = calloc(1, sizeof *kept + strlen(id));
-    if (kept == NULL) {
-        return WEIVEL_C_STATUS_OUT_OF_MEMORY;
-    }
-    memcpy(kept->id, id, strlen(id) + 1);
-    status = weivel_c_context_register_service(host->own_context, id, service, answerer, &kept->registration,
-                                               refusal);
-    if (status != WEIVEL_C_STATUS_OK) {
-        free(kept);
-        return status;
-    }
-    keep_service(host, kept);
-    if (registration != NULL) {
-        *registration = kept->registration;
-    }
-    return WEIVEL_C_STATUS_OK;
+    return register_claimed(host, id, service, NULL, 0, registration, refusal);
 }
 
 static void forget_service(weivel_c_host *host, weivel_handle registration) {

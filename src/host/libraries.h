@@ -81,14 +81,15 @@ const char *weivel_c_host_repeated_id(const weivel_standard_library *declaration
  */
 const char *weivel_c_host_find_registered_id(weivel_c_host *host, const weivel_standard_library *declaration);
 
-/** Under the host's lock, taken here: 1 when a library the host loaded and has not unloaded declares `id`. */
-int weivel_c_host_a_live_library_declares(weivel_c_host *host, const char *id);
+/** Under the host's lock: 1 when a library the host loaded and has not unloaded declares `id`. */
+int weivel_c_host_a_live_library_declares_held(weivel_c_host *host, const char *id);
 
 /**
  * Under the host's lock: the service of `library` whose id another library on the host's list, not yet unloaded,
- * declares too, or NULL. It covers a library whose load has kept it and not finished registering, which no get sees.
+ * declares too, or a service the host registered or is registering holds, or NULL. It covers a library whose load
+ * has kept it and not finished registering, and a host registration whose core call has not answered yet, which no
+ * record and no get sees.
  */
-const library_service *weivel_c_host_service_another_library_declares(weivel_c_host *host,
-                                                                      const weivel_c_library *library);
+const library_service *weivel_c_host_service_already_held(weivel_c_host *host, const weivel_c_library *library);
 
 #endif

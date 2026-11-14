@@ -23,6 +23,13 @@ weivel_c_status weivel_c_core_register_service_then(weivel_c_core *core, weivel_
 weivel_c_status weivel_c_core_unregister_then(weivel_c_core *core, weivel_handle handle, weivel_c_refusal *refusal,
                                               const weivel_c_answered_step *then);
 
+weivel_c_status weivel_c_core_release_plugin_then(weivel_c_core *core, weivel_handle plugin, weivel_c_refusal *refusal,
+                                                  const weivel_c_answered_step *then);
+
+weivel_c_status weivel_c_core_quarantine_plugin_then(weivel_c_core *core, weivel_handle plugin,
+                                                     const weivel_quarantine_reason *reason, weivel_c_refusal *refusal,
+                                                     const weivel_c_answered_step *then);
+
 weivel_c_status weivel_c_core_forget_plugin_then(weivel_c_core *core, weivel_handle plugin, weivel_c_refusal *refusal,
                                                  const weivel_c_answered_step *then);
 

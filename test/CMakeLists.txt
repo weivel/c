@@ -183,6 +183,8 @@ weivel_c_test(host_library_loading_test host/library_loading_test.c weivel_c_tes
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library> $<TARGET_FILE:echo_library>)
 add_dependencies(host_library_loading_test weivel_core_shared service_library echo_library)
 weivel_c_test(host_references_test host/references_test.c weivel_c_testing)
+weivel_c_test(host_seams_test host/seams_test.c weivel_c_testing $<TARGET_FILE:weivel_core_shared>)
+add_dependencies(host_seams_test weivel_core_shared)
 weivel_c_test(host_library_threads_test host/library_threads_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library>)
 add_dependencies(host_library_threads_test weivel_core_shared service_library)

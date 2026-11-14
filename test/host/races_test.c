@@ -376,11 +376,169 @@ static void an_activate_settling_while_the_destroy_ends_is_still_told_its_outcom
     CHECK(weivel_c_host_free(racing.in.host) == WEIVEL_C_STATUS_OK);
 }
 
+/**
+ * A plugin released or quarantined on one thread, held inside the `follow` hook its ending call's own deadline sets
+ * off, while another thread's dispatch is held and the plugin's own code reaches for an id it never declared: the
+ * reach refusal is queued after the ending call, so the plugin's listeners must not hear it.
+ */
+typedef struct ending_race {
+    host_world in;
+    test_plugin held;
+    test_mutex mutex;
+    /** Guarded by `mutex`: the schedulings left until the one the ending thread stops at. */
+    uint32_t schedulings_left;
+    test_gate reached;
+    test_gate free_to_go;
+    test_gate dispatch_held;
+    test_gate dispatch_free;
+    test_thread dispatcher;
+    test_thread ending;
+    /** Written by the held dispatch's thread, read once it is joined. */
+    uint32_t reach_refusals;
+    uint32_t pending_activate;
+} ending_race;
+
+static ending_race ending_racing;
+
+static void stop_at_the_counted_scheduling(void *more) {
+    ending_race *self = more;
+    int stopping;
+    lock_test_mutex(&self->mutex);
+    stopping = self->schedulings_left > 0 && --self->schedulings_left == 0;
+    unlock_test_mutex(&self->mutex);
+    if (stopping) {
+        open_gate(&self->reached);
+        pass_gate(&self->free_to_go);
+    }
+}
+
+static weivel_c_status count_the_reach_refusals(void *data, const weivel_c_plugin_event *event) {
+    ending_race *self = data;
+    self->reach_refusals += event->kind == WEIVEL_C_PLUGIN_EVENT_REACH_REFUSED;
+    return WEIVEL_C_STATUS_OK;
+}
+
+/** Listens for what the core reports about the plugin, and wants within a deadline nearer than the host's. */
+static uint32_t activate_listening_and_wanting(void *data, weivel_c_context *context, weivel_c_completion *completion,
+                                               const char **reason) {
+    test_plugin *self = data;
+    ending_race *race_of = self->more;
+    weivel_c_plugin_listener listener = {count_the_reach_refusals, race_of};
+    weivel_c_want_options options = WEIVEL_INIT(weivel_c_want_options);
+    weivel_c_want_callback callback = {trace_settlement, self};
+    uint64_t listening = 0;
+    (void)reason;
+    self->context = context;
+    self->activation = completion;
+    CHECK(weivel_c_context_add_listener(context, &listener, &listening) == WEIVEL_C_STATUS_OK);
+    options.timed = WEIVEL_CHOICE_YES;
+    options.timeout_millis = 1000;
+    CHECK(weivel_c_context_want_service(context, "never:there", &options, &callback, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    return race_of->pending_activate ? WEIVEL_C_ENTRY_PENDING : WEIVEL_C_ENTRY_DONE;
+}
+
+static weivel_c_status hold_the_ending_dispatch(void *data, weivel_c_core *core) {
+    ending_race *self = data;
+    (void)core;
+    open_gate(&self->dispatch_held);
+    pass_gate(&self->dispatch_free);
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void dispatch_and_hold_the_ending(void *argument) {
+    ending_race *self = argument;
+    weivel_c_step step = WEIVEL_INIT(weivel_c_step);
+    weivel_c_core *core = NULL;
+    uint32_t here = 0;
+    step.run = hold_the_ending_dispatch;
+    step.data = self;
+    CHECK(weivel_c_host_core(self->in.host, &core) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_defer(core, &step, &here) == WEIVEL_C_STATUS_OK && here == 1);
+}
+
+static void release_the_held_plugin(void *argument) {
+    ending_race *self = argument;
+    uint32_t finished = 9;
+    CHECK(weivel_c_host_release(self->in.host, self->held.handle, &finished) == WEIVEL_C_STATUS_OK && finished == 0);
+}
+
+static void fail_the_held_plugins_activate(void *argument) {
+    ending_race *self = argument;
+    CHECK(weivel_c_completion_finish(self->held.activation, WEIVEL_C_ENTRY_FAILED, "it gave up") ==
+          WEIVEL_C_STATUS_OK);
+}
+
+/** Arms a distant deadline of the host's own, and activates the held plugin, whose want arms a nearer one. */
+static void begin_the_ending_race(ending_race *self, uint32_t pending_activate) {
+    test_plugin *only[1];
+    weivel_c_want_options options = WEIVEL_INIT(weivel_c_want_options);
+    weivel_c_want_callback callback = {trace_settlement, &self->held};
+    weivel_c_context *own = NULL;
+    memset(self, 0, sizeof *self);
+    start_test_mutex(&self->mutex);
+    start_gate(&self->reached);
+    start_gate(&self->free_to_go);
+    start_gate(&self->dispatch_held);
+    start_gate(&self->dispatch_free);
+    self->pending_activate = pending_activate;
+    begin_host_world(&self->in);
+    name_acting_plugin(&self->held, &self->in, "held", activate_listening_and_wanting, NULL);
+    self->held.more = self;
+    options.timed = WEIVEL_CHOICE_YES;
+    options.timeout_millis = 1000000000;
+    CHECK(weivel_c_host_context(self->in.host, &own) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_want_service(own, "far:away", &options, &callback, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    wants_service(&self->held, "never:there");
+    register_test_plugin(&self->held);
+    only[0] = &self->held;
+    CHECK(activate_in_order(&self->in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+}
+
+/** The plugin's own code, on this thread, reaching for an id it never declared: a refusal of reach naming it. */
+static void reach_for_an_undeclared_id(ending_race *self) {
+    void *service = NULL;
+    CHECK(weivel_c_context_get_service(self->held.context, "never:declared", &service, NULL) ==
+          WEIVEL_C_STATUS_REFUSED);
+}
+
+static void run_the_ending_race(ending_race *self, void (*end_the_plugin)(void *argument)) {
+    self->in.schedule_react = stop_at_the_counted_scheduling;
+    self->in.schedule_more = self;
+    lock_test_mutex(&self->mutex);
+    self->schedulings_left = 1;
+    unlock_test_mutex(&self->mutex);
+    CHECK(start_test_thread(&self->dispatcher, dispatch_and_hold_the_ending, self));
+    pass_gate(&self->dispatch_held);
+    CHECK(start_test_thread(&self->ending, end_the_plugin, self));
+    pass_gate(&self->reached);
+    reach_for_an_undeclared_id(self);
+    open_gate(&self->free_to_go);
+    join_test_thread(&self->ending);
+    open_gate(&self->dispatch_free);
+    join_test_thread(&self->dispatcher);
+    CHECK(self->reach_refusals == 0);
+    CHECK(sink_count(&self->in) == 0);
+    end_host_world(&self->in);
+}
+
+static void a_released_plugin_hears_nothing_queued_after_its_release(void) {
+    begin_the_ending_race(&ending_racing, 0);
+    run_the_ending_race(&ending_racing, release_the_held_plugin);
+}
+
+static void a_quarantined_plugin_hears_nothing_queued_after_its_quarantine(void) {
+    begin_the_ending_race(&ending_racing, 1);
+    run_the_ending_race(&ending_racing, fail_the_held_plugins_activate);
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 2 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: host_races_test <core-library>\n");
         return 2;
     }
+    a_released_plugin_hears_nothing_queued_after_its_release();
+    a_quarantined_plugin_hears_nothing_queued_after_its_quarantine();
     an_activation_whose_open_races_the_destroys_first_step_releases_its_plugin_without_its_activate();
     a_registration_that_races_the_destroy_answers_destroyed_and_keeps_nothing();
     a_free_while_another_thread_is_still_inside_the_layer_frees_nothing();

@@ -174,8 +174,9 @@ typedef struct weivel_c_library_load_failure {
  * The refusal of an id registered already holds against every registration made before this call began. One a plugin
  * makes on another thread while the load runs can still be replaced by the library's registration under WEIVEL_HOST,
  * since the core registers for the host whether or not another owner holds the id; closing that window needs a
- * register-if-absent call for WEIVEL_HOST in the core, which it does not have. The host's own
- * weivel_c_host_register_service refuses an id a live library declares, so the host cannot replace one.
+ * register-if-absent call for WEIVEL_HOST in the core, which it does not have. The host's own registrations hold both
+ * ways, on any thread: weivel_c_host_register_service claims its id under the host's lock before it asks the core,
+ * refusing an id a live library declares, and a load that finds the claim, or a registration it made, is refused.
  *
  * A load undone while the host is being destroyed, and not yet destroyed, tells the error sink when the platform
  * refuses to close its binary, as the destroy's own unloading of every library reports a failed unload (the

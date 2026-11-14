@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "../core/calls.h"
+
 #define END_OF(type, field) (offsetof(type, field) + sizeof(((type *)0)->field))
 #define FIRST_ACTIVATION_SIZE END_OF(weivel_c_activation, listener)
 
@@ -253,18 +255,39 @@ static weivel_c_status start_the_plan(weivel_c_host *host, const weivel_c_outcom
     return WEIVEL_C_STATUS_OK;
 }
 
-weivel_c_status weivel_c_host_activate(weivel_c_host *host, const weivel_c_activation *activation,
-                                       weivel_activation_plan *plan, weivel_c_refusal *refusal) {
+/**
+ * Takes an activation the destroy will wait for, unless the destroy has begun. Answers 0, taking nothing, once it has.
+ *
+ * @implNote Counted from the running check until every started plugin's outcome is queued: a destroy that ended
+ * between the plan and the start would destroy the core, and a plugin the start then keeps from its activate could no
+ * longer be told `released`.
+ */
+static int take_the_activation(weivel_c_host *host) {
+    int running;
+    weivel_c_mutex_lock(&host->lock);
+    running = host->state == HOST_RUNNING;
+    host->activations_in_flight += (uint32_t)running;
+    weivel_c_mutex_unlock(&host->lock);
+    return running;
+}
+
+/** Ends an activation taken while the host ran, once its outcomes are queued, and lets a waiting destroy end. */
+static void end_the_activation(weivel_c_host *host) {
+    int destroy_may_end;
+    weivel_c_mutex_lock(&host->lock);
+    host->activations_in_flight--;
+    destroy_may_end = weivel_c_host_destroy_may_end(host);
+    weivel_c_mutex_unlock(&host->lock);
+    if (destroy_may_end) {
+        weivel_c_host_end_the_destroy(host);
+    }
+}
+
+static weivel_c_status plan_and_start(weivel_c_host *host, const weivel_c_activation *activation,
+                                      weivel_activation_plan *plan, weivel_c_refusal *refusal) {
     weivel_strings provided = {NULL, 0};
-    const char **ids;
+    const char **ids = list_the_hosts_services(host, &provided.count);
     weivel_c_status status;
-    if (host == NULL || plan == NULL || !activation_is_usable(activation)) {
-        return WEIVEL_C_STATUS_MISUSE;
-    }
-    if (!weivel_c_host_is_running(host)) {
-        return WEIVEL_C_STATUS_DESTROYED;
-    }
-    ids = list_the_hosts_services(host, &provided.count);
     if (ids == NULL) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
@@ -276,6 +299,20 @@ weivel_c_status weivel_c_host_activate(weivel_c_host *host, const weivel_c_activ
         return status;
     }
     return start_the_plan(host, &activation->listener, plan);
+}
+
+weivel_c_status weivel_c_host_activate(weivel_c_host *host, const weivel_c_activation *activation,
+                                       weivel_activation_plan *plan, weivel_c_refusal *refusal) {
+    weivel_c_status status;
+    if (host == NULL || plan == NULL || !activation_is_usable(activation)) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    if (!take_the_activation(host)) {
+        return WEIVEL_C_STATUS_DESTROYED;
+    }
+    status = plan_and_start(host, activation, plan, refusal);
+    end_the_activation(host);
+    return status;
 }
 
 weivel_c_status weivel_c_host_plan_release(weivel_c_host *host, weivel_activation_plan *plan) {
@@ -320,16 +357,18 @@ static void stamp_the_ending(host_ending *ending) {
     weivel_c_mutex_unlock(&host->lock);
 }
 
+/**
+ * @implNote The ending is queued in the quarantine's own hold of the layer lock, right behind its events, so nothing
+ * another thread's call drains after it is heard by the plugin ahead of it.
+ */
 weivel_c_status weivel_c_host_quarantine(host_ending *ending, const weivel_quarantine_reason *reason) {
     host_plugin *plugin = ending->plugin;
     weivel_c_host *host = plugin->host;
+    weivel_c_answered_step then = {NULL, NULL, NULL, NULL, &ending->step, NULL};
     weivel_c_status status;
     stamp_the_ending(ending);
-    status = weivel_c_core_quarantine_plugin(host->core, plugin->handle, reason, NULL);
+    status = weivel_c_core_quarantine_plugin_then(host->core, plugin->handle, reason, NULL, &then);
     weivel_c_host_report_call(host, status, "the core did not quarantine a plugin the host quarantined");
-    if (status == WEIVEL_C_STATUS_OK) {
-        weivel_c_core_defer(host->core, &ending->step, NULL);
-    }
     return status;
 }
 

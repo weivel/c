@@ -16,7 +16,7 @@ weivel_c_status weivel_c_context_provide_capability(weivel_c_context *context, c
                                                     weivel_handle *provided, weivel_c_refusal *refusal) {
     weivel_handle answered = 0;
     weivel_c_keeping keeping = {NULL, &answered, 0};
-    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping, weivel_c_context_guard, context};
+    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping, weivel_c_context_guard, context, NULL, NULL};
     weivel_c_status status;
     if (provided != NULL) {
         *provided = 0;
@@ -122,7 +122,8 @@ static void give_back_unused_room(listing *listed) {
 static weivel_c_status list_into_room(listing *listed, const char *id, weivel_capability_list *answered,
                                       weivel_c_refusal *refusal) {
     weivel_c_core *core = listed->context->contexts->core;
-    weivel_c_answered_step then = {hold_the_implementations, listed, weivel_c_context_guard, listed->context};
+    weivel_c_answered_step then = {hold_the_implementations, listed, weivel_c_context_guard, listed->context,
+                                   NULL, NULL};
     weivel_c_status status;
     do {
         if (listed->short_of != 0 && !make_room(listed, listed->short_of)) {
@@ -184,7 +185,7 @@ weivel_c_status weivel_c_context_watch_capability(weivel_c_context *context, con
                                                   weivel_c_refusal *refusal) {
     weivel_handle answered = 0;
     weivel_c_keeping keeping = {NULL, &answered, 0};
-    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping, weivel_c_context_guard, context};
+    weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping, weivel_c_context_guard, context, NULL, NULL};
     weivel_c_status status;
     if (watch != NULL) {
         *watch = 0;

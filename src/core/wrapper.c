@@ -521,12 +521,42 @@ static weivel_c_status record_the_answer(const invocation *asked, weivel_c_statu
     return asked->then->record(asked->then->data);
 }
 
+static int is_usable_step(const weivel_c_step *step) {
+    return step->size >= FIRST_STEP_SIZE && step->run != NULL;
+}
+
+/** Under the lock: queues the call's deferred step behind its events once everything before answered OK. */
+static weivel_c_status queue_the_deferred_step(weivel_c_core *core, const invocation *asked, weivel_c_status status,
+                                               int *queued) {
+    *queued = 0;
+    if (status != WEIVEL_C_STATUS_OK || asked->then == NULL || asked->then->deferred == NULL) {
+        return status;
+    }
+    if (!is_usable_step(asked->then->deferred)) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    if (asked->then->deferred->place.waiting != PLACE_IDLE) {
+        return status;
+    }
+    append(core, &asked->then->deferred->place, PLACE_OF_A_STEP);
+    *queued = 1;
+    return WEIVEL_C_STATUS_OK;
+}
+
+static void tell_whether_the_deferred_step_ran(const invocation *asked, int queued, int dispatched) {
+    if (asked->then != NULL && asked->then->deferred_ran != NULL) {
+        *asked->then->deferred_ran = (uint32_t)(queued && dispatched);
+    }
+}
+
 static weivel_c_status invoke(weivel_c_core *core, const invocation *asked) {
     const weivel_c_event *own_refusal = NULL;
     call_notes notes;
     uint32_t waiting = 0;
     weivel_status answered;
     weivel_c_status status;
+    int queued;
+    tell_whether_the_deferred_step_ran(asked, 0, 0);
     if (core == NULL || !weivel_c_refusal_is_ready(asked->refusal)) {
         return WEIVEL_C_STATUS_MISUSE;
     }
@@ -547,7 +577,8 @@ static weivel_c_status invoke(weivel_c_core *core, const invocation *asked) {
     drain(core, waiting, &notes, &own_refusal);
     status = answer_of(core, answered, asked->parts, own_refusal, asked->refusal, &notes);
     status = record_the_answer(asked, status);
-    leave(core, &notes);
+    status = queue_the_deferred_step(core, asked, status, &queued);
+    tell_whether_the_deferred_step_ran(asked, queued, leave(core, &notes));
     return status;
 }
 
