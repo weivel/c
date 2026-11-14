@@ -373,6 +373,10 @@ typedef struct weivel_c_error_sink {
  * behind every event drained before them. A status other than WEIVEL_C_STATUS_OK goes to the error sink and the
  * other listeners still hear the event.
  *
+ * An event of a kind this layer does not know, from a core newer than its header, is released in the core as it is
+ * drained and heard by no listener, and the error sink is not told: the core's header asks a caller to ignore and
+ * release such a kind, so dropping it is no failure, and a sink told of each would hear of every newer core's events.
+ *
  * @implNote No `size`, as weivel_c_error_sink has none.
  */
 typedef struct weivel_c_listener {
