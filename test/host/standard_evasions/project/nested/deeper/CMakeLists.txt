@@ -1,0 +1,2 @@
+add_library(host_deep_test INTERFACE)
+target_link_libraries(host_deep_test INTERFACE weivel_c_testing weivel_standard)

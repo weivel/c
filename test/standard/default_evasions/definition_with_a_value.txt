@@ -1,0 +1,1 @@
+weivel_c_standard PLUGINS_FILE="plugins.json"

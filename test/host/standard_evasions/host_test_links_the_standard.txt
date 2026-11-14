@@ -1,1 +1,1 @@
-host_sneaking_test weivel_c_testing,weivel_standard_shared
+own host_sneaking_test weivel_c_testing,weivel_standard_shared
