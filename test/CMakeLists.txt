@@ -62,7 +62,7 @@ foreach(variant "" _shared)
             $<TARGET_FILE:weivel_core_shared>)
         add_dependencies(context_${suite}_test${variant} weivel_core_shared)
     endforeach()
-    foreach(suite host lifecycle threads)
+    foreach(suite host lifecycle threads races)
         weivel_c_test(host_${suite}_test${variant} host/${suite}_test.c weivel_c${variant}
             $<TARGET_FILE:weivel_core_shared>)
         add_dependencies(host_${suite}_test${variant} weivel_core_shared)

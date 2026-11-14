@@ -317,6 +317,43 @@ static void a_plugin_that_calls_its_context_after_it_was_forgotten_is_refused_an
     end_host_world(&in);
 }
 
+static uint32_t activate_and_destroy_the_host(void *data, weivel_c_context *context, weivel_c_completion *completion,
+                                              const char **reason) {
+    test_plugin *self = data;
+    uint32_t finished = 9;
+    (void)completion;
+    (void)reason;
+    self->context = context;
+    trace_line(&self->in->heard, "activate", self->manifest.import_name, "");
+    CHECK(weivel_c_host_destroy(self->in->host, &finished) == WEIVEL_C_STATUS_OK && finished == 0);
+    return WEIVEL_C_ENTRY_DONE;
+}
+
+static void a_destroy_from_inside_an_activate_opens_no_later_plugin_of_the_plan(void) {
+    host_world in;
+    test_plugin first;
+    test_plugin second;
+    test_plugin *both[2];
+    uint32_t finished = 0;
+    uint32_t kind = 0;
+    begin_host_world(&in);
+    name_acting_plugin(&first, &in, "first", activate_and_destroy_the_host, NULL);
+    first.entry.deactivate = deactivate_and_answer_done;
+    name_acting_plugin(&second, &in, "second", activate_and_answer_done, NULL);
+    register_test_plugin(&first);
+    register_test_plugin(&second);
+    both[0] = &first;
+    both[1] = &second;
+    CHECK(activate_in_order(&in, both, 2, WEIVEL_EDGES_CAPABILITIES));
+    CHECK(weivel_c_host_destroy(in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
+    CHECK(is_before(&in.heard, "activate first", "deactivate first"));
+    CHECK(place_of(&in.heard, "activate second") < 0);
+    CHECK(outcomes_of(&in.told, first.handle, &kind) == 1 && kind == WEIVEL_C_OUTCOME_RELEASED);
+    CHECK(outcomes_of(&in.told, second.handle, &kind) == 1 && kind == WEIVEL_C_OUTCOME_RELEASED);
+    CHECK(sink_count(&in) == 0);
+    CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_OK);
+}
+
 /** Calls the host from code it runs: each would wait for ever on a lock of the host's held around that code. */
 static void call_the_host(void *more) {
     host_world *in = more;
@@ -381,6 +418,7 @@ int main(int argument_count, char **arguments) {
     destroy_releases_the_last_opened_first_a_quarantined_one_included();
     a_destroy_inside_a_dispatch_runs_behind_what_is_queued_and_finishes_there();
     a_pending_deactivate_holds_the_destroy_for_as_long_as_it_takes();
+    a_destroy_from_inside_an_activate_opens_no_later_plugin_of_the_plan();
     a_plugin_that_calls_its_context_after_it_was_forgotten_is_refused_and_reads_nothing_freed();
     no_entry_listener_log_or_sink_runs_under_a_lock_of_the_hosts();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);

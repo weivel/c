@@ -93,6 +93,70 @@ static void activates_finished_on_several_threads_while_another_releases_are_eac
     end_host_world(&everyone.in);
 }
 
+/** Two plugins, the first active with a deactivate that waits, so a destroy holds while the second is activated. */
+typedef struct contest {
+    host_world in;
+    test_plugin early;
+    test_plugin late;
+    test_thread activator;
+    weivel_c_status activated;
+} contest;
+
+static contest contested;
+
+static void activate_late_on_its_own_thread(void *argument) {
+    contest *self = argument;
+    weivel_c_activation activation = WEIVEL_INIT(weivel_c_activation);
+    weivel_activation_plan plan = WEIVEL_INIT(weivel_activation_plan);
+    activation.plugins = &self->late.handle;
+    activation.count = 1;
+    activation.edge_source = WEIVEL_EDGES_CAPABILITIES;
+    activation.listener.hear = hear_outcome;
+    activation.listener.data = &self->in.told;
+    self->activated = weivel_c_host_activate(self->in.host, &activation, &plan, NULL);
+    if (self->activated == WEIVEL_C_STATUS_OK) {
+        CHECK(weivel_c_host_plan_release(self->in.host, &plan) == WEIVEL_C_STATUS_OK);
+    }
+}
+
+static void open_the_contest(contest *self) {
+    test_plugin *only[1];
+    memset(self, 0, sizeof *self);
+    begin_host_world(&self->in);
+    name_acting_plugin(&self->early, &self->in, "early", activate_and_answer_done, NULL);
+    self->early.entry.deactivate = deactivate_and_wait;
+    name_acting_plugin(&self->late, &self->in, "late", activate_and_answer_done, NULL);
+    self->late.entry.deactivate = deactivate_and_answer_done;
+    register_test_plugin(&self->early);
+    register_test_plugin(&self->late);
+    only[0] = &self->early;
+    CHECK(activate_in_order(&self->in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+}
+
+/** A late plugin whose activate was called is deactivated, and one an activation answered OK for is told once. */
+static void check_the_late_plugin(contest *self) {
+    uint32_t kind = 0;
+    uint32_t told = outcomes_of(&self->in.told, self->late.handle, &kind);
+    if (place_of(&self->in.heard, "activate late") >= 0) {
+        CHECK(place_of(&self->in.heard, "deactivate late") >= 0);
+    }
+    CHECK(told == (self->activated == WEIVEL_C_STATUS_OK ? 1u : 0u));
+    CHECK(self->activated == WEIVEL_C_STATUS_OK || self->activated == WEIVEL_C_STATUS_DESTROYED);
+}
+
+static void an_activation_racing_a_destroy_leaves_no_plugin_activated_past_it(void) {
+    uint32_t finished = 0;
+    open_the_contest(&contested);
+    CHECK(start_test_thread(&contested.activator, activate_late_on_its_own_thread, &contested));
+    CHECK(weivel_c_host_destroy(contested.in.host, &finished) == WEIVEL_C_STATUS_OK);
+    join_test_thread(&contested.activator);
+    CHECK(weivel_c_completion_finish(contested.early.deactivation, WEIVEL_C_ENTRY_DONE, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_host_destroy(contested.in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
+    check_the_late_plugin(&contested);
+    CHECK(sink_count(&contested.in) == 0);
+    CHECK(weivel_c_host_free(contested.in.host) == WEIVEL_C_STATUS_OK);
+}
+
 int main(int argument_count, char **arguments) {
     uint32_t round;
     if (argument_count != 2 || !load_tables(arguments[1])) {
@@ -102,6 +166,10 @@ int main(int argument_count, char **arguments) {
     for (round = 0; round < 20; round++) {
         activates_finished_on_several_threads_while_another_releases_are_each_told_once();
     }
+    for (round = 0; round < 200; round++) {
+        an_activation_racing_a_destroy_leaves_no_plugin_activated_past_it();
+    }
+
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host threads");
 }

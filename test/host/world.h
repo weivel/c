@@ -139,11 +139,6 @@ static inline weivel_c_status count_log(void *data, const weivel_c_log_record *r
     return WEIVEL_C_STATUS_OK;
 }
 
-/** A clock the test moves, and a scheduler that keeps a task and never runs one. */
-static inline int64_t host_world_now(void *data) {
-    return *(int64_t *)data;
-}
-
 static inline void *host_world_schedule(void *data, int64_t at, weivel_c_task_callback callback, void *callback_data) {
     (void)at;
     (void)callback;
@@ -168,7 +163,19 @@ typedef struct host_world {
     /** What the sink does about each failure, outside its own mutex. */
     void (*sink_react)(void *more);
     void *sink_more;
+    /** What each reading of the clock does first; the wrapper reads it outside every lock. */
+    void (*clock_react)(void *more);
+    void *clock_more;
 } host_world;
+
+/** A clock the test moves, and a scheduler that keeps a task and never runs one. */
+static inline int64_t host_world_now(void *data) {
+    host_world *self = data;
+    if (self->clock_react != NULL) {
+        self->clock_react(self->clock_more);
+    }
+    return self->now;
+}
 
 /** A sink that records under a mutex of its own, since a host may tell it from several threads. */
 static inline weivel_c_status tell_guarded(void *data, const weivel_c_failure *failure) {
@@ -190,7 +197,7 @@ static inline weivel_c_host_options host_options_of(host_world *self, const weiv
     scheduler->now = host_world_now;
     scheduler->schedule = host_world_schedule;
     scheduler->cancel = host_world_cancel;
-    scheduler->data = &self->now;
+    scheduler->data = self;
     options.table = table;
     options.scheduler = scheduler;
     options.error_sink.report = tell_guarded;

@@ -131,6 +131,8 @@ struct weivel_c_host {
     weivel_c_library *libraries;
     uint32_t state;
     uint32_t releases_in_flight;
+    /** The opens begun while the host was running and not yet taken into the opened list or answered. */
+    uint32_t opens_in_flight;
     uint32_t destroy_waits;
     uint32_t destroy_finished;
     weivel_c_step destroy_beginning;
@@ -213,7 +215,10 @@ weivel_c_status weivel_c_host_finish_release(void *data, weivel_c_core *core);
 /** Ends a quarantined plugin's entries, as the step a plugin's record carries: `data` is the record. */
 weivel_c_status weivel_c_host_end_quarantined_entries(void *data, weivel_c_core *core);
 
-/** Under the host's lock: whether the last release a destroy waits on has finished, so its last steps may run. */
+/**
+ * Under the host's lock: whether the last release and the last open a destroy waits on have finished, so its last
+ * steps may run.
+ */
 int weivel_c_host_destroy_may_end(weivel_c_host *host);
 
 /** Defers the destroy's last steps behind everything queued. */
