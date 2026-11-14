@@ -311,7 +311,12 @@ typedef enum weivel_c_failure_kind {
     /** The core named a registration or an implementation the layer holds no object for: one made around it. */
     WEIVEL_C_FAILURE_OBJECT_UNKNOWN = 11,
     /** The host's log answered a status other than WEIVEL_C_STATUS_OK for a line. */
-    WEIVEL_C_FAILURE_LOG = 12
+    WEIVEL_C_FAILURE_LOG = 12,
+    /**
+     * The core did not take the time the wrapper handed it for a deadline that fell due. The call the wrapper was
+     * asked for is still made, the deadline stays due, and the time is handed over again before the next call.
+     */
+    WEIVEL_C_FAILURE_DUE_ADVANCE = 13
 } weivel_c_failure_kind;
 
 /** One failure, as the error sink is told it. Everything in it lives for the length of the sink's call. */

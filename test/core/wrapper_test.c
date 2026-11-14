@@ -835,6 +835,29 @@ static void a_deadline_is_due_at_the_very_time_it_names(void) {
     end_core(core);
 }
 
+static void a_due_advance_the_core_does_not_take_goes_to_the_sink_and_is_made_again(void) {
+    hearing listener = {0};
+    telling sink = {0};
+    clockwork clock = {0};
+    weivel_c_deadline_hooks hooks = hooks_of(&clock);
+    weivel_c_core *core = make_core(NULL, &listener, &sink);
+    weivel_handle found = 0;
+    CHECK(weivel_c_core_set_deadline_hooks(core, &hooks) == WEIVEL_C_STATUS_OK);
+    want_as_the_host_within(core, "sooner", 100);
+    forget_crossings();
+    clock.now = 150;
+    advance_answers = WEIVEL_STATUS_OUT_OF_MEMORY;
+    CHECK(weivel_c_core_get_service(core, WEIVEL_HOST, "sooner", &found, NULL) == WEIVEL_C_STATUS_NONE);
+    CHECK(crossed.advance == 1 && count_heard(&listener, WEIVEL_EVENT_WANT_SETTLED) == 0);
+    CHECK(sink.count == 1 && sink.items[0].failure.kind == WEIVEL_C_FAILURE_DUE_ADVANCE);
+    CHECK(sink.items[0].failure.status == WEIVEL_C_STATUS_OUT_OF_MEMORY);
+    advance_answers = WEIVEL_STATUS_OK;
+    CHECK(weivel_c_core_get_service(core, WEIVEL_HOST, "sooner", &found, NULL) == WEIVEL_C_STATUS_NONE);
+    CHECK(crossed.advance == 2 && count_heard(&listener, WEIVEL_EVENT_WANT_SETTLED) == 1);
+    CHECK(sink.count == 1);
+    end_core(core);
+}
+
 /** How often the `follow` hook had been called by the time a listener heard a deadline announced. */
 typedef struct followed_when_heard {
     clockwork *clock;
@@ -1665,6 +1688,7 @@ static void run_the_tests_of_deadlines(void) {
     a_due_deadline_is_handed_to_the_core_before_the_call_and_never_checked_again();
     the_advance_made_for_a_due_deadline_is_not_checked_again_while_a_later_one_waits();
     a_deadline_is_due_at_the_very_time_it_names();
+    a_due_advance_the_core_does_not_take_goes_to_the_sink_and_is_made_again();
     an_advance_the_caller_makes_is_not_preceded_by_the_check();
     a_failing_deadline_hook_goes_to_the_sink_and_the_call_is_still_made();
     the_deadline_hooks_run_outside_the_layer_lock();

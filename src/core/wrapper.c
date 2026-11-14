@@ -401,6 +401,21 @@ static void drain(weivel_c_core *core, uint32_t waiting, call_notes *notes, cons
     }
 }
 
+/**
+ * @implNote An advance the core did not take leaves the deadline recorded, so the next call hands the time over
+ * again: the sink is told each time, since nothing else would say why a want that is past its time still waits.
+ */
+static void note_an_advance_not_taken(call_notes *notes, weivel_status answered) {
+    if (answered == WEIVEL_STATUS_MALFORMED) {
+        note_defect(notes, "the core called the advance made for a due deadline malformed", NULL);
+    } else if (answered != WEIVEL_STATUS_OK) {
+        weivel_c_status status =
+            answered == WEIVEL_STATUS_OUT_OF_MEMORY ? WEIVEL_C_STATUS_OUT_OF_MEMORY : WEIVEL_C_STATUS_FAILED;
+        note(notes, failure_of(WEIVEL_C_FAILURE_DUE_ADVANCE, status, NULL,
+                               "the core did not take the time of a deadline that fell due, which stays due"));
+    }
+}
+
 /** Under the lock: hands the core the time `now` when the recorded deadline has fallen due, and drains that. */
 static int advance_when_due(weivel_c_core *core, int64_t now, call_notes *notes) {
     const weivel_c_event *unused = NULL;
@@ -408,9 +423,7 @@ static int advance_when_due(weivel_c_core *core, int64_t now, call_notes *notes)
     if (!core->deadline_set || now < core->deadline_at) {
         return 0;
     }
-    if (core->table.advance(core->core, now, &waiting) == WEIVEL_STATUS_MALFORMED) {
-        note_defect(notes, "the core called the advance made for a due deadline malformed", NULL);
-    }
+    note_an_advance_not_taken(notes, core->table.advance(core->core, now, &waiting));
     drain(core, waiting, notes, &unused);
     return 1;
 }
