@@ -18,8 +18,11 @@ the layer runs against whichever core binary its caller loads.
 `core`, `handles`, `timer`, `context`, `host`, `standard`, `conformance` and `benchmarks`. A module's public header is
 `include/weivel/c/<module>.h`, with any further header of the module under `include/weivel/c/<module>/`,
 `include/weivel/c.h` includes them all but the optional `standard` module's and the `conformance` module's, each a
-library of its own, and its tests are in `test/<module>/`. Every public name begins with `weivel_c_`, every public struct begins with its `size`, and every call answers a
-`weivel_c_status`.
+library of its own, and its tests are in `test/<module>/`. Every public name begins with `weivel_c_` and every call
+answers a `weivel_c_status`. Every public struct begins with its `size` but two kinds, each saying so in its header: a
+callback that is only a function and the data it is called with (the error sink, the log, the listeners, watchers
+and outcome listener, the want callback), and the queue place inside a step, each embedded by value or copied whole
+so that the struct holding it is what grows.
 
 ## What is built
 
@@ -133,24 +136,26 @@ declaring two strides is handed to the core as the caller built it, so the host 
   context's token as payload and calls its activate, never waiting for one before starting the next. Each started
   plugin's outcome reaches the caller's listener once, from the dispatch: `active`, `quarantined` (its activate
   failed, with a reason and a fix, or the core refused its verification, quarantined before any event of the
-  verification is dispatched and before the next plugin is started),
-  `refused` (the core refused the open), `released` (released while its activate was in flight, told as that release
-  begins, or kept from its activate because the host's destroy had begun) or `failed` (an open that failed for no
-  refusal, told to the sink, the plugin released and forgotten at once when the core held it open). Every completion
-  is made before the first open, so an activation short of memory starts nothing, and the plugins are started on the
-  calling thread exactly once whatever other thread dispatches meanwhile.
-
+  verification is dispatched and before the next plugin is started), `refused` (the core refused the open),
+  `released` (released while its activate was in flight, told as that release begins, or kept from its activate
+  because the host's destroy had begun) or `failed` (an open that failed for no refusal, told to the sink, the plugin
+  released and forgotten at once when the core held it open). Every completion is made before the first open, so an
+  activation short of memory starts nothing, and the plugins are started on the calling thread exactly once whatever
+  other thread dispatches meanwhile. A verification the caller asks for, or one an activate finishing later sets off,
+  is the same one step with its quarantine where no dispatch runs.
 - `weivel_c_host_release` calls the deactivate while the plugin is whole, releases it in the core, lets that
   release's events reach the plugin, then ends its entries, forgets it and detaches its context, those last three as
-  one step deferred behind the events, the detach made in the forget's own hold of the layer lock.
- Where no dispatch runs, the release has finished when it returns. A
-  deactivate that answers pending holds the core's release and everything after it until it finishes, however long.
+  one step queued in the release's own hold of the layer lock behind its events, the detach made in the forget's own
+  hold. A quarantine queues the ending of its plugin's entries the same way. Where no dispatch runs, the release has
+  finished when it returns. A deactivate that answers pending holds the core's release and everything after it until
+  it finishes, however long.
 - `weivel_c_host_destroy` releases every plugin the host opened and has not released, the last opened first, one in
-  flight and one quarantined included; lets every event and step those releases left run; unloads every C library
-  it loaded, telling the sink of one whose binary does not close and unloading the rest; then disarms the timer and
-  destroys the core. It too is a deferred step, and finishes where no dispatch
-  runs before it returns, unless a deactivate it waits on is pending. From then on every call on the host answers
-  `WEIVEL_C_STATUS_DESTROYED`, quietly; `weivel_c_host_free` follows once it has finished.
+  flight and one quarantined included; lets every event and step those releases left run; unloads every C library it
+  loaded, telling the sink of one whose binary does not close and unloading the rest; then disarms the timer and
+  destroys the core. It waits for every open, settling and activation begun while the host ran. It too is a deferred
+  step, and finishes where no dispatch runs before it returns, unless something it waits on is still pending. From
+  then on every call on the host answers `WEIVEL_C_STATUS_DESTROYED`, quietly; `weivel_c_host_free` follows once it
+  has finished.
 
 No entry function, listener, log line or sink report runs under a lock of the layer's: the host's own lock guards its
 tables and is let go before it calls anything.
@@ -290,12 +295,13 @@ counts every crossing a resolve or a call of the layer's makes, refused for a re
 control call refused against a budget of 1 ns; and both ratio gates and the same-language gate failing on a platform
 the budget gives no line, before anything is measured, never passing unbounded. In a Release build, labelled
 `release-benchmark`, which CI's `benchmarks` job builds and runs on all three runners, configured with
-`WEIVEL_C_BENCHMARKS_REQUIRED` so that a gate which would skip outside a Release build fails there instead: the control call through the wrapper against the core's own
-budget, `benchmarks/budget.txt` of the pinned kit; the two ratio gates against `benchmarks/c.txt` of the pinned kit,
-each round's measured path over its reference, the per-round median held to the highest ratio measured on that
-runner times the margin; the same-language call against that runner's noise bounds in the same file, failing a run
-too noisy to judge; and a measuring mode that prints every measurement the bounds are set from. Every bound is the kit's; the layer
-sets none, and the commit that adds `c.txt` to the kit lists the samples.
+`WEIVEL_C_BENCHMARKS_REQUIRED` so that a gate which would skip outside a Release build fails there instead: the
+control call through the wrapper against the core's own budget, `benchmarks/budget.txt` of the pinned kit; the two
+ratio gates against `benchmarks/c.txt` of the pinned kit, each round's measured path over its reference, the
+per-round median held to the highest ratio measured on that runner times the margin; the same-language call against
+that runner's noise bounds in the same file, failing a run too noisy to judge; and a measuring mode that prints every
+measurement the bounds are set from. Every bound is the kit's; the layer sets none, and the commit that adds `c.txt`
+to the kit lists the samples.
 
 ## Building
 
