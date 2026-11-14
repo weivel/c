@@ -270,11 +270,17 @@ static void observe_pending(void *data, const weivel_json_value *expectation, co
     const char *names[LIFECYCLE_WANTS];
     uint32_t count = 0;
     uint32_t index;
+    int written;
     (void)expectation;
     for (index = 0; index < run->want_count; index++) {
         if (!run->wants[index].ended) {
-            snprintf(lines[count], LIFECYCLE_TEXT, "%s %s", run->wants[index].owner->plugin->name,
-                     run->wants[index].id);
+            written = snprintf(lines[count], LIFECYCLE_TEXT, "%s %s", run->wants[index].owner->plugin->name,
+                               run->wants[index].id);
+            if (written < 0 || written >= LIFECYCLE_TEXT) {
+                conformance_world_fail(run->world, "a pending want is named longer than the driver holds",
+                                       run->wants[index].id);
+                continue;
+            }
             names[count] = lines[count];
             count++;
         }
