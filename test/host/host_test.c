@@ -6,6 +6,10 @@
 
 #include "plugins.h"
 
+#if !defined(WEIVEL_C_USING_SHARED)
+#include "../../src/host/host.h"
+#endif
+
 static int clock_object;
 
 static void a_plugin_is_registered_from_a_manifest_value_and_an_entry_alone(void) {
@@ -300,6 +304,75 @@ static void a_refused_verify_quarantines_the_plugin_in_the_same_step(void) {
     end_host_world(&with.in);
 }
 
+#if !defined(WEIVEL_C_USING_SHARED)
+/** An allocator that refuses the allocation of the given number, counting from 1, and makes every other. */
+typedef struct refusing_allocator {
+    uint32_t made;
+    uint32_t refused_at;
+} refusing_allocator;
+
+static void *allocate_unless_refused(void *data, size_t size) {
+    refusing_allocator *self = data;
+    return ++self->made == self->refused_at ? NULL : malloc(size);
+}
+
+static void release_plainly(void *data, void *memory) {
+    (void)data;
+    free(memory);
+}
+
+static void open_three_with_the_last_completion_refused(host_world *in, test_plugin *plugins,
+                                                        refusing_allocator *refusing) {
+    weivel_c_allocator allocator = {allocate_unless_refused, release_plainly, NULL};
+    allocator.data = refusing;
+    name_acting_plugin(&plugins[0], in, "first", activate_and_answer_done, NULL);
+    name_acting_plugin(&plugins[1], in, "second", activate_and_answer_done, NULL);
+    name_acting_plugin(&plugins[2], in, "third", activate_and_answer_done, NULL);
+    register_test_plugin(&plugins[0]);
+    register_test_plugin(&plugins[1]);
+    register_test_plugin(&plugins[2]);
+    weivel_c_host_replace_allocator(in->host, &allocator);
+}
+
+static void an_activation_short_of_memory_for_its_outcomes_starts_no_plugin(void) {
+    host_world in;
+    test_plugin plugins[3];
+    refusing_allocator refusing = {0, 3};
+    weivel_handle handles[3];
+    weivel_c_activation activation = WEIVEL_INIT(weivel_c_activation);
+    weivel_activation_plan plan = WEIVEL_INIT(weivel_activation_plan);
+    begin_host_world(&in);
+    open_three_with_the_last_completion_refused(&in, plugins, &refusing);
+    handles[0] = plugins[0].handle;
+    handles[1] = plugins[1].handle;
+    handles[2] = plugins[2].handle;
+    activation.plugins = handles;
+    activation.count = 3;
+    activation.edge_source = WEIVEL_EDGES_CAPABILITIES;
+    activation.listener.hear = hear_outcome;
+    activation.listener.data = &in.told;
+    CHECK(weivel_c_host_activate(in.host, &activation, &plan, NULL) == WEIVEL_C_STATUS_OUT_OF_MEMORY);
+    CHECK(in.heard.count == 0 && in.told.count == 0 && sink_count(&in) == 0);
+    CHECK(ledger_status_of(&in, &plugins[0], NULL) == WEIVEL_PLUGIN_STATUS_REGISTERED);
+    end_host_world(&in);
+}
+#endif
+
+static void verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing(void) {
+    host_world in;
+    test_plugin plugin;
+    weivel_c_refusal refusal = WEIVEL_INIT(weivel_c_refusal);
+    begin_host_world(&in);
+    name_acting_plugin(&plugin, &in, "agenda", activate_and_answer_done, NULL);
+    register_test_plugin(&plugin);
+    CHECK(weivel_c_host_verify(in.host, plugin.handle, &refusal) == WEIVEL_C_STATUS_REFUSED);
+    CHECK(refusal.code != WEIVEL_REFUSAL_NONE && weivel_c_refusal_release(&refusal) == WEIVEL_C_STATUS_OK);
+    CHECK(state_of(&in, &plugin) == WEIVEL_C_PLUGIN_REGISTERED);
+    CHECK(ledger_status_of(&in, &plugin, NULL) == WEIVEL_PLUGIN_STATUS_REGISTERED);
+    CHECK(sink_count(&in) == 0);
+    end_host_world(&in);
+}
+
 static void every_call_answers_its_mistakes_as_values(void) {
     host_world in;
     weivel_c_host_options options = WEIVEL_INIT(weivel_c_host_options);
@@ -339,7 +412,13 @@ int main(int argument_count, char **arguments) {
     an_open_that_fails_for_no_refusal_is_answered_failed_and_leaves_nothing_open_in_the_core();
     an_awaited_want_does_not_hold_back_a_later_plugin();
     a_refused_verify_quarantines_the_plugin_in_the_same_step();
+    verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing();
+#if !defined(WEIVEL_C_USING_SHARED)
+    an_activation_short_of_memory_for_its_outcomes_starts_no_plugin();
+#endif
+
     every_call_answers_its_mistakes_as_values();
+
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host");
 }

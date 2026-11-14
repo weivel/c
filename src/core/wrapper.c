@@ -505,6 +505,14 @@ typedef struct invocation {
     int hands_the_time;
 } invocation;
 
+/** Under the lock, before the call: the guard of the call's step, whose failure becomes the call's answer. */
+static weivel_c_status guard_the_call(const invocation *asked) {
+    if (asked->then == NULL || asked->then->guard == NULL) {
+        return WEIVEL_C_STATUS_OK;
+    }
+    return asked->then->guard(asked->then->guard_data);
+}
+
 /** Under the lock: runs the step of a call the core answered OK, whose failure becomes the call's answer. */
 static weivel_c_status record_the_answer(const invocation *asked, weivel_c_status status) {
     if (status != WEIVEL_C_STATUS_OK || asked->then == NULL || asked->then->record == NULL) {
@@ -527,6 +535,11 @@ static weivel_c_status invoke(weivel_c_core *core, const invocation *asked) {
         status = hand_over_a_due_deadline(core);
     }
     if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    status = guard_the_call(asked);
+    if (status != WEIVEL_C_STATUS_OK) {
+        weivel_c_mutex_unlock(&core->lock);
         return status;
     }
     begin_notes(&notes);
@@ -575,6 +588,14 @@ int weivel_c_core_is_destroyed(weivel_c_core *core) {
     destroyed = core->core == NULL;
     weivel_c_mutex_unlock(&core->lock);
     return destroyed;
+}
+
+uint64_t weivel_c_core_last_sequence(weivel_c_core *core) {
+    uint64_t sequence;
+    weivel_c_mutex_lock(&core->lock);
+    sequence = core->sequence;
+    weivel_c_mutex_unlock(&core->lock);
+    return sequence;
 }
 
 int weivel_c_core_is_idle(weivel_c_core *core) {
@@ -771,7 +792,37 @@ weivel_c_status weivel_c_core_defer(weivel_c_core *core, weivel_c_step *step, ui
     return WEIVEL_C_STATUS_OK;
 }
 
+/**
+ * @implNote The dispatch is claimed under the same hold that found none running, so no other thread can take the step
+ * between. The `follow` hook is left to the next thread to leave a call, the step's own calls among them.
+ */
+weivel_c_status weivel_c_core_run_as_the_dispatcher(weivel_c_core *core, weivel_c_step *step, uint32_t *ran) {
+    weivel_c_status status;
+    if (ran != NULL) {
+        *ran = 0;
+    }
+    if (core == NULL || ran == NULL || step == NULL || step->size < FIRST_STEP_SIZE || step->run == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    status = enter(core);
+    if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    if (core->dispatching || step->place.waiting != PLACE_IDLE) {
+        status = core->dispatching ? WEIVEL_C_STATUS_OK : WEIVEL_C_STATUS_MISUSE;
+        weivel_c_mutex_unlock(&core->lock);
+        return status;
+    }
+    append(core, &step->place, PLACE_OF_A_STEP);
+    core->dispatching = 1;
+    weivel_c_mutex_unlock(&core->lock);
+    dispatch(core);
+    *ran = 1;
+    return WEIVEL_C_STATUS_OK;
+}
+
 static int options_are_usable(const weivel_c_core_options *options) {
+
     return options != NULL && options->size >= FIRST_OPTIONS_SIZE && weivel_c_core_table_is_large_enough(options->table) &&
            options->table->library != NULL;
 }

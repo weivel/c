@@ -65,6 +65,22 @@ static weivel_c_status make_the_contexts(weivel_c_host *made, const weivel_c_hos
     return status;
 }
 
+static void *allocate_plainly(void *data, size_t size) {
+    (void)data;
+    return malloc(size);
+}
+
+static void release_plainly(void *data, void *memory) {
+    (void)data;
+    free(memory);
+}
+
+void weivel_c_host_replace_allocator(weivel_c_host *host, const weivel_c_allocator *allocator) {
+    weivel_c_mutex_lock(&host->lock);
+    host->allocator = *allocator;
+    weivel_c_mutex_unlock(&host->lock);
+}
+
 static void ready_the_destroy(weivel_c_host *made) {
     made->destroy_beginning = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
     made->destroy_beginning.run = begin_destroying;
@@ -110,6 +126,7 @@ weivel_c_status weivel_c_host_create(const weivel_c_host_options *options, weive
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
     ready_the_destroy(made);
+    made->allocator = (weivel_c_allocator){allocate_plainly, release_plainly, NULL};
     status = adopt_the_table(made, options, failure);
     status = status == WEIVEL_C_STATUS_OK ? make_the_core(made, options) : status;
     status = status == WEIVEL_C_STATUS_OK ? make_the_contexts(made, options) : status;
@@ -215,17 +232,12 @@ static void free_the_records(weivel_c_host *host) {
         weivel_c_completion *completion = host->completions;
         host->completions = completion->next;
         weivel_c_refusal_release(&completion->outcome.refusal);
-        free(completion);
+        host->allocator.release(host->allocator.data, completion);
     }
     while (host->services != NULL) {
         host_service *kept = host->services;
         host->services = kept->next;
         free(kept);
-    }
-    while (host->starts != NULL) {
-        host_start *start = host->starts;
-        host->starts = start->next;
-        free(start);
     }
 }
 

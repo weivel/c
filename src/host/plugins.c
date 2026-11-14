@@ -89,9 +89,7 @@ static void fill_plugin(host_plugin *plugin, weivel_c_host *host, const weivel_m
     plugin->finishing = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
     plugin->finishing.run = weivel_c_host_finish_release;
     plugin->finishing.data = plugin;
-    plugin->quarantine_ending = (weivel_c_step)WEIVEL_INIT(weivel_c_step);
-    plugin->quarantine_ending.run = weivel_c_host_end_quarantined_entries;
-    plugin->quarantine_ending.data = plugin;
+    weivel_c_host_ready_ending(&plugin->verify_ending, plugin);
 }
 
 /** Keeps a registered plugin in the host's tables, unless the destroy has begun. Answers 0, keeping nothing, then. */

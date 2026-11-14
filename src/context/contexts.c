@@ -49,13 +49,16 @@ weivel_c_refusal weivel_c_contexts_refusal_of(const weivel_refusal *refusal, con
     return carried;
 }
 
-weivel_c_context *weivel_c_contexts_context_of(weivel_c_contexts *contexts, weivel_handle plugin) {
+weivel_c_context *weivel_c_contexts_context_of(weivel_c_contexts *contexts, weivel_handle plugin,
+                                               const weivel_c_event *event) {
     weivel_c_handle_entry entry = WEIVEL_INIT(weivel_c_handle_entry);
+    weivel_c_context *context;
     if (plugin == 0 || weivel_c_handles_find(contexts->handles, plugin, &entry) != WEIVEL_C_STATUS_OK ||
         entry.kind != WEIVEL_C_HANDLE_PLUGIN) {
         return NULL;
     }
-    return entry.object;
+    context = entry.object;
+    return event->sequence > context->first_sequence ? context : NULL;
 }
 
 static void *allocate_plainly(void *data, size_t size) {
@@ -223,6 +226,7 @@ weivel_c_status weivel_c_context_create(weivel_c_contexts *contexts, weivel_hand
     created->contexts = contexts;
     created->plugin = plugin;
     created->manifest = manifest;
+    created->first_sequence = weivel_c_core_last_sequence(contexts->core);
     status = keep_context(created);
     if (status != WEIVEL_C_STATUS_OK) {
         free(created);
@@ -280,6 +284,10 @@ weivel_c_status weivel_c_context_detach(weivel_c_context *context) {
     end_the_plugins_entry(context);
     weivel_c_mutex_unlock(&contexts->lock);
     return WEIVEL_C_STATUS_OK;
+}
+
+weivel_c_status weivel_c_context_guard(void *data) {
+    return weivel_c_context_is_detached(data) ? WEIVEL_C_STATUS_DETACHED : WEIVEL_C_STATUS_OK;
 }
 
 int weivel_c_context_is_detached(weivel_c_context *context) {

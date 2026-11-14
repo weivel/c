@@ -31,6 +31,17 @@ enum { COMPLETION_OF_AN_ACTIVATE = 1, COMPLETION_OF_A_DEACTIVATE = 2 };
 typedef struct host_plugin host_plugin;
 
 /**
+ * The ending of a quarantined plugin's entries, deferred behind the events its quarantine queued, and tied to the
+ * activation that quarantine ended: one that runs once a later activation has begun ends nothing of it.
+ */
+typedef struct host_ending {
+    weivel_c_step step;
+    host_plugin *plugin;
+    /** The plugin's `activations` when the quarantine was made; guarded by the host's lock. */
+    uint32_t activation;
+} host_ending;
+
+/**
  * One started plugin's outcome, told once from the dispatch as a step of its own. Made before the plugin is opened,
  * so telling it needs no memory.
  */
@@ -56,6 +67,8 @@ struct weivel_c_completion {
     uint32_t finished;
     /** For an activate: the outcome of the activation it finishes. */
     host_outcome outcome;
+    /** For an activate: the ending of its plugin's entries should that activation be quarantined. */
+    host_ending ending;
 };
 
 struct host_plugin {
@@ -76,30 +89,16 @@ struct host_plugin {
     uint32_t opened;
     /** 1 once its activate was called and its deactivate not; guarded by the host's lock. */
     uint32_t activate_called;
+    /** How many activations have taken it into the opened list; guarded by the host's lock. */
+    uint32_t activations;
     /** The completion of the activation in flight, or NULL; guarded by the host's lock. */
     weivel_c_completion *activating;
     weivel_c_completion deactivating;
     /** Steps 4 to 6 of its release. */
     weivel_c_step finishing;
-    /** The ending of its entries once a quarantine's events have been dispatched. */
-    weivel_c_step quarantine_ending;
+    /** The ending of its entries once the quarantine a verify the host's caller asked for made has its events heard. */
+    host_ending verify_ending;
 };
-
-/**
- * One activation's starting of its plan's plugins, run as a step so every activate is called inside a dispatch: what
- * an activate's own calls queue is then heard once it returns, as everywhere else in a dispatch. Kept until the host
- * is freed, since the step may still wait in the queue after the activation that made it has returned.
- */
-typedef struct host_start {
-    weivel_c_step step;
-    weivel_c_host *host;
-    struct host_start *next;
-    weivel_c_outcome_listener listener;
-    /** 1 once the step or its activation took the starting; guarded by the host's lock. */
-    uint32_t claimed;
-    uint32_t count;
-    weivel_handle order[1];
-} host_start;
 
 /** A service the host registered under WEIVEL_HOST. Its id stays until the host is freed, since a plan reads it. */
 typedef struct host_service {
@@ -112,6 +111,8 @@ typedef struct host_service {
 
 struct weivel_c_host {
     weivel_c_mutex lock;
+    /** Where the memory of the completions comes from. */
+    weivel_c_allocator allocator;
     weivel_c_core_table table;
     uint32_t loaded_the_table;
     weivel_c_core *core;
@@ -126,7 +127,6 @@ struct weivel_c_host {
     host_plugin *last_opened;
     weivel_c_completion *completions;
     host_service *services;
-    host_start *starts;
     /** The C libraries the host loaded, the last loaded first, unloaded ones kept until the host is freed. */
     weivel_c_library *libraries;
     uint32_t state;
@@ -138,6 +138,12 @@ struct weivel_c_host {
     weivel_c_step destroy_beginning;
     weivel_c_step destroy_ending;
 };
+
+/**
+ * Replaces the allocator the completions are made with: the seam a test fails an allocation through. No completion
+ * may have been made yet.
+ */
+void weivel_c_host_replace_allocator(weivel_c_host *host, const weivel_c_allocator *allocator);
 
 /** 1 while nothing has begun to destroy the host. */
 int weivel_c_host_is_running(weivel_c_host *host);
@@ -167,10 +173,15 @@ void weivel_c_host_leave_opened(host_plugin *plugin);
 void weivel_c_host_close_library(host_plugin *plugin);
 
 /**
- * Makes the completion of one plugin's activation, with its outcome, and keeps it on the host's list. `plugin` is
- * NULL for a handle the host registered no plugin under. NULL when memory ran out.
+ * Makes the completion of each plugin of a plan's order, with its outcome told to `listener`, and keeps them on the
+ * host's list. Its `plugin` is NULL for a handle the host registered no plugin under. Answers the array, which its
+ * caller hands back to the host's allocator; NULL, with nothing made, when memory ran out.
  */
-weivel_c_completion *weivel_c_host_make_completion(weivel_c_host *host, host_plugin *plugin, weivel_handle handle);
+weivel_c_completion **weivel_c_host_make_completions(weivel_c_host *host, const weivel_handle *order, uint32_t count,
+                                                     const weivel_c_outcome_listener *listener);
+
+/** Readies the ending of a plugin's entries after a quarantine. */
+void weivel_c_host_ready_ending(host_ending *ending, host_plugin *plugin);
 
 /** Readies a completion embedded in a record, keeping it off the host's list. */
 void weivel_c_host_ready_completion(weivel_c_completion *completion, host_plugin *plugin, uint32_t purpose);
@@ -192,13 +203,17 @@ weivel_c_status weivel_c_host_settle_deactivation(weivel_c_completion *deactivat
                                                   const char *reason);
 
 /**
- * Quarantines a plugin in the core, its entries ending once the events of that call have been dispatched. With a NULL
- * reason the ledger row shows the core's own refusal of the plugin's verification.
+ * Quarantines the plugin of `ending` in the core, its entries ending by `ending` once the events of that call have
+ * been dispatched, unless a later activation of it has begun by then. With a NULL reason the ledger row shows the
+ * core's own refusal of the plugin's verification.
  */
-weivel_c_status weivel_c_host_quarantine(host_plugin *plugin, const weivel_quarantine_reason *reason);
+weivel_c_status weivel_c_host_quarantine(host_ending *ending, const weivel_quarantine_reason *reason);
 
-/** Verifies a plugin, and quarantines it in the same step when the core refuses. Answers what the verify answered. */
-weivel_c_status weivel_c_host_verify_plugin(host_plugin *plugin, weivel_c_refusal *refusal);
+/**
+ * Verifies the plugin of `ending`, and quarantines it in the same step when the core refuses. Answers what the verify
+ * answered.
+ */
+weivel_c_status weivel_c_host_verify_plugin(host_ending *ending, weivel_c_refusal *refusal);
 
 /**
  * Begins a plugin's release. Answers WEIVEL_C_STATUS_OK, `*finished` 1 when every step has run before this returned;
@@ -212,7 +227,7 @@ int weivel_c_host_go_on_releasing(host_plugin *plugin);
 /** Steps 4 to 6 of a release, as the step a plugin's record carries: `data` is the record. */
 weivel_c_status weivel_c_host_finish_release(void *data, weivel_c_core *core);
 
-/** Ends a quarantined plugin's entries, as the step a plugin's record carries: `data` is the record. */
+/** Ends a quarantined plugin's entries, as the step a host_ending carries: `data` is that ending. */
 weivel_c_status weivel_c_host_end_quarantined_entries(void *data, weivel_c_core *core);
 
 /**

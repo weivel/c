@@ -296,7 +296,7 @@ static void a_pending_deactivate_holds_the_destroy_for_as_long_as_it_takes(void)
     CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_OK);
 }
 
-static void a_plugin_that_calls_its_context_after_it_was_forgotten_is_refused_and_reads_nothing_freed(void) {
+static void a_plugin_that_calls_its_context_after_it_was_forgotten_is_answered_detached_and_reads_nothing_freed(void) {
     host_world in;
     test_plugin plugin;
     test_plugin *only[1];
@@ -309,9 +309,9 @@ static void a_plugin_that_calls_its_context_after_it_was_forgotten_is_refused_an
     CHECK(activate_in_order(&in, only, 1, WEIVEL_EDGES_CAPABILITIES));
     CHECK(weivel_c_host_release(in.host, plugin.handle, NULL) == WEIVEL_C_STATUS_OK);
     forget_crossings();
-    CHECK(weivel_c_context_get_service(plugin.context, "agenda:x", &service, NULL) == WEIVEL_C_STATUS_REFUSED);
+    CHECK(weivel_c_context_get_service(plugin.context, "agenda:x", &service, NULL) == WEIVEL_C_STATUS_DETACHED);
     CHECK(weivel_c_context_register_service(plugin.context, "agenda:x", &service, NULL, NULL, NULL) ==
-          WEIVEL_C_STATUS_REFUSED);
+          WEIVEL_C_STATUS_DETACHED);
     CHECK(crossed.next_event == 0);
     CHECK(weivel_c_context_manifest(plugin.context, &manifest) == WEIVEL_C_STATUS_OK && manifest == &plugin.manifest);
     end_host_world(&in);
@@ -419,7 +419,7 @@ int main(int argument_count, char **arguments) {
     a_destroy_inside_a_dispatch_runs_behind_what_is_queued_and_finishes_there();
     a_pending_deactivate_holds_the_destroy_for_as_long_as_it_takes();
     a_destroy_from_inside_an_activate_opens_no_later_plugin_of_the_plan();
-    a_plugin_that_calls_its_context_after_it_was_forgotten_is_refused_and_reads_nothing_freed();
+    a_plugin_that_calls_its_context_after_it_was_forgotten_is_answered_detached_and_reads_nothing_freed();
     no_entry_listener_log_or_sink_runs_under_a_lock_of_the_hosts();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("host lifecycle");

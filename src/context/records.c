@@ -389,13 +389,13 @@ static int names_a_takeable_record(const ending *asked) {
 weivel_c_status weivel_c_context_end_handle(weivel_c_context *context, weivel_handle handle, uint32_t kind,
                                             uint32_t other_kind, weivel_c_refusal *refusal) {
     ending asked = {context, handle, kind, other_kind, NULL};
-    weivel_c_answered_step then = {mark_ended, &asked};
+    weivel_c_answered_step then = {mark_ended, &asked, weivel_c_context_guard, context};
     weivel_c_status status;
     if (context == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     if (weivel_c_context_is_detached(context)) {
-        return WEIVEL_C_STATUS_REFUSED;
+        return WEIVEL_C_STATUS_DETACHED;
     }
     if (!names_a_takeable_record(&asked)) {
         return WEIVEL_C_STATUS_NONE;

@@ -92,6 +92,11 @@ struct weivel_c_context {
     uint64_t last_registration;
     /** 1 once weivel_c_context_detach was called; guarded by the lock of the contexts. */
     uint32_t detached;
+    /**
+     * The sequence of the last event drained before the context was made. An event at or before it that names the
+     * context's plugin named an earlier plugin the core issued the same handle to, and never reaches this one.
+     */
+    uint64_t first_sequence;
 };
 
 /** @implNote `lock` guards every list and count here, each context's lists, and each record's flags. */
@@ -197,8 +202,22 @@ weivel_c_status weivel_c_contexts_hold(weivel_c_contexts *contexts, weivel_handl
 /** 1 once the context was detached from its plugin, so no call through it may reach the core. */
 int weivel_c_context_is_detached(weivel_c_context *context);
 
-/** The context of `plugin`, or NULL. Only the dispatching thread may use what it answers. */
-weivel_c_context *weivel_c_contexts_context_of(weivel_c_contexts *contexts, weivel_handle plugin);
+/**
+ * The guard every call through a context gives the wrapper (see weivel_c_answered_step): `data` is the context, and a
+ * detached one answers WEIVEL_C_STATUS_DETACHED. It runs under the layer lock, where the forget's answered step
+ * detaches it, so a call either reaches the core before the forget or not at all.
+ *
+ * @implNote A call also asks weivel_c_context_is_detached first, which spares its preparations; only this answer,
+ * made under the lock the detach is made under, is the one that holds when the core is called.
+ */
+weivel_c_status weivel_c_context_guard(void *data);
+
+/**
+ * The context of the plugin `event` names as `plugin`, or NULL, also when the event was drained before the context
+ * was made and so names an earlier plugin that held the handle. Only the dispatching thread may use what it answers.
+ */
+weivel_c_context *weivel_c_contexts_context_of(weivel_c_contexts *contexts, weivel_handle plugin,
+                                               const weivel_c_event *event);
 
 /** Tells the error sink of a failure met for `event`, which may be NULL. */
 void weivel_c_contexts_report(weivel_c_contexts *contexts, uint32_t kind, weivel_c_status status,

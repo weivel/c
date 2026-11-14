@@ -199,9 +199,15 @@ static weivel_status call_forget_plugin(const weivel_c_core_table *table, weivel
     return table->forget_plugin(core, given->plugin, pending_events);
 }
 
-weivel_c_status weivel_c_core_forget_plugin(weivel_c_core *core, weivel_handle plugin, weivel_c_refusal *refusal) {
+weivel_c_status weivel_c_core_forget_plugin_then(weivel_c_core *core, weivel_handle plugin, weivel_c_refusal *refusal,
+                                                 const weivel_c_answered_step *then) {
     forget_plugin_arguments arguments = {plugin};
-    return weivel_c_core_invoke(core, call_forget_plugin, &arguments, WEIVEL_C_CALL_BUILT_BY_THE_LAYER, refusal);
+    return weivel_c_core_invoke_then(core, call_forget_plugin, &arguments, WEIVEL_C_CALL_BUILT_BY_THE_LAYER, refusal,
+                                     then);
+}
+
+weivel_c_status weivel_c_core_forget_plugin(weivel_c_core *core, weivel_handle plugin, weivel_c_refusal *refusal) {
+    return weivel_c_core_forget_plugin_then(core, plugin, refusal, NULL);
 }
 
 typedef struct register_service_arguments {
@@ -396,13 +402,19 @@ static weivel_status call_service_ids(const weivel_c_core_table *table, weivel_c
     return table->service_ids(core, given->plugin, given->list, pending_events);
 }
 
-weivel_c_status weivel_c_core_service_ids(weivel_c_core *core, weivel_handle plugin, weivel_service_list *list,
-                                          weivel_c_refusal *refusal) {
+weivel_c_status weivel_c_core_service_ids_then(weivel_c_core *core, weivel_handle plugin, weivel_service_list *list,
+                                               weivel_c_refusal *refusal, const weivel_c_answered_step *then) {
     service_ids_arguments arguments = {plugin, list};
     if (list == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
-    return weivel_c_core_invoke(core, call_service_ids, &arguments, WEIVEL_C_CALL_CARRIES_A_CALLERS_STRUCT, refusal);
+    return weivel_c_core_invoke_then(core, call_service_ids, &arguments, WEIVEL_C_CALL_CARRIES_A_CALLERS_STRUCT,
+                                     refusal, then);
+}
+
+weivel_c_status weivel_c_core_service_ids(weivel_c_core *core, weivel_handle plugin, weivel_service_list *list,
+                                          weivel_c_refusal *refusal) {
+    return weivel_c_core_service_ids_then(core, plugin, list, refusal, NULL);
 }
 
 typedef struct unbound_services_arguments {

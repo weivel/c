@@ -52,6 +52,11 @@ weivel_c_status weivel_c_core_invoke(weivel_c_core *core, weivel_c_core_call cal
  * runs under, and it calls nothing it was handed. A status other than WEIVEL_C_STATUS_OK becomes the call's answer,
  * with the core's answer already written where the call writes it, so the caller can still end what the core made.
  *
+ * `guard` and the `guard_data` it is called with run first, under the same hold, once a due deadline was handed over
+ * and before the call is made: a status other than WEIVEL_C_STATUS_OK is the call's answer, the core not called and
+ * nothing drained. A check that must hold when the core is called, and not merely when the call began, is made there.
+ * Each may be NULL, and each is held to what `record` is held to.
+ *
  * @implNote A step that only records into room reserved before the call cannot fail. The failing answer stays for the
  * step that finds it cannot stand behind what the core answered: a get whose registration the layer keeps no object
  * for answers WEIVEL_C_STATUS_FAILED through it.
@@ -59,6 +64,8 @@ weivel_c_status weivel_c_core_invoke(weivel_c_core *core, weivel_c_core_call cal
 typedef struct weivel_c_answered_step {
     weivel_c_status (*record)(void *data);
     void *data;
+    weivel_c_status (*guard)(void *guard_data);
+    void *guard_data;
 } weivel_c_answered_step;
 
 /** weivel_c_core_invoke with a step run once the core has answered OK; `then` may be NULL. */
@@ -93,8 +100,25 @@ weivel_c_status weivel_c_core_install_deadline_hooks(weivel_c_core *core, const 
  */
 weivel_c_status weivel_c_core_remove_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks);
 
+/**
+ * Runs `step` now, on this thread made the dispatcher, when no dispatch runs: behind whatever a thread still on its
+ * way out drained ahead of it, as weivel_c_core_defer would run it then. When a dispatch runs, on this thread or
+ * another, it queues nothing and answers `*ran` 0, so the step runs nowhere unless its caller runs it.
+ *
+ * @param ran receives 1 when the step ran before this returned, else 0. Required.
+ * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE (a NULL argument, a step smaller than its first shape, with no
+ * `run`, or waiting in the queue already); WEIVEL_C_STATUS_DESTROYED.
+ */
+weivel_c_status weivel_c_core_run_as_the_dispatcher(weivel_c_core *core, weivel_c_step *step, uint32_t *ran);
+
 /** 1 once the core behind the object is destroyed, so that no listener and no step of it will be taken again. */
 int weivel_c_core_is_destroyed(weivel_c_core *core);
+
+/**
+ * The sequence of the last event drained from the core, 0 before the first: every event drained later has a greater
+ * one. It takes the layer lock, so no step running under it may ask.
+ */
+uint64_t weivel_c_core_last_sequence(weivel_c_core *core);
 
 /**
  * 1 once the core behind the object is destroyed and no thread dispatches it or tells its `follow` hook any more, so
