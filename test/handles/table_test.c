@@ -649,8 +649,8 @@ static void an_entry_made_as_the_core_answers_is_there_when_an_event_naming_the_
     recording of_the_service = {table, &registration, WEIVEL_C_HANDLE_SERVICE_REGISTRATION, provider,
                                 &service_object};
     recording of_the_want = {table, &want, WEIVEL_C_HANDLE_WANT, consumer, &want_object};
-    weivel_c_answered_step record_service = {record_the_handle, &of_the_service};
-    weivel_c_answered_step record_want = {record_the_handle, &of_the_want};
+    weivel_c_answered_step record_service = {record_the_handle, &of_the_service, NULL, NULL};
+    weivel_c_answered_step record_want = {record_the_handle, &of_the_want, NULL, NULL};
     more.table = table;
     listener.react = look_up_what_an_event_names;
     listener.more = &more;
@@ -681,7 +681,7 @@ static weivel_c_status fail_to_record(void *data) {
  */
 static void a_step_runs_only_for_a_call_the_core_answered_and_its_failure_is_the_calls_answer(void) {
     uint32_t runs = 0;
-    weivel_c_answered_step failing = {fail_to_record, &runs};
+    weivel_c_answered_step failing = {fail_to_record, &runs, NULL, NULL};
     weivel_c_core *core = make_core(NULL, NULL, NULL);
     weivel_handle plugin = open_plugin(core, "p", PROVIDED, 1, NULL, 0);
     weivel_handle registration = 0;
@@ -892,7 +892,7 @@ static void the_step_of_a_get_and_of_a_listing_runs_with_the_answer_before_any_e
     weivel_handle registration = 0;
     weivel_handle answered = 0;
     seen_answer seen = {&answered, NULL, 0, 0, 0, 0, &listener};
-    weivel_c_answered_step then = {see_the_answer, &seen};
+    weivel_c_answered_step then = {see_the_answer, &seen, NULL, NULL};
     CHECK(weivel_c_core_get_service_then(core, consumer, "p:a", &answered, NULL, &then) == WEIVEL_C_STATUS_NONE);
     CHECK(seen.runs == 0);
     CHECK(weivel_c_core_get_service_then(core, consumer, "p:undeclared", &answered, NULL, &then) ==
@@ -935,7 +935,7 @@ static void the_step_of_an_unregistration_runs_only_when_the_core_ended_the_hand
     weivel_handle watch = 0;
     weivel_handle registration = 0;
     seen_ending seen = {0, 0, &listener};
-    weivel_c_answered_step then = {see_the_ending, &seen};
+    weivel_c_answered_step then = {see_the_ending, &seen, NULL, NULL};
     CHECK(weivel_c_core_watch_service(core, consumer, "p:a", &watch, NULL) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_core_register_service(core, provider, "p:a", &registration, NULL) == WEIVEL_C_STATUS_OK);
     listener.count = 0;
