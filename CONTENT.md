@@ -283,13 +283,13 @@ through the layer's public surface on a table its caller loaded:
 `test/benchmarks/` holds the gates. In every build: the identity gate, a consumer handed the provider's very pointer
 by `weivel_c_context_get_service` and a thousand calls through it crossing into the core not once on a table that
 counts every crossing a resolve or a call of the layer's makes, refused for a resolver that copies the object; the
-control call refused against a budget of 1 ns; and both ratio gates failing on a platform the budget gives no line,
-before anything is measured, never passing unbounded. In a Release build, labelled `release-benchmark`, which CI's
+control call refused against a budget of 1 ns; and both ratio gates and the same-language gate failing on a platform
+the budget gives no line, before anything is measured, never passing unbounded. In a Release build, labelled `release-benchmark`, which CI's
 `benchmarks` job builds and runs on all three runners: the control call through the wrapper against the core's own
 budget, `benchmarks/budget.txt` of the pinned kit; the two ratio gates against `benchmarks/c.txt` of the pinned kit,
 each round's measured path over its reference, the per-round median held to the highest ratio measured on that
-runner times the margin; the same-language call against the noise bounds of the same file, failing a run too noisy to
-judge; and a measuring mode that prints every measurement the bounds are set from. Every bound is the kit's; the layer
+runner times the margin; the same-language call against that runner's noise bounds in the same file, failing a run
+too noisy to judge; and a measuring mode that prints every measurement the bounds are set from. Every bound is the kit's; the layer
 sets none, and the commit that adds `c.txt` to the kit lists the samples.
 
 ## Building
