@@ -315,6 +315,34 @@ static void a_refused_call_is_answered_with_the_refusal_the_core_queued_for_it(v
     end_core(core);
 }
 
+/**
+ * A refused call that drains two refusals: one put ahead of the core's own, then the core's. The call's own refusal
+ * is the first one drained, as the core's header says, never a later one.
+ */
+static void a_call_that_drains_two_refusals_is_answered_the_first(void) {
+    static weivel_event injected;
+    weivel_c_refusal refusal = WEIVEL_INIT(weivel_c_refusal);
+    weivel_service_want consumed = want_of("p:a");
+    weivel_c_core *core = make_core(NULL, NULL, NULL);
+    weivel_handle plugin = open_plugin(core, "c", NULL, 0, &consumed, 1);
+    weivel_handle handle = 7;
+    memset(&injected, 0, sizeof injected);
+    injected.size = (uint32_t)sizeof injected;
+    injected.kind = WEIVEL_EVENT_REFUSAL;
+    injected.data.refused.refusal.code = WEIVEL_REFUSAL_OUTSIDE_NAMESPACE;
+    injected.data.refused.refusal.detail = "the first refusal drained";
+    injected.data.refused.refusal.fix = "";
+    injected.data.refused.subject = "first";
+    forget_crossings();
+    inject_first_event = &injected;
+    CHECK(weivel_c_core_get_service(core, plugin, "p:undeclared", &handle, &refusal) == WEIVEL_C_STATUS_REFUSED);
+    CHECK(refusal.code == WEIVEL_REFUSAL_OUTSIDE_NAMESPACE);
+    check_text(refusal.detail, "the first refusal drained", "the call's own refusal");
+    CHECK(crossed.events == 1);
+    CHECK(weivel_c_refusal_release(&refusal) == WEIVEL_C_STATUS_OK);
+    end_core(core);
+}
+
 static void a_refusal_of_reach_is_answered_once_and_its_repeat_with_the_status_alone(void) {
     hearing listener = {0};
     weivel_c_refusal refusal = WEIVEL_INIT(weivel_c_refusal);
@@ -1749,6 +1777,7 @@ static void run_the_tests_of_draining_and_answering(void) {
     a_capacity_events_constraints_are_the_layers_own_copies();
     steps_through_an_array_at_the_stride_its_first_element_declares();
     a_refused_call_is_answered_with_the_refusal_the_core_queued_for_it();
+    a_call_that_drains_two_refusals_is_answered_the_first();
     a_refusal_of_reach_is_answered_once_and_its_repeat_with_the_status_alone();
     a_late_registration_and_a_late_watch_are_answered_with_the_status_alone();
     a_handle_that_names_nothing_is_answered_with_the_status_alone();

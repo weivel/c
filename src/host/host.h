@@ -165,6 +165,13 @@ void weivel_c_host_replace_allocator(weivel_c_host *host, const weivel_c_allocat
 weivel_manifest *weivel_c_host_copy_manifest(const weivel_manifest *given);
 
 /**
+ * 1 when the manifest and every element list in it reach their first shapes and declare one stride each, so its copy
+ * is judged by the core as the caller's own would be; 0 when the core is to judge the caller's own instead, since the
+ * copy, laid out at the layer's sizes, would hide the very shape the core refuses.
+ */
+int weivel_c_host_manifest_is_whole(const weivel_manifest *given);
+
+/**
  * Registers a service under WEIVEL_HOST as weivel_c_host_register_service does, but without refusing an id a live
  * library declares: how a library the host loads registers its own services.
  */

@@ -128,7 +128,9 @@ WEIVEL_C_API weivel_c_status weivel_c_host_free(weivel_c_host *host);
  *
  * @param manifest copied, every text and array of it, before the core is asked: the caller may free or change its own
  * as soon as the call returns. The host's copy is what the core registers and what the plugin's context answers,
- * kept until weivel_c_host_free. Required.
+ * kept until weivel_c_host_free. Required. A manifest, or a list in it, smaller than its first shape or declaring two
+ * strides is the caller's mistake that the copy would hide, so the core is handed the caller's own for its judgement
+ * and the host answers exactly as the core answers it.
  * @param entry copied. Required, with an activate. An entry weivel_c_entry_load read hands the host its library on
  * OK; on any other answer the library stays the caller's.
  * @param plugin receives the plugin's handle. Required; 0 on every answer but OK.

@@ -351,6 +351,10 @@ target_link_libraries(benchmarks_benchmark PRIVATE weivel_c_benchmarks)
 weivel_c_strict_warnings(benchmarks_benchmark)
 add_dependencies(benchmarks_benchmark weivel_core_shared echo_library)
 
+option(WEIVEL_C_BENCHMARKS_REQUIRED
+    "Fail, rather than skip, a release-only benchmark gate run outside a Release build, as a job running the gates must"
+    OFF)
+
 # Runs one mode of the benchmarks against the real core, holding it to `expected_exit` and, when given, `must_match`.
 function(weivel_c_benchmark name expected_exit must_match)
     string(JOIN "|" arguments ${ARGN})
@@ -359,7 +363,10 @@ function(weivel_c_benchmark name expected_exit must_match)
             "-DARGUMENTS=${arguments}" -DEXPECTED_EXIT=${expected_exit} -DCONFIG=$<CONFIG>
             "-DMUST_MATCH=${must_match}" ${WEIVEL_C_BENCHMARK_RELEASE_ONLY}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/run.cmake)
-    set_tests_properties(benchmarks_${name} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+    set_tests_properties(benchmarks_${name} PROPERTIES TIMEOUT 300)
+    if(NOT WEIVEL_C_BENCHMARKS_REQUIRED)
+        set_tests_properties(benchmarks_${name} PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
 endfunction()
 
 set(benchmark_core $<TARGET_FILE:weivel_core_shared>)

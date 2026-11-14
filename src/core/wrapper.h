@@ -110,13 +110,20 @@ weivel_c_status weivel_c_core_remove_deadline_hooks(weivel_c_core *core, const w
 /**
  * Runs `step` now, on this thread made the dispatcher, when no dispatch runs: behind whatever a thread still on its
  * way out drained ahead of it, as weivel_c_core_defer would run it then. When a dispatch runs, on this thread or
- * another, it queues nothing and answers `*ran` 0, so the step runs nowhere unless its caller runs it.
+ * another, or events held back until a `follow` returns still wait, it queues nothing and answers `*ran` 0, so the
+ * step runs nowhere unless its caller runs it.
  *
  * @param ran receives 1 when the step ran before this returned, else 0. Required.
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE (a NULL argument, a step smaller than its first shape, with no
  * `run`, or waiting in the queue already); WEIVEL_C_STATUS_DESTROYED.
  */
 weivel_c_status weivel_c_core_run_as_the_dispatcher(weivel_c_core *core, weivel_c_step *step, uint32_t *ran);
+
+/**
+ * The sequence of the last event drained, as weivel_c_core_last_sequence answers it, read by a step that runs under the
+ * layer lock (see weivel_c_answered_step) and takes no lock itself.
+ */
+uint64_t weivel_c_core_sequence_held(const weivel_c_core *core);
 
 /** 1 once the core behind the object is destroyed, so that no listener and no step of it will be taken again. */
 int weivel_c_core_is_destroyed(weivel_c_core *core);

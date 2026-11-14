@@ -106,7 +106,7 @@ struct weivel_c_contexts {
     weivel_c_handles *handles;
     weivel_c_timer *timer;
     weivel_c_log log;
-    /** Where the memory of the records comes from. */
+    /** Where the memory of the records and of the contexts comes from. */
     weivel_c_allocator allocator;
     weivel_c_context *first;
     /** Records whose context was freed while their step waited. */
@@ -114,6 +114,32 @@ struct weivel_c_contexts {
     uint32_t context_count;
     uint32_t record_count;
 };
+
+/** A registration's answered step and what it works on: the context to keep under the plugin the core answered. */
+typedef struct weivel_c_context_keeping {
+    weivel_c_context *context;
+    const weivel_handle *answered;
+    /** 1 once the step made the context's entry. */
+    uint32_t kept;
+} weivel_c_context_keeping;
+
+/**
+ * Makes a context for a plugin not registered yet and reserves its entry in the handles table, so the registration's
+ * answered step, weivel_c_context_keep_answered, needs no memory. WEIVEL_C_STATUS_OUT_OF_MEMORY, nothing made and
+ * nothing reserved, when memory ran out.
+ */
+weivel_c_status weivel_c_context_prepare(weivel_c_contexts *contexts, const weivel_manifest *manifest,
+                                         weivel_c_context **context);
+
+/**
+ * The answered step of a plugin's registration: `data` is a weivel_c_context_keeping. It keeps the prepared context
+ * under the handle the core answered, in the reserved entry, before any event naming that plugin can be heard, and
+ * hears nothing drained before it.
+ */
+weivel_c_status weivel_c_context_keep_answered(void *data);
+
+/** Gives back what weivel_c_context_prepare took, for a context its answered step did not keep. */
+void weivel_c_context_discard_prepared(weivel_c_context *context);
 
 /** A call's answered step and what it works on: the record to keep under the handle the core just answered. */
 typedef struct weivel_c_keeping {
@@ -124,8 +150,8 @@ typedef struct weivel_c_keeping {
 } weivel_c_keeping;
 
 /**
- * Replaces the allocator the records are made with: the seam a test fails an allocation through. No record may have
- * been made yet.
+ * Replaces the allocator the records and the contexts are made with: the seam a test fails an allocation through.
+ * What was made before must have been made by an allocator whose memory the new one releases.
  */
 void weivel_c_contexts_replace_allocator(weivel_c_contexts *contexts, const weivel_c_allocator *allocator);
 

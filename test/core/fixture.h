@@ -49,6 +49,12 @@ static uint32_t fail_next_event_at;
 static uint32_t kind_before_bending;
 /** When not WEIVEL_STATUS_OK, what weivel_advance answers in place of the core, which is then not asked. */
 static weivel_status advance_answers;
+/**
+ * When not NULL, the event the next weivel_next_event answers ahead of the core's own, reporting one more of the
+ * core's waiting; its release is then the fixture's and never reaches the core.
+ */
+static const weivel_event *inject_first_event;
+static int injected_event_out;
 
 static weivel_status counted_core_create(const weivel_core_options *options, weivel_core **core,
                                          uint32_t *pending_events) {
@@ -68,6 +74,13 @@ static weivel_status counted_next_event(weivel_core *core, weivel_event *event, 
     if (crossed.next_event == fail_next_event_at) {
         return WEIVEL_STATUS_MALFORMED;
     }
+    if (inject_first_event != NULL) {
+        *event = *inject_first_event;
+        inject_first_event = NULL;
+        injected_event_out = 1;
+        *pending_events = 1;
+        return WEIVEL_STATUS_OK;
+    }
     status = real_table.next_event(core, event, pending_events);
     if (status == WEIVEL_STATUS_OK) {
         crossed.events++;
@@ -83,6 +96,10 @@ static weivel_status counted_next_event(weivel_core *core, weivel_event *event, 
 
 static weivel_status counted_event_release(weivel_event *event) {
     weivel_status status;
+    if (injected_event_out) {
+        injected_event_out = 0;
+        return WEIVEL_STATUS_OK;
+    }
     crossed.event_release++;
     crossed.unreleased--;
     if (kind_before_bending != 0) {
@@ -146,6 +163,8 @@ static inline void forget_crossings(void) {
     fail_next_event_at = 0;
     kind_before_bending = 0;
     advance_answers = WEIVEL_STATUS_OK;
+    inject_first_event = NULL;
+    injected_event_out = 0;
 }
 
 typedef struct heard {

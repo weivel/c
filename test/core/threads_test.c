@@ -233,6 +233,10 @@ typedef struct gated_follow {
     test_mutex mutex;
     int open;
     followed told;
+    weivel_c_core *core;
+    weivel_c_status answered;
+    /** Written by the dispatching listener, read once every thread is joined. */
+    uint32_t heard_unfollowed;
 } gated_follow;
 
 static followed told_through(gated_follow *self) {
@@ -332,7 +336,62 @@ static void a_deadline_drained_while_another_thread_follows_is_followed_by_that_
     end_core(core);
 }
 
-static void another_threads_events_are_dispatched_while_one_thread_sits_in_follow(void) {
+static void set_the_gated_hooks(void *argument) {
+    gated_follow *self = argument;
+    weivel_c_deadline_hooks hooks = WEIVEL_INIT(weivel_c_deadline_hooks);
+    hooks.follow = follow_through_the_gate;
+    hooks.data = self;
+    self->answered = weivel_c_core_set_deadline_hooks(self->core, &hooks);
+}
+
+/**
+ * A thread told the recorded deadline again, because it gave new hooks, sits in `follow` having drained nothing, so
+ * no event waits on it: another thread's call is dispatched by that thread at once.
+ */
+static void a_thread_sitting_in_a_follow_that_drained_nothing_keeps_no_event_waiting(void) {
+    static hearing listener;
+    gated_follow gate;
+    test_thread thread;
+    weivel_handle handle = 0;
+    weivel_c_core *core = make_core(NULL, &listener, NULL);
+    timed_wanter first = {core, "first", 1000, WEIVEL_C_STATUS_FAILED};
+    CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "s", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    want_within_a_timeout(&first);
+    memset(&gate, 0, sizeof gate);
+    start_test_mutex(&gate.mutex);
+    gate.core = core;
+    listener.count = 0;
+    forget_crossings();
+    CHECK(start_test_thread(&thread, set_the_gated_hooks, &gate));
+    wait_until_follow_is_inside(&gate);
+    CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "s", &handle, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(told_through(&gate).inside == 1);
+    CHECK(crossed.events >= 1 && listener.count == crossed.events);
+    CHECK(count_heard(&listener, WEIVEL_EVENT_WATCH) == 1);
+    open_the_gate(&gate);
+    join_test_thread(&thread);
+    CHECK(gate.answered == WEIVEL_C_STATUS_OK && listener.count == crossed.events);
+    end_core(core);
+}
+
+/** Counts each deadline announcement heard before `follow` had returned with it. */
+static weivel_c_status check_the_deadline_was_followed(hearing *self, weivel_c_core *core, const weivel_c_event *event) {
+    gated_follow *gate = self->more;
+    followed told = told_through(gate);
+    (void)core;
+    if (event->kind == WEIVEL_EVENT_DEADLINE &&
+        (told.inside || told.last_at != event->data.deadline.at || told.last_set != event->data.deadline.set)) {
+        gate->heard_unfollowed++;
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+/**
+ * A thread sits in `follow` for the deadline its own call drained while another thread calls and would dispatch: no
+ * event of the first call, nor any queued behind them, is dispatched before `follow` has returned, so a listener
+ * reading the timer never finds it armed for less than the announcement it hears.
+ */
+static void a_calls_events_wait_until_follow_has_returned_with_its_deadline(void) {
     static hearing listener;
     gated_follow gate;
     test_thread thread;
@@ -342,17 +401,19 @@ static void another_threads_events_are_dispatched_while_one_thread_sits_in_follo
     CHECK(weivel_c_core_watch_service(core, WEIVEL_HOST, "s", &handle, NULL) == WEIVEL_C_STATUS_OK);
     begin_gate(&gate, core);
     listener.count = 0;
+    listener.react = check_the_deadline_was_followed;
+    listener.more = &gate;
     forget_crossings();
     CHECK(start_test_thread(&thread, want_within_a_timeout, &first));
     wait_until_follow_is_inside(&gate);
     CHECK(weivel_c_core_register_service(core, WEIVEL_HOST, "s", &handle, NULL) == WEIVEL_C_STATUS_OK);
-    CHECK(told_through(&gate).inside == 1);
-    CHECK(crossed.events >= 2 && listener.count == crossed.events);
-    CHECK(listener.items[0].kind == WEIVEL_EVENT_DEADLINE);
-    CHECK(count_heard(&listener, WEIVEL_EVENT_WATCH) == 1);
+    CHECK(told_through(&gate).inside == 1 && listener.count == 0);
     open_the_gate(&gate);
     join_test_thread(&thread);
     CHECK(first.answered == WEIVEL_C_STATUS_OK && listener.count == crossed.events);
+    CHECK(listener.items[0].kind == WEIVEL_EVENT_DEADLINE && count_heard(&listener, WEIVEL_EVENT_WATCH) == 1);
+    CHECK(gate.heard_unfollowed == 0);
+    listener.react = NULL;
     end_core(core);
 }
 
@@ -474,7 +535,8 @@ int main(int argument_count, char **arguments) {
     calls_from_several_threads_are_dispatched_once_in_drained_order_by_one_thread();
     the_latest_deadline_is_followed_last_and_by_one_thread_at_a_time();
     a_deadline_drained_while_another_thread_follows_is_followed_by_that_thread();
-    another_threads_events_are_dispatched_while_one_thread_sits_in_follow();
+    a_thread_sitting_in_a_follow_that_drained_nothing_keeps_no_event_waiting();
+    a_calls_events_wait_until_follow_has_returned_with_its_deadline();
     a_destroy_from_another_thread_ends_the_calls_of_the_rest();
     listeners_come_and_go_on_another_thread_while_events_are_dispatched();
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);

@@ -304,6 +304,65 @@ static void a_refused_verify_quarantines_the_plugin_in_the_same_step(void) {
     end_host_world(&with.in);
 }
 
+/** What a listener the caller added to the core saw of a plugin when the core's refusal of its verify was heard. */
+typedef struct refusal_watch {
+    screens *with;
+    uint32_t refusals;
+    uint32_t state_when_heard;
+} refusal_watch;
+
+static weivel_c_status note_the_state_at_the_refusal(void *data, weivel_c_core *core, const weivel_c_event *event) {
+    refusal_watch *self = data;
+    (void)core;
+    if (event->kind == WEIVEL_EVENT_REFUSAL && event->data.refused.subject != NULL &&
+        strcmp(event->data.refused.subject, "flaky") == 0) {
+        self->refusals++;
+        self->state_when_heard = state_of(&self->with->in, &self->with->flaky);
+    }
+    return WEIVEL_C_STATUS_OK;
+}
+
+/** Opens the screens with a listener of the caller's on the core, and readies flaky's verify to be refused. */
+static void ready_a_refused_verify(screens *with, refusal_watch *watch) {
+    weivel_c_listener listener = {note_the_state_at_the_refusal, watch};
+    weivel_c_core *core = NULL;
+    uint64_t registration = 0;
+    memset(with, 0, sizeof *with);
+    memset(watch, 0, sizeof *watch);
+    watch->with = with;
+    begin_host_world(&with->in);
+    open_screens(with);
+    CHECK(weivel_c_host_core(with->in.host, &core) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_add_listener(core, &listener, &registration) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_provide_capability(with->flaky.context, "screens", &flaky_screen, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+}
+
+static void check_quarantined_before_the_refusal_was_heard(screens *with, refusal_watch *watch) {
+    CHECK(watch->refusals == 1 && watch->state_when_heard == WEIVEL_C_PLUGIN_QUARANTINED);
+    CHECK(state_of(&with->in, &with->flaky) == WEIVEL_C_PLUGIN_QUARANTINED);
+    CHECK(sink_count(&with->in) == 0);
+    end_host_world(&with->in);
+}
+
+/** A verify the caller asks for at the top level quarantines before any event of the verification is dispatched. */
+static void a_refused_verify_asked_for_is_quarantined_before_its_refusal_is_heard(void) {
+    screens with;
+    refusal_watch watch;
+    ready_a_refused_verify(&with, &watch);
+    CHECK(weivel_c_host_verify(with.in.host, with.flaky.handle, NULL) == WEIVEL_C_STATUS_REFUSED);
+    check_quarantined_before_the_refusal_was_heard(&with, &watch);
+}
+
+/** An activate finished on a thread with no dispatch: its refused verify is quarantined before the refusal is heard. */
+static void a_refused_verify_of_a_later_finish_is_quarantined_before_its_refusal_is_heard(void) {
+    screens with;
+    refusal_watch watch;
+    ready_a_refused_verify(&with, &watch);
+    CHECK(weivel_c_completion_finish(with.flaky.activation, WEIVEL_C_ENTRY_DONE, NULL) == WEIVEL_C_STATUS_OK);
+    check_quarantined_before_the_refusal_was_heard(&with, &watch);
+}
+
 #if !defined(WEIVEL_C_USING_SHARED)
 /** An allocator that refuses the allocation of the given number, counting from 1, and makes every other. */
 typedef struct refusing_allocator {
@@ -579,6 +638,117 @@ static void every_call_answers_its_mistakes_as_values(void) {
     end_host_world(&in);
 }
 
+/** A manifest built as a caller builds one, every list of it laid out, one shape of it then broken by a test. */
+typedef struct shaped_manifest {
+    weivel_manifest manifest;
+    weivel_service_offer offers[2];
+    weivel_service_want wants[1];
+    weivel_number attributes[1];
+    weivel_number constraints[1];
+} shaped_manifest;
+
+static void lay_out_every_shape(shaped_manifest *self) {
+    memset(self, 0, sizeof *self);
+    self->manifest = (weivel_manifest)WEIVEL_INIT(weivel_manifest);
+    self->manifest.import_name = "shaped";
+    self->manifest.api = 1;
+    self->attributes[0] = (weivel_number)WEIVEL_INIT(weivel_number);
+    self->attributes[0].name = "speed";
+    self->constraints[0] = self->attributes[0];
+    self->offers[0] = (weivel_service_offer)WEIVEL_INIT(weivel_service_offer);
+    self->offers[0].id = "shaped:first";
+    self->offers[0].attributes.items = self->attributes;
+    self->offers[0].attributes.count = 1;
+    self->offers[1] = (weivel_service_offer)WEIVEL_INIT(weivel_service_offer);
+    self->offers[1].id = "shaped:second";
+    self->wants[0] = want_of("other:thing");
+    self->wants[0].constraints.items = self->constraints;
+    self->wants[0].constraints.count = 1;
+    self->manifest.services.provides.items = self->offers;
+    self->manifest.services.provides.count = 2;
+    self->manifest.services.consumes.items = self->wants;
+    self->manifest.services.consumes.count = 1;
+}
+
+enum {
+    SHAPE_MANIFEST,
+    SHAPE_OFFER,
+    SHAPE_SECOND_OFFER,
+    SHAPE_WANT,
+    SHAPE_ATTRIBUTE,
+    SHAPE_CONSTRAINT,
+    SHAPES
+};
+
+static void break_one_shape(shaped_manifest *self, uint32_t shape) {
+    switch (shape) {
+    case SHAPE_MANIFEST:
+        self->manifest.size = 4;
+        break;
+    case SHAPE_OFFER:
+        self->offers[0].size = 4;
+        self->offers[1].size = 4;
+        break;
+    case SHAPE_SECOND_OFFER:
+        self->offers[1].size = 4;
+        break;
+    case SHAPE_WANT:
+        self->wants[0].size = 4;
+        break;
+    case SHAPE_ATTRIBUTE:
+        self->attributes[0].size = 4;
+        break;
+    default:
+        self->constraints[0].size = 4;
+        break;
+    }
+}
+
+static int same_refusal(const weivel_c_refusal *first, const weivel_c_refusal *second) {
+    const char *first_detail = first->detail == NULL ? "" : first->detail;
+    const char *second_detail = second->detail == NULL ? "" : second->detail;
+    return first->code == second->code && strcmp(first_detail, second_detail) == 0;
+}
+
+/** The host answers a manifest whose shape is broken exactly as the core answers that very struct. */
+static void a_broken_shape_is_answered_as_the_core_answers_the_callers_own_manifest(uint32_t shape) {
+    host_world in;
+    test_plugin plugin;
+    shaped_manifest given;
+    weivel_c_core *core = NULL;
+    weivel_c_refusal by_the_core = WEIVEL_INIT(weivel_c_refusal);
+    weivel_c_refusal by_the_host = WEIVEL_INIT(weivel_c_refusal);
+    weivel_handle direct = 0;
+    weivel_c_status answered_by_the_core;
+    weivel_c_status answered_by_the_host;
+    begin_host_world(&in);
+    name_acting_plugin(&plugin, &in, "shaped", activate_and_answer_done, NULL);
+    lay_out_every_shape(&given);
+    break_one_shape(&given, shape);
+    CHECK(weivel_c_host_core(in.host, &core) == WEIVEL_C_STATUS_OK);
+    answered_by_the_core = weivel_c_core_register_manifest(core, &given.manifest, &direct, &by_the_core);
+    answered_by_the_host = weivel_c_host_register(in.host, &given.manifest, &plugin.entry, &plugin.handle, &by_the_host);
+    if (answered_by_the_host != answered_by_the_core || !same_refusal(&by_the_core, &by_the_host)) {
+        fprintf(stderr, "shape %u: the core answered %u (%u, %s), the host %u (%u, %s)\n", (unsigned)shape,
+                (unsigned)answered_by_the_core, (unsigned)by_the_core.code,
+                by_the_core.detail == NULL ? "" : by_the_core.detail, (unsigned)answered_by_the_host,
+                (unsigned)by_the_host.code, by_the_host.detail == NULL ? "" : by_the_host.detail);
+        CHECK(answered_by_the_host == answered_by_the_core && same_refusal(&by_the_core, &by_the_host));
+    }
+    CHECK(answered_by_the_core != WEIVEL_C_STATUS_OK && plugin.handle == 0);
+    CHECK(sink_count(&in) == 0);
+    weivel_c_refusal_release(&by_the_core);
+    weivel_c_refusal_release(&by_the_host);
+    end_host_world(&in);
+}
+
+static void every_broken_shape_is_answered_as_the_core_answers_it(void) {
+    uint32_t shape;
+    for (shape = 0; shape < SHAPES; shape++) {
+        a_broken_shape_is_answered_as_the_core_answers_the_callers_own_manifest(shape);
+    }
+}
+
 int main(int argument_count, char **arguments) {
     if (argument_count != 2 || !load_tables(arguments[1])) {
         fprintf(stderr, "usage: host_test <core-library>\n");
@@ -592,8 +762,11 @@ int main(int argument_count, char **arguments) {
     an_open_that_fails_for_no_refusal_is_answered_failed_and_leaves_nothing_open_in_the_core();
     an_awaited_want_does_not_hold_back_a_later_plugin();
     a_refused_verify_quarantines_the_plugin_in_the_same_step();
+    a_refused_verify_asked_for_is_quarantined_before_its_refusal_is_heard();
+    a_refused_verify_of_a_later_finish_is_quarantined_before_its_refusal_is_heard();
     verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing();
     a_manifest_is_copied_so_its_caller_may_free_it_once_it_is_registered();
+    every_broken_shape_is_answered_as_the_core_answers_it();
     the_hosts_timer_answers_the_deadline_it_is_armed_for();
 #if !defined(WEIVEL_C_USING_SHARED)
     an_activation_short_of_memory_for_its_outcomes_starts_no_plugin();

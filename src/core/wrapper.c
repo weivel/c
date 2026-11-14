@@ -34,6 +34,12 @@ typedef struct listener_slot {
  * tell the `follow` hook again: an announcement, new hooks, a request to follow once more. `following` is 1 exactly
  * while one thread calls `follow`, and that thread does not stop until `followed_serial` has caught up, so the last
  * call `follow` receives always carries the latest announcement, whichever thread drained it.
+ *
+ * Every event a call drains along with an announcement is fenced with the serial that announcement left, and the
+ * dispatch stops at the first event whose fence `followed_serial` has not reached, ending until the thread telling
+ * `follow` has returned and delivers the rest itself. So no event of a call is dispatched before the timer is armed
+ * for that call's announcement, while a thread telling `follow` again with nothing drained keeps nobody waiting.
+ * Fences only grow along the queue, so `highest_fence` above `followed_serial` says some fenced event still waits.
  */
 struct weivel_c_core {
     weivel_c_core_table table;
@@ -56,6 +62,7 @@ struct weivel_c_core {
     uint32_t following;
     uint64_t deadline_serial;
     uint64_t followed_serial;
+    uint64_t highest_fence;
 };
 
 /** One call of the `follow` hook, taken under the layer lock and made outside it. */
@@ -182,11 +189,31 @@ static void release_memory(weivel_c_core *core, void *memory) {
     core->allocator.release(core->allocator.data, memory);
 }
 
-/** Takes the next entry for the running dispatch, or ends that dispatch when the queue is empty. */
-static weivel_c_queue_place *take_next(weivel_c_core *core, uint32_t *holding) {
-    weivel_c_queue_place *place;
+/** Under the lock: 1 when the first entry is an event of a call whose announcement `follow` has not returned with. */
+static int first_is_fenced(const weivel_c_core *core) {
+    const weivel_c_queue_place *first = core->first;
+    if (first == NULL || first->waiting != PLACE_OF_AN_EVENT) {
+        return 0;
+    }
+    return ((const weivel_c_queued_event *)(const void *)first)->fence > core->followed_serial;
+}
+
+/** Under the lock: 1 while an event fenced behind an announcement `follow` has not returned with still waits. */
+static int has_fenced_events(const weivel_c_core *core) {
+    return core->highest_fence > core->followed_serial;
+}
+
+/**
+ * Takes the next entry for the running dispatch, or ends that dispatch when the queue is empty or its first entry is
+ * fenced, `*fenced` then 1 and the thread telling `follow` delivering the rest.
+ */
+static weivel_c_queue_place *take_next(weivel_c_core *core, uint32_t *holding, int *fenced) {
+    weivel_c_queue_place *place = NULL;
     weivel_c_mutex_lock(&core->lock);
-    place = detach_first(core);
+    *fenced = first_is_fenced(core);
+    if (!*fenced) {
+        place = detach_first(core);
+    }
     if (place == NULL) {
         core->dispatching = 0;
     } else {
@@ -235,19 +262,27 @@ static void run_step(weivel_c_core *core, weivel_c_step *step) {
     }
 }
 
-/** Delivers the queue until it is empty. Only the thread that set `dispatching` calls it, without the lock. */
-static void dispatch(weivel_c_core *core) {
+/**
+ * Delivers the queue until it is empty or reaches a fence. Only the thread that set `dispatching` calls it, without
+ * the lock. Answers 1 when `watched`, queued before the call, is no longer waiting for another thread: it took it,
+ * or it emptied the queue, as a destroy made inside the dispatch does by dropping it.
+ */
+static int dispatch(weivel_c_core *core, const weivel_c_queue_place *watched) {
     uint32_t holding = PLACE_IDLE;
-    weivel_c_queue_place *place = take_next(core, &holding);
+    int took_watched = 0;
+    int fenced = 0;
+    weivel_c_queue_place *place = take_next(core, &holding, &fenced);
     while (place != NULL) {
+        took_watched |= place == watched;
         if (holding == PLACE_OF_A_STEP) {
             run_step(core, step_at(place));
         } else {
             hear_event(core, &event_at(place)->event);
             release_memory(core, event_at(place));
         }
-        place = take_next(core, &holding);
+        place = take_next(core, &holding, &fenced);
     }
+    return took_watched || !fenced;
 }
 
 static weivel_c_status enter(weivel_c_core *core) {
@@ -300,9 +335,9 @@ static void follow_the_deadline(weivel_c_core *core, following_turn *turn) {
     }
 }
 
-/** Under the lock: makes this thread the dispatcher when something waits and no dispatch runs. */
+/** Under the lock: makes this thread the dispatcher when something it may deliver waits and no dispatch runs. */
 static int claim_the_dispatch(weivel_c_core *core) {
-    if (core->first == NULL || core->dispatching) {
+    if (core->first == NULL || core->dispatching || first_is_fenced(core)) {
         return 0;
     }
     core->dispatching = 1;
@@ -311,14 +346,14 @@ static int claim_the_dispatch(weivel_c_core *core) {
 
 /**
  * Tells the `follow` hook of a deadline this hold drained, lets the lock go, tells the sink what the call met, and
- * dispatches unless a dispatch is already running. Answers 1 when this thread dispatched.
+ * dispatches unless a dispatch is already running. Answers 1 when this thread dispatched `watched`, which may be NULL.
  *
  * @implNote The dispatch is claimed only once `follow` has returned, under the hold it returns with. A thread that
- * sits in `follow`, or goes round for the announcements others drain meanwhile, therefore keeps nobody's events
- * waiting: the next thread to leave finds no dispatch running and delivers the queue itself, this thread's entries
- * first.
+ * sits in `follow` keeps waiting only the events fenced behind the announcement it tells and those queued after them:
+ * any other thread to leave meanwhile delivers what lies ahead of the fence, and this thread, once `follow` has
+ * returned, finds the fence passed and delivers the rest.
  */
-static int leave(weivel_c_core *core, const call_notes *notes) {
+static int leave(weivel_c_core *core, const call_notes *notes, const weivel_c_queue_place *watched) {
     following_turn turn;
     int claimed;
     if (take_following_turn(core, &turn)) {
@@ -327,10 +362,7 @@ static int leave(weivel_c_core *core, const call_notes *notes) {
     claimed = claim_the_dispatch(core);
     weivel_c_mutex_unlock(&core->lock);
     tell_notes(core, notes);
-    if (claimed) {
-        dispatch(core);
-    }
-    return claimed;
+    return claimed && dispatch(core, watched);
 }
 
 static void empty_buffer(weivel_c_core *core) {
@@ -349,6 +381,7 @@ static void record_deadline(weivel_c_core *core) {
 }
 
 static void keep_copy(weivel_c_core *core, weivel_c_queued_event *copy, const weivel_c_event **own_refusal) {
+    copy->fence = 0;
     append(core, &copy->place, PLACE_OF_AN_EVENT);
     if (*own_refusal == NULL && weivel_c_event_is_refusal(&copy->event)) {
         *own_refusal = &copy->event;
@@ -396,8 +429,25 @@ static int drain_one(weivel_c_core *core, uint32_t *waiting, call_notes *notes, 
     return 1;
 }
 
+/** Under the lock: fences every event queued after `before`, NULL for the whole queue, with the latest serial. */
+static void fence_what_was_drained(weivel_c_core *core, weivel_c_queue_place *before) {
+    weivel_c_queue_place *place = before == NULL ? core->first : before->next;
+    for (; place != NULL; place = place->next) {
+        if (place->waiting == PLACE_OF_AN_EVENT) {
+            event_at(place)->fence = core->deadline_serial;
+        }
+    }
+    core->highest_fence = core->deadline_serial;
+}
+
+/** Drains a call's events, fencing them all when one of them is an announcement. */
 static void drain(weivel_c_core *core, uint32_t waiting, call_notes *notes, const weivel_c_event **own_refusal) {
+    weivel_c_queue_place *before = core->last;
+    uint64_t serial = core->deadline_serial;
     while (waiting > 0 && drain_one(core, &waiting, notes, own_refusal)) {
+    }
+    if (core->deadline_serial != serial) {
+        fence_what_was_drained(core, before);
     }
 }
 
@@ -455,7 +505,7 @@ static weivel_c_status hand_over_a_due_deadline(weivel_c_core *core) {
     if (!advance_when_due(core, now, &notes)) {
         return WEIVEL_C_STATUS_OK;
     }
-    leave(core, &notes);
+    leave(core, &notes, NULL);
     return enter(core);
 }
 
@@ -578,7 +628,8 @@ static weivel_c_status invoke(weivel_c_core *core, const invocation *asked) {
     status = answer_of(core, answered, asked->parts, own_refusal, asked->refusal, &notes);
     status = record_the_answer(asked, status);
     status = queue_the_deferred_step(core, asked, status, &queued);
-    tell_whether_the_deferred_step_ran(asked, queued, leave(core, &notes));
+    tell_whether_the_deferred_step_ran(asked, queued,
+                                       leave(core, &notes, queued ? &asked->then->deferred->place : NULL));
     return status;
 }
 
@@ -609,7 +660,7 @@ weivel_c_status weivel_c_core_follow_deadline_again(weivel_c_core *core) {
     }
     begin_notes(&notes);
     core->deadline_serial += core->deadline_serial != 0;
-    leave(core, &notes);
+    leave(core, &notes, NULL);
     return WEIVEL_C_STATUS_OK;
 }
 
@@ -619,6 +670,10 @@ int weivel_c_core_is_destroyed(weivel_c_core *core) {
     destroyed = core->core == NULL;
     weivel_c_mutex_unlock(&core->lock);
     return destroyed;
+}
+
+uint64_t weivel_c_core_sequence_held(const weivel_c_core *core) {
+    return core->sequence;
 }
 
 uint64_t weivel_c_core_last_sequence(weivel_c_core *core) {
@@ -752,7 +807,7 @@ static void put_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks)
     }
     core->deadline_serial += core->deadline_serial != 0;
     begin_notes(&notes);
-    leave(core, &notes);
+    leave(core, &notes, NULL);
 }
 
 weivel_c_status weivel_c_core_set_deadline_hooks(weivel_c_core *core, const weivel_c_deadline_hooks *hooks) {
@@ -817,7 +872,7 @@ weivel_c_status weivel_c_core_defer(weivel_c_core *core, weivel_c_step *step, ui
     }
     begin_notes(&notes);
     append(core, &step->place, PLACE_OF_A_STEP);
-    if (leave(core, &notes) && dispatched_here != NULL) {
+    if (leave(core, &notes, &step->place) && dispatched_here != NULL) {
         *dispatched_here = 1;
     }
     return WEIVEL_C_STATUS_OK;
@@ -839,15 +894,15 @@ weivel_c_status weivel_c_core_run_as_the_dispatcher(weivel_c_core *core, weivel_
     if (status != WEIVEL_C_STATUS_OK) {
         return status;
     }
-    if (core->dispatching || step->place.waiting != PLACE_IDLE) {
-        status = core->dispatching ? WEIVEL_C_STATUS_OK : WEIVEL_C_STATUS_MISUSE;
+    if (core->dispatching || has_fenced_events(core) || step->place.waiting != PLACE_IDLE) {
+        status = core->dispatching || has_fenced_events(core) ? WEIVEL_C_STATUS_OK : WEIVEL_C_STATUS_MISUSE;
         weivel_c_mutex_unlock(&core->lock);
         return status;
     }
     append(core, &step->place, PLACE_OF_A_STEP);
     core->dispatching = 1;
     weivel_c_mutex_unlock(&core->lock);
-    dispatch(core);
+    dispatch(core, NULL);
     *ran = 1;
     return WEIVEL_C_STATUS_OK;
 }
@@ -902,7 +957,7 @@ static weivel_c_status start(weivel_c_core *core, const weivel_c_core_options *o
     begin_notes(&notes);
     weivel_c_mutex_lock(&core->lock);
     drain(core, waiting, &notes, &unused);
-    leave(core, &notes);
+    leave(core, &notes, NULL);
     return WEIVEL_C_STATUS_OK;
 }
 

@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../context/contexts.h"
+#include "../core/calls.h"
+
 #define END_OF(type, field) (offsetof(type, field) + sizeof(((type *)0)->field))
 #define FIRST_ENTRY_SIZE END_OF(weivel_c_entry, library)
 
@@ -134,21 +137,27 @@ static void forget_unkept(weivel_c_host *host, host_plugin *made) {
 }
 
 /**
- * @implNote The plugin's context is built here
-, before it is ever opened, though the plugin is handed it only by its
- * activate: building it at the open could fail for want of memory after the core had opened the plugin, and here such
- * a failure is answered to the caller with nothing left registered.
+ * @implNote The plugin's context is made and its entry reserved before the core is asked, and kept by the
+ * registration's answered step, though the plugin is handed it only by its activate: so the core never holds a plugin
+ * the table lacks an entry for, and a registration short of memory reaches nothing of the core.
  */
-static weivel_c_status register_into(weivel_c_host *host, host_plugin *made, const weivel_manifest *manifest,
-                                     weivel_c_refusal *refusal) {
-    weivel_c_status status = weivel_c_core_register_manifest(host->core, manifest, &made->handle, refusal);
+static weivel_c_status register_into(weivel_c_host *host, host_plugin *made, const weivel_manifest *given,
+                                     const weivel_manifest *copy, weivel_c_refusal *refusal) {
+    const weivel_manifest *registered = weivel_c_host_manifest_is_whole(given) ? copy : given;
+    weivel_c_context_keeping keeping = {NULL, &made->handle, 0};
+    weivel_c_answered_step then = {weivel_c_context_keep_answered, &keeping, NULL, NULL, NULL, NULL};
+    weivel_c_status status = weivel_c_context_prepare(host->contexts, copy, &keeping.context);
     if (status != WEIVEL_C_STATUS_OK) {
         return status;
     }
-    status = weivel_c_context_create(host->contexts, made->handle, manifest, &made->context);
-    if (status != WEIVEL_C_STATUS_OK) {
+    status = weivel_c_core_register_manifest_then(host->core, registered, &made->handle, refusal, &then);
+    if (!keeping.kept) {
+        weivel_c_context_discard_prepared(keeping.context);
+    }
+    if (status != WEIVEL_C_STATUS_OK && made->handle != 0) {
         undo_the_registration(host, made->handle);
     }
+    made->context = keeping.kept ? keeping.context : NULL;
     return status;
 }
 
@@ -173,7 +182,7 @@ weivel_c_status weivel_c_host_register(weivel_c_host *host, const weivel_manifes
         free(made);
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
-    status = register_into(host, made, copy, refusal);
+    status = register_into(host, made, manifest, copy, refusal);
     if (status != WEIVEL_C_STATUS_OK) {
         free(copy);
         free(made);

@@ -146,12 +146,17 @@ static void end_the_plugins_entry(weivel_c_context *context) {
     weivel_c_handles_drop_holdings(handles, context->plugin);
 }
 
+static void release_context(weivel_c_context *context) {
+    weivel_c_contexts *contexts = context->contexts;
+    contexts->allocator.release(contexts->allocator.data, context);
+}
+
 /** Frees a context whose records' steps can no longer run, because the core is destroyed. */
 static void free_context_for_good(weivel_c_context *context) {
     end_the_plugins_entry(context);
     weivel_c_records_discard(context->records);
     free(context->slots);
-    free(context);
+    release_context(context);
 }
 
 weivel_c_status weivel_c_contexts_free(weivel_c_contexts *contexts) {
@@ -187,15 +192,16 @@ weivel_c_status weivel_c_contexts_count(weivel_c_contexts *contexts, uint32_t *c
     return WEIVEL_C_STATUS_OK;
 }
 
-static weivel_c_status keep_context(weivel_c_context *context) {
+/** Under the lock of the contexts: enters the context under its plugin's handle, in a reserved entry when `reserved`. */
+static weivel_c_status keep_context(weivel_c_context *context, int reserved) {
     weivel_c_contexts *contexts = context->contexts;
     weivel_c_handle_entry entry = WEIVEL_INIT(weivel_c_handle_entry);
     weivel_c_status status;
     entry.kind = WEIVEL_C_HANDLE_PLUGIN;
     entry.handle = context->plugin;
     entry.object = context;
-    weivel_c_mutex_lock(&contexts->lock);
-    status = weivel_c_handles_add(contexts->handles, &entry, &context->token);
+    status = reserved ? weivel_c_handles_add_reserved(contexts->handles, &entry, &context->token)
+                      : weivel_c_handles_add(contexts->handles, &entry, &context->token);
     if (status == WEIVEL_C_STATUS_OK) {
         context->next = contexts->first;
         if (contexts->first != NULL) {
@@ -204,8 +210,17 @@ static weivel_c_status keep_context(weivel_c_context *context) {
         contexts->first = context;
         contexts->context_count++;
     }
-    weivel_c_mutex_unlock(&contexts->lock);
     return status;
+}
+
+static weivel_c_context *allocate_context(weivel_c_contexts *contexts, const weivel_manifest *manifest) {
+    weivel_c_context *made = contexts->allocator.allocate(contexts->allocator.data, sizeof *made);
+    if (made != NULL) {
+        memset(made, 0, sizeof *made);
+        made->contexts = contexts;
+        made->manifest = manifest;
+    }
+    return made;
 }
 
 weivel_c_status weivel_c_context_create(weivel_c_contexts *contexts, weivel_handle plugin,
@@ -219,21 +234,57 @@ weivel_c_status weivel_c_context_create(weivel_c_contexts *contexts, weivel_hand
     if (contexts == NULL || plugin == 0) {
         return WEIVEL_C_STATUS_MISUSE;
     }
-    created = calloc(1, sizeof *created);
+    created = allocate_context(contexts, manifest);
     if (created == NULL) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
-    created->contexts = contexts;
     created->plugin = plugin;
-    created->manifest = manifest;
     created->first_sequence = weivel_c_core_last_sequence(contexts->core);
-    status = keep_context(created);
+    weivel_c_mutex_lock(&contexts->lock);
+    status = keep_context(created, 0);
+    weivel_c_mutex_unlock(&contexts->lock);
     if (status != WEIVEL_C_STATUS_OK) {
-        free(created);
+        release_context(created);
         return status;
     }
     *context = created;
     return WEIVEL_C_STATUS_OK;
+}
+
+weivel_c_status weivel_c_context_prepare(weivel_c_contexts *contexts, const weivel_manifest *manifest,
+                                         weivel_c_context **context) {
+    weivel_c_context *made = allocate_context(contexts, manifest);
+    weivel_c_status status;
+    *context = NULL;
+    if (made == NULL) {
+        return WEIVEL_C_STATUS_OUT_OF_MEMORY;
+    }
+    status = weivel_c_handles_reserve(contexts->handles);
+    if (status != WEIVEL_C_STATUS_OK) {
+        release_context(made);
+        return status;
+    }
+    *context = made;
+    return WEIVEL_C_STATUS_OK;
+}
+
+weivel_c_status weivel_c_context_keep_answered(void *data) {
+    weivel_c_context_keeping *keeping = data;
+    weivel_c_context *context = keeping->context;
+    weivel_c_contexts *contexts = context->contexts;
+    weivel_c_status status;
+    context->plugin = *keeping->answered;
+    context->first_sequence = weivel_c_core_sequence_held(contexts->core);
+    weivel_c_mutex_lock(&contexts->lock);
+    status = keep_context(context, 1);
+    weivel_c_mutex_unlock(&contexts->lock);
+    keeping->kept = status == WEIVEL_C_STATUS_OK;
+    return status;
+}
+
+void weivel_c_context_discard_prepared(weivel_c_context *context) {
+    weivel_c_handles_unreserve(context->contexts->handles);
+    release_context(context);
 }
 
 weivel_c_status weivel_c_context_token(weivel_c_context *context, uint64_t *token) {
@@ -269,7 +320,7 @@ weivel_c_status weivel_c_context_free(weivel_c_context *context) {
     unlink_context(context);
     weivel_c_mutex_unlock(&contexts->lock);
     free(context->slots);
-    free(context);
+    release_context(context);
     return WEIVEL_C_STATUS_OK;
 }
 

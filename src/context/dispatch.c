@@ -57,7 +57,14 @@ static void settle_want(weivel_c_contexts *contexts, const weivel_c_event *event
     weivel_c_record_end_in_dispatch(want);
 }
 
-/** Answers 0, the sink told, when what a registration hands over has no object in the layer to hear it with. */
+/**
+ * Answers 0, the sink told, when what a registration hands over has no object in the layer to hear it with.
+ *
+ * @implNote The holding is made here with no reservation, since a watch hears registrations for as long as it stands
+ * and no room for them can be taken before the call that started it. So when memory runs out the watcher is still
+ * handed the object, the sink is told the holding was not recorded, and the later revocation of that registration is
+ * not heard by the watcher.
+ */
 static int hand_over_the_registered(weivel_c_contexts *contexts, const weivel_c_event *event,
                                     weivel_c_service_change *change) {
     const weivel_watch_event *heard = &event->data.watch;

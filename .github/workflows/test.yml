@@ -36,7 +36,7 @@ jobs:
       toolchains: cmake
       runners: '["ubuntu-latest","windows-latest","macos-latest"]'
       cmake_version: '4.4.4'
-      cmake_configure: '-S . -B build -DCMAKE_BUILD_TYPE=Release'
+      cmake_configure: '-S . -B build -DCMAKE_BUILD_TYPE=Release -DWEIVEL_C_BENCHMARKS_REQUIRED=ON'
       cmake_build: '--build build --config Release'
       cmake_test: 'ctest --test-dir build --output-on-failure -V -C Release -L release-benchmark --no-tests=error'
 
