@@ -20,6 +20,8 @@
 
 cmake_minimum_required(VERSION 3.15)
 
+include(${CMAKE_CURRENT_LIST_DIR}/../read_tokens.cmake)
+
 set(names_prefixes "weivel_standard_" "weivel_json_")
 set(allowed_to_link_the_standard weivel_c_standard weivel_c_standard_shared)
 set(host_targets weivel_c weivel_c_shared weivel_c_testing)
@@ -50,44 +52,6 @@ function(find_the_sources result)
     list(FILTER found EXCLUDE REGEX
         "^(src/standard/|test/standard/|include/weivel/c/standard[./]|test/host/standard_evasions/)")
     set(${result} "${found}" PARENT_SCOPE)
-endfunction()
-
-# Sets `${result}` to the tokens of `text`, each between two spaces: identifiers and `##`; and `${literals}` to each run
-# of adjacent string literals, joined into one as the compiler joins them. Comments and character literals are matched
-# whole and dropped.
-function(read_tokens text result literals)
-    string(REGEX REPLACE "[][;]" " " text "${text}")
-    set(block_comment "/\\*([^*]|\\*+[^*/])*\\*+/")
-    set(line_comment "//[^\n]*")
-    set(string_literal "\"([^\"\\\\\n]|\\\\.)*\"")
-    set(character_literal "'([^'\\\\\n]|\\\\.)*'")
-    string(REGEX MATCHALL
-        "${block_comment}|${line_comment}|${string_literal}|${character_literal}|[A-Za-z_][A-Za-z0-9_]*|##|[^ \t\r\n]"
-        matched "${text}")
-    set(tokens "")
-    set(joined_literals "")
-    set(joined "")
-    set(in_literal FALSE)
-    foreach(token IN LISTS matched)
-        if(token MATCHES "^\"(.*)\"$")
-            string(APPEND joined "${CMAKE_MATCH_1}")
-            set(in_literal TRUE)
-        elseif(NOT token MATCHES "^(/\\*|//)")
-            if(in_literal)
-                list(APPEND joined_literals "${joined}")
-                set(joined "")
-                set(in_literal FALSE)
-            endif()
-            if(token MATCHES "^([A-Za-z_][A-Za-z0-9_]*|##)$")
-                string(APPEND tokens " ${token} ")
-            endif()
-        endif()
-    endforeach()
-    if(in_literal)
-        list(APPEND joined_literals "${joined}")
-    endif()
-    set(${result} " ${tokens} " PARENT_SCOPE)
-    set(${literals} "${joined_literals}" PARENT_SCOPE)
 endfunction()
 
 # Appends to `offenders` each way `source`, as its `tokens` and `literals`, reaches a function of the standard.
