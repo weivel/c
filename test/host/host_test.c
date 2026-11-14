@@ -428,6 +428,96 @@ static void verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quaran
     end_host_world(&in);
 }
 
+static char *text_on_the_heap(const char *text) {
+    char *made = malloc(strlen(text) + 1);
+    CHECK(made != NULL);
+    memcpy(made, text, strlen(text) + 1);
+    return made;
+}
+
+/** A manifest whose every part the caller allocated, to be scribbled over and freed once it is registered. */
+typedef struct heap_manifest {
+    weivel_manifest manifest;
+    char *name;
+    char *offered;
+    char *wanted;
+    char *constraint;
+    weivel_service_offer *offers;
+    weivel_service_want *wants;
+    weivel_number *numbers;
+} heap_manifest;
+
+static void build_on_the_heap(heap_manifest *self) {
+    self->manifest = (weivel_manifest)WEIVEL_INIT(weivel_manifest);
+    self->name = text_on_the_heap("agenda");
+    self->offered = text_on_the_heap("agenda:x");
+    self->wanted = text_on_the_heap("mail:inbox");
+    self->constraint = text_on_the_heap("speed");
+    self->offers = calloc(1, sizeof *self->offers);
+    self->wants = calloc(1, sizeof *self->wants);
+    self->numbers = calloc(1, sizeof *self->numbers);
+    self->offers->size = (uint32_t)sizeof *self->offers;
+    self->offers->id = self->offered;
+    *self->wants = want_of(self->wanted);
+    self->numbers->size = (uint32_t)sizeof *self->numbers;
+    self->numbers->name = self->constraint;
+    self->numbers->value = 4.5;
+    self->wants->constraints = (weivel_numbers){self->numbers, 1};
+    self->manifest.import_name = self->name;
+    self->manifest.api = 1;
+    self->manifest.services.provides = (weivel_service_offers){self->offers, 1};
+    self->manifest.services.consumes = (weivel_service_wants){self->wants, 1};
+}
+
+static void scribble_and_free(heap_manifest *self) {
+    memset(self->name, 'x', strlen(self->name));
+    memset(self->offered, 'x', strlen(self->offered));
+    memset(self->wanted, 'x', strlen(self->wanted));
+    memset(self->constraint, 'x', strlen(self->constraint));
+    memset(self->numbers, 0, sizeof *self->numbers);
+    free(self->name);
+    free(self->offered);
+    free(self->wanted);
+    free(self->constraint);
+    free(self->offers);
+    free(self->wants);
+    free(self->numbers);
+    memset(&self->manifest, 0, sizeof self->manifest);
+}
+
+static void check_the_copy(const weivel_manifest *copy, const heap_manifest *given) {
+    CHECK(copy != NULL && copy != &given->manifest && copy->size == sizeof *copy);
+    check_text(copy->import_name, "agenda", "the import name the host copied");
+    CHECK(copy->services.provides.count == 1 && copy->services.consumes.count == 1);
+    check_text(copy->services.provides.items[0].id, "agenda:x", "the offer the host copied");
+    check_text(copy->services.consumes.items[0].id, "mail:inbox", "the want the host copied");
+    CHECK(copy->services.consumes.items[0].constraints.count == 1);
+    check_text(copy->services.consumes.items[0].constraints.items[0].name, "speed", "the constraint copied");
+    CHECK(copy->services.consumes.items[0].constraints.items[0].value == 4.5);
+}
+
+static void a_manifest_is_copied_so_its_caller_may_free_it_once_it_is_registered(void) {
+    host_world in;
+    test_plugin plugin;
+    test_plugin *only[1];
+    heap_manifest given;
+    const weivel_manifest *copy = NULL;
+    uint32_t kind = 0;
+    begin_host_world(&in);
+    name_acting_plugin(&plugin, &in, "agenda", activate_and_answer_done, NULL);
+    build_on_the_heap(&given);
+    CHECK(weivel_c_host_register(in.host, &given.manifest, &plugin.entry, &plugin.handle, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    scribble_and_free(&given);
+    only[0] = &plugin;
+    CHECK(activate_in_order(&in, only, 1, WEIVEL_EDGES_CAPABILITIES));
+    CHECK(outcomes_of(&in.told, plugin.handle, &kind) == 1 && kind == WEIVEL_C_OUTCOME_ACTIVE);
+    CHECK(weivel_c_context_manifest(plugin.context, &copy) == WEIVEL_C_STATUS_OK);
+    check_the_copy(copy, &given);
+    CHECK(place_of(&in.heard, "outcome agenda active") >= 0 && sink_count(&in) == 0);
+    end_host_world(&in);
+}
+
 static void every_call_answers_its_mistakes_as_values(void) {
     host_world in;
     weivel_c_host_options options = WEIVEL_INIT(weivel_c_host_options);
@@ -468,6 +558,7 @@ int main(int argument_count, char **arguments) {
     an_awaited_want_does_not_hold_back_a_later_plugin();
     a_refused_verify_quarantines_the_plugin_in_the_same_step();
     verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing();
+    a_manifest_is_copied_so_its_caller_may_free_it_once_it_is_registered();
 #if !defined(WEIVEL_C_USING_SHARED)
     an_activation_short_of_memory_for_its_outcomes_starts_no_plugin();
     a_release_ends_its_plugins_entries_before_it_forgets_it_and_leaves_none();

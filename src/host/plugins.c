@@ -78,7 +78,7 @@ static int entry_is_usable(const weivel_c_entry *entry) {
     return entry != NULL && entry->size >= FIRST_ENTRY_SIZE && entry->activate != NULL;
 }
 
-static void fill_plugin(host_plugin *plugin, weivel_c_host *host, const weivel_manifest *manifest,
+static void fill_plugin(host_plugin *plugin, weivel_c_host *host, weivel_manifest *manifest,
                         const weivel_c_entry *entry) {
     plugin->host = host;
     plugin->manifest = manifest;
@@ -128,6 +128,7 @@ static void undo_the_registration(weivel_c_host *host, weivel_handle plugin) {
 static void forget_unkept(weivel_c_host *host, host_plugin *made) {
     weivel_c_core_forget_plugin(host->core, made->handle, NULL);
     weivel_c_context_detach(made->context);
+    free(made->manifest);
     free(made);
 }
 
@@ -153,6 +154,7 @@ static weivel_c_status register_into(weivel_c_host *host, host_plugin *made, con
 weivel_c_status weivel_c_host_register(weivel_c_host *host, const weivel_manifest *manifest,
                                        const weivel_c_entry *entry, weivel_handle *plugin, weivel_c_refusal *refusal) {
     host_plugin *made;
+    weivel_manifest *copy;
     weivel_c_status status;
     if (plugin == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
@@ -165,15 +167,18 @@ weivel_c_status weivel_c_host_register(weivel_c_host *host, const weivel_manifes
         return WEIVEL_C_STATUS_DESTROYED;
     }
     made = calloc(1, sizeof *made);
-    if (made == NULL) {
+    copy = made == NULL ? NULL : weivel_c_host_copy_manifest(manifest);
+    if (copy == NULL) {
+        free(made);
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
-    status = register_into(host, made, manifest, refusal);
+    status = register_into(host, made, copy, refusal);
     if (status != WEIVEL_C_STATUS_OK) {
+        free(copy);
         free(made);
         return status;
     }
-    fill_plugin(made, host, manifest, entry);
+    fill_plugin(made, host, copy, entry);
     if (!keep_plugin(made)) {
         forget_unkept(host, made);
         return WEIVEL_C_STATUS_DESTROYED;

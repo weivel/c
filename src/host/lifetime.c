@@ -228,6 +228,7 @@ static void free_the_records(weivel_c_host *host) {
         host_plugin *plugin = host->first_plugin;
         host->first_plugin = plugin->next;
         weivel_c_host_close_library(plugin);
+        free(plugin->manifest);
         free(plugin);
     }
     while (host->completions != NULL) {

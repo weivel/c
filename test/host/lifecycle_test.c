@@ -313,7 +313,9 @@ static void a_plugin_that_calls_its_context_after_it_was_forgotten_is_answered_d
     CHECK(weivel_c_context_register_service(plugin.context, "agenda:x", &service, NULL, NULL, NULL) ==
           WEIVEL_C_STATUS_DETACHED);
     CHECK(crossed.next_event == 0);
-    CHECK(weivel_c_context_manifest(plugin.context, &manifest) == WEIVEL_C_STATUS_OK && manifest == &plugin.manifest);
+    CHECK(weivel_c_context_manifest(plugin.context, &manifest) == WEIVEL_C_STATUS_OK && manifest != &plugin.manifest);
+    check_text(manifest->import_name, "agenda", "the manifest's copy a forgotten plugin's context still answers");
+
     end_host_world(&in);
 }
 

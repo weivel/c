@@ -119,8 +119,9 @@ comes after every call into the layer has returned.
 
 `weivel_c_host_create` makes a host from a loaded core table or the path of the core's binary, the core's options,
 the caller's scheduler, an error sink and a log, and builds the wrapper's core, the handles table, the timer and the
-contexts. It never links or loads the standard: `weivel_c_host_register` takes a manifest value, which it borrows
-until the host is freed, and an entry.
+contexts. It never links or loads the standard: `weivel_c_host_register` takes a manifest value, which it copies
+whole, so its caller may free its own at once, and an entry.
+
 
 - `weivel_c_host_register_service` registers a service of the host's own under `WEIVEL_HOST`, offered to every plan
   as provided by the host and answered to a plugin as the very pointer given.
