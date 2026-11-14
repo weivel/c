@@ -178,6 +178,12 @@ weivel_c_status weivel_c_record_hold_settled(weivel_c_record *want, weivel_handl
 /** Ends and frees a claimed record at once. Only the dispatching thread calls it. */
 void weivel_c_record_end_in_dispatch(weivel_c_record *record);
 
+/**
+ * 1 while a registration of `id` that a context keeps stands, the host's own context's among them; else 0. It reads the
+ * layer's records and asks the core nothing, so nobody comes to hold the registration by it, as a get would.
+ */
+int weivel_c_contexts_have_registered(weivel_c_contexts *contexts, const char *id);
+
 /** Ends every record of a context. With `freeing`, a record whose step still waits is moved to the orphans. */
 void weivel_c_records_end(weivel_c_context *context, int freeing);
 

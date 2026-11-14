@@ -154,6 +154,14 @@ void weivel_c_host_replace_allocator(weivel_c_host *host, const weivel_c_allocat
  */
 weivel_manifest *weivel_c_host_copy_manifest(const weivel_manifest *given);
 
+/**
+ * Registers a service under WEIVEL_HOST as weivel_c_host_register_service does, but without refusing an id a live
+ * library declares: how a library the host loads registers its own services.
+ */
+weivel_c_status weivel_c_host_register_kept_service(weivel_c_host *host, const char *id, void *service,
+                                                    const weivel_c_capacity_answerer *answerer,
+                                                    weivel_handle *registration, weivel_c_refusal *refusal);
+
 /** 1 while nothing has begun to destroy the host. */
 int weivel_c_host_is_running(weivel_c_host *host);
 

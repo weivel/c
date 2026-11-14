@@ -173,8 +173,13 @@ answer. A consumer that resolves the service is answered that very object.
   when it has a function of another kind (named), no service or a service of no function, an id it lists twice, or an
   id a registration under the host already holds, a plugin's, another live library's or the host's own (the id
   named): registering under `WEIVEL_HOST` replaces a registration, so loading it would silently take that service
-  over. A library that is none, or lacks its release symbol or a function's, is answered as a value naming what is
-  missing.
+  over. The id is looked for in the layer's own records of every registration, never by a get, so a refused load
+  leaves the host holding nothing it would later hear revoked. The refusal holds against every registration made
+  before the load call; a plugin registering the same id on another thread while the load runs can still be
+  replaced, and closing that window needs a register-if-absent call for `WEIVEL_HOST` in the core, which it does not
+  have. The other way round is closed in the layer: `weivel_c_host_register_service` refuses, `WEIVEL_C_STATUS_MISUSE`,
+  an id a live library declares. A library that is none, or lacks its release symbol or a function's, is answered as
+  a value naming what is missing.
 - The library's record is kept on the host's list before any service is registered, so a load that does not finish
   once one is (the destroy begun meanwhile, or a later service's registration refused) is undone as an unload is: an
   object a consumer was told of meanwhile answers `WEIVEL_C_STATUS_UNLOADED`, nothing stays registered, and the binary

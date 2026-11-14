@@ -168,7 +168,18 @@ typedef struct weivel_c_library_load_failure {
  * host's own, since registering it under WEIVEL_HOST would replace that registration; each the caller's mistake that
  * is told to nobody else); WEIVEL_C_STATUS_NOT_A_LIBRARY; WEIVEL_C_STATUS_MISSING_SYMBOL; WEIVEL_C_STATUS_REFUSED with
  * the core's refusal of a registration; WEIVEL_C_STATUS_OUT_OF_MEMORY; WEIVEL_C_STATUS_DESTROYED. Nothing stays
- * loaded or registered on any answer but OK.
+ * loaded, registered or held on any answer but OK: an id found registered already is found from the layer's own
+ * records, never by a get, so the host comes to hold nothing it would later hear revoked.
+ *
+ * The refusal of an id registered already holds against every registration made before this call began. One a plugin
+ * makes on another thread while the load runs can still be replaced by the library's registration under WEIVEL_HOST,
+ * since the core registers for the host whether or not another owner holds the id; closing that window needs a
+ * register-if-absent call for WEIVEL_HOST in the core, which it does not have. The host's own
+ * weivel_c_host_register_service refuses an id a live library declares, so the host cannot replace one.
+ *
+ * A load undone while the host is being destroyed, and not yet destroyed, tells the error sink when the platform
+ * refuses to close its binary, as the destroy's own unloading of every library reports a failed unload (the
+ * contract's destroy step 3); only once the host is destroyed is such a close told to nobody.
  */
 WEIVEL_C_API weivel_c_status weivel_c_host_load_library(weivel_c_host *host, const char *path,
                                                         const weivel_standard_library *declaration,
