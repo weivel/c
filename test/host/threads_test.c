@@ -222,6 +222,12 @@ static void keep_dispatching(void *argument) {
     CHECK(weivel_c_core_defer(core, &self->step, NULL) == WEIVEL_C_STATUS_OK);
 }
 
+static int was_activated_before_the_activation_returned(host_world *in, const char *name) {
+    char line[HOST_WORLD_TEXT];
+    snprintf(line, sizeof line, "activate %s", name);
+    return place_of(&in->heard, line) >= 0;
+}
+
 /** Waits until the busy thread's step has run once: from then on that thread holds the dispatch until stopped. */
 static void wait_until_dispatching(busy_dispatcher *self) {
     uint32_t runs = 0;
@@ -254,7 +260,7 @@ static void activations_alongside_another_threads_dispatch_start_each_plugin_onc
         register_test_plugin(&everyone.plugins[index]);
         one[0] = &everyone.plugins[index];
         CHECK(activate_in_order(&everyone.in, one, 1, WEIVEL_EDGES_CAPABILITIES));
-        CHECK(everyone.in.heard.count >= index + 1);
+        CHECK(was_activated_before_the_activation_returned(&everyone.in, everyone.names[index]));
     }
     lock_test_mutex(&busy.mutex);
     busy.stopping = 1;
