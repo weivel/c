@@ -29,7 +29,9 @@ find_package(Threads REQUIRED)
 set(WEIVEL_C_SOURCES
     src/core/load.c src/core/events.c src/core/wrapper.c src/core/calls.c
     src/handles/table.c
-    src/timer/timer.c)
+    src/timer/timer.c
+    src/context/contexts.c src/context/records.c src/context/services.c src/context/capabilities.c
+    src/context/capacity.c src/context/dispatch.c)
 if(WIN32)
     list(APPEND WEIVEL_C_SOURCES src/core/binary_windows.c src/core/mutex_windows.c)
 else()
