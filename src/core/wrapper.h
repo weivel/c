@@ -119,6 +119,12 @@ weivel_c_status weivel_c_core_remove_deadline_hooks(weivel_c_core *core, const w
  */
 weivel_c_status weivel_c_core_run_as_the_dispatcher(weivel_c_core *core, weivel_c_step *step, uint32_t *ran);
 
+/**
+ * The sequence of the last event drained, as weivel_c_core_last_sequence answers it, read by a step that runs under the
+ * layer lock (see weivel_c_answered_step) and takes no lock itself.
+ */
+uint64_t weivel_c_core_sequence_held(const weivel_c_core *core);
+
 /** 1 once the core behind the object is destroyed, so that no listener and no step of it will be taken again. */
 int weivel_c_core_is_destroyed(weivel_c_core *core);
 

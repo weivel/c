@@ -672,6 +672,10 @@ int weivel_c_core_is_destroyed(weivel_c_core *core) {
     return destroyed;
 }
 
+uint64_t weivel_c_core_sequence_held(const weivel_c_core *core) {
+    return core->sequence;
+}
+
 uint64_t weivel_c_core_last_sequence(weivel_c_core *core) {
     uint64_t sequence;
     weivel_c_mutex_lock(&core->lock);
