@@ -10,6 +10,7 @@
 #include <weivel/c/core.h>
 #include <weivel/c/handles.h>
 #include <weivel/c/host.h>
+#include <weivel/c/host/library.h>
 #include <weivel/c/timer.h>
 
 #endif

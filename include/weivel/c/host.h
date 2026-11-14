@@ -4,7 +4,8 @@
 /**
  * @file
  * The `host` module of the weivel C language implementation: it registers plugins written in C, activates and
- * releases them, offers host services, and is destroyed and freed. Every decision is the core's; the host carries
+ * releases them, offers host services, loads C libraries as host services (see weivel/c/host/library.h), and is
+ * destroyed and freed. Every decision is the core's; the host carries
  * out its answers in the order the core's contract gives.
  *
  * - Registration takes a manifest value and an entry (see weivel/c/host/entry.h) the caller hands it. It never needs
@@ -18,8 +19,8 @@
  *   ends its entries, forgets it and drops it from the host's tables. The last three always run as one step deferred
  *   behind the release's events; a release made where no dispatch runs has run them before it returns.
  * - Destroy releases every plugin the host opened and has not released, the last opened first, lets every event and
- *   step those releases left run, disarms the timer and destroys the core. Afterwards every call on the host answers
- *   WEIVEL_C_STATUS_DESTROYED, quietly, until weivel_c_host_free.
+ *   step those releases left run, unloads every C library it loaded, disarms the timer and destroys the core.
+ *   Afterwards every call on the host answers WEIVEL_C_STATUS_DESTROYED, quietly, until weivel_c_host_free.
  *
  * Threading: any thread may call any function here, an entry function and every callback included. The host has one
  * lock of its own, held only inside its own code and never while it calls anything: the wrapper, the contexts, the
@@ -81,8 +82,9 @@ WEIVEL_C_API weivel_c_status weivel_c_host_create(const weivel_c_host_options *o
  * Destroys the host, in the contract's four steps: releases every plugin it opened and has not released, one whose
  * activate is in flight and one quarantined included, the last opened first, each calling its deactivate when its
  * activate was called; lets every event those releases queued and every step they left run, each forget included;
- * closes every plugin library still open; then disarms the timer and destroys the core, whatever the steps before
- * reported.
+ * unloads every C library it loaded (see weivel/c/host/library.h), telling the sink of one whose binary does not
+ * close and unloading the rest, and closes every plugin library still open; then disarms the timer and destroys the
+ * core, whatever the steps before reported.
  *
  * It is a step deferred behind everything already queued, and its last two steps a further step behind its own
  * releases' steps. Where no dispatch runs, it has finished when it returns, unless a deactivate it waits for is still
@@ -104,7 +106,7 @@ WEIVEL_C_API weivel_c_status weivel_c_host_destroy(weivel_c_host *host, uint32_t
  * the host loaded it. A context or a completion a plugin still holds is gone afterwards.
  *
  * @return WEIVEL_C_STATUS_OK, also for NULL; WEIVEL_C_STATUS_MISUSE, freeing nothing, while the destroy has not
- * finished.
+ * finished, or while bytes one of its C libraries answered are still held.
  * Threading: no call on the host, on any of its contexts or completions, may be in flight or follow.
  */
 WEIVEL_C_API weivel_c_status weivel_c_host_free(weivel_c_host *host);

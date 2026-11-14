@@ -15,6 +15,13 @@ if(NOT EXISTS ${WEIVEL_C_CORE_INCLUDE_DIRECTORY}/weivel/core.h)
         "at siblings/core, or set WEIVEL_C_CORE_INCLUDE_DIRECTORY to the core's include directory")
 endif()
 
+set(WEIVEL_C_STANDARD_INCLUDE_DIRECTORY ${PROJECT_SOURCE_DIR}/siblings/standard/include
+    CACHE PATH "The directory that holds the standard's weivel/library.h, whose declaration types the host loads C libraries from; the standard's binary is never linked")
+if(NOT EXISTS ${WEIVEL_C_STANDARD_INCLUDE_DIRECTORY}/weivel/library.h)
+    message(FATAL_ERROR "no weivel/library.h under ${WEIVEL_C_STANDARD_INCLUDE_DIRECTORY}: link or clone the standard "
+        "checkout at siblings/standard, or set WEIVEL_C_STANDARD_INCLUDE_DIRECTORY to the standard's include directory")
+endif()
+
 function(weivel_c_strict_warnings target)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /WX /utf-8)
@@ -32,15 +39,17 @@ set(WEIVEL_C_SOURCES
     src/timer/timer.c
     src/context/contexts.c src/context/records.c src/context/services.c src/context/capabilities.c
     src/context/capacity.c src/context/dispatch.c
-    src/host/entry.c src/host/plugins.c src/host/activation.c src/host/release.c src/host/lifetime.c)
+    src/host/entry.c src/host/plugins.c src/host/activation.c src/host/release.c src/host/lifetime.c
+    src/host/libraries.c src/host/library_calls.c)
 if(WIN32)
-    list(APPEND WEIVEL_C_SOURCES src/core/binary_windows.c src/core/mutex_windows.c)
+    list(APPEND WEIVEL_C_SOURCES src/core/binary_windows.c src/core/mutex_windows.c src/host/references_windows.c)
 else()
-    list(APPEND WEIVEL_C_SOURCES src/core/binary_posix.c src/core/mutex_posix.c)
+    list(APPEND WEIVEL_C_SOURCES src/core/binary_posix.c src/core/mutex_posix.c src/host/references_posix.c)
 endif()
 
 function(weivel_c_target target)
-    target_include_directories(${target} PUBLIC include ${WEIVEL_C_CORE_INCLUDE_DIRECTORY})
+    target_include_directories(${target} PUBLIC include ${WEIVEL_C_CORE_INCLUDE_DIRECTORY}
+        ${WEIVEL_C_STANDARD_INCLUDE_DIRECTORY})
     target_link_libraries(${target} PUBLIC ${CMAKE_DL_LIBS} Threads::Threads)
     weivel_c_strict_warnings(${target})
 endfunction()
@@ -58,6 +67,9 @@ set_target_properties(weivel_c_shared PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/shared)
 
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+    add_library(weivel_c_testing STATIC ${WEIVEL_C_SOURCES})
+    weivel_c_target(weivel_c_testing)
+    target_compile_definitions(weivel_c_testing PUBLIC WEIVEL_C_TESTING)
     enable_testing()
     add_subdirectory(test)
 endif()
