@@ -34,6 +34,12 @@
 static const benchmark_sampling core_budget_sampling = {200000, 1000, 2000};
 static const benchmark_sampling pair_sampling = {100000, 1000, 501};
 static const benchmark_sampling same_language_sampling = {2000000, 1000000, 301};
+/**
+ * @implNote As many calls as the same-language sampling, in ten times the rounds: a call into another binary spreads
+ * more within a long batch, and 301 rounds of a million calls failed the quiet bound in two runs of twenty on a
+ * loaded machine where these held twenty of twenty.
+ */
+static const benchmark_sampling definition_sampling = {2000000, 100000, 3001};
 static const benchmark_sampling brief_sampling = {1000, 20, 21};
 
 static const char *platform_text(void) {
@@ -271,7 +277,7 @@ static int measure_once(const char *library_path, int repetition) {
         return 0;
     }
     print_noise_judged("same-language", repetition, &same_language);
-    if (measure_definition(library_path, &same_language_sampling, &same_language) != 1) {
+    if (measure_definition(library_path, &definition_sampling, &same_language) != 1) {
         return 0;
     }
     print_noise_judged("library-call-definition", repetition, &same_language);
@@ -470,7 +476,7 @@ static int run_mode(const char *mode, int argument_count, char **arguments) {
     }
     if (strcmp(mode, "library-definition") == 0 && argument_count >= 5) {
         return run_library_definition(arguments[3], arguments[4],
-                                      sampling_of(argument_count, arguments, 5, &same_language_sampling));
+                                      sampling_of(argument_count, arguments, 5, &definition_sampling));
     }
     if (strcmp(mode, "same-language-judge") == 0 && argument_count >= 6) {
         return judge_given_ratios(arguments[3], arguments[4], arguments[5]);
