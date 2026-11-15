@@ -191,9 +191,9 @@ weivel_c_status weivel_c_context_service_ids_release(weivel_c_context *context, 
     return weivel_c_core_service_list_release(context->contexts->core, list);
 }
 
-weivel_c_status weivel_c_context_register_service(weivel_c_context *context, const char *id, void *service,
-                                                  const weivel_c_capacity_answerer *answerer,
-                                                  weivel_handle *registration, weivel_c_refusal *refusal) {
+static weivel_c_status register_with_the_core(weivel_c_context *context, const char *id, void *service,
+                                              const weivel_c_capacity_answerer *answerer, int awaiting_releases,
+                                              weivel_handle *registration, weivel_c_refusal *refusal) {
     weivel_handle answered = 0;
     weivel_c_keeping keeping = {NULL, &answered, 0};
     weivel_c_answered_step then = {weivel_c_record_keep_answered, &keeping, weivel_c_context_guard, context, NULL, NULL};
@@ -213,13 +213,42 @@ weivel_c_status weivel_c_context_register_service(weivel_c_context *context, con
     if (answerer != NULL) {
         keeping.record->answerer = *answerer;
     }
-    status = weivel_c_core_register_service_then(context->contexts->core, context->plugin, id, &answered, refusal,
-                                                 &then);
+    status = awaiting_releases
+                 ? weivel_c_core_register_service_awaiting_releases_then(context->contexts->core, context->plugin, id,
+                                                                         &answered, refusal, &then)
+                 : weivel_c_core_register_service_then(context->contexts->core, context->plugin, id, &answered,
+                                                       refusal, &then);
     if (status != WEIVEL_C_STATUS_OK) {
         weivel_c_record_abandon(&keeping);
     }
     answer_handle(registration, answered, status);
     return status;
+}
+
+weivel_c_status weivel_c_context_register_service(weivel_c_context *context, const char *id, void *service,
+                                                  const weivel_c_capacity_answerer *answerer,
+                                                  weivel_handle *registration, weivel_c_refusal *refusal) {
+    return register_with_the_core(context, id, service, answerer, 0, registration, refusal);
+}
+
+weivel_c_status weivel_c_context_register_service_awaiting_releases(weivel_c_context *context, const char *id,
+                                                                    void *service,
+                                                                    const weivel_c_capacity_answerer *answerer,
+                                                                    weivel_handle *registration,
+                                                                    weivel_c_refusal *refusal) {
+    return register_with_the_core(context, id, service, answerer, 1, registration, refusal);
+}
+
+weivel_c_status weivel_c_context_release_holding(weivel_c_context *context, weivel_handle registration,
+                                                 weivel_c_refusal *refusal) {
+    weivel_c_answered_step then = {NULL, NULL, weivel_c_context_guard, context, NULL, NULL};
+    if (context == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    if (weivel_c_context_is_detached(context)) {
+        return WEIVEL_C_STATUS_DETACHED;
+    }
+    return weivel_c_core_release_holding_then(context->contexts->core, context->plugin, registration, refusal, &then);
 }
 
 weivel_c_status weivel_c_context_unregister_service(weivel_c_context *context, weivel_handle registration,

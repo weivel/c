@@ -153,6 +153,7 @@ static int describe_holding(weivel_c_contexts *contexts, const weivel_revoked_ev
     told->reach = record->kind == WEIVEL_C_RECORD_SERVICE ? WEIVEL_REACH_SERVICE : WEIVEL_REACH_CAPABILITY;
     told->id = record->id;
     told->object = record->object;
+    told->handle = revoked->implementation;
     return 1;
 }
 
@@ -168,6 +169,15 @@ static void revoke(weivel_c_contexts *contexts, const weivel_c_event *event) {
         weivel_c_context_emit(weivel_c_contexts_context_of(contexts, event->data.revoked.plugin, event), &told,
                               event);
     }
+}
+
+/** An owner released or forgotten since is found by no context, so it hears nothing and the event is dropped. */
+static void tell_holdings_released(weivel_c_contexts *contexts, const weivel_c_event *event) {
+    weivel_c_plugin_event told = WEIVEL_INIT(weivel_c_plugin_event);
+    told.kind = WEIVEL_C_PLUGIN_EVENT_HOLDINGS_RELEASED;
+    told.reach = WEIVEL_REACH_SERVICE;
+    told.handle = event->data.released.registration;
+    weivel_c_context_emit(weivel_c_contexts_context_of(contexts, event->data.released.owner, event), &told, event);
 }
 
 static void refuse_reach(weivel_c_contexts *contexts, const weivel_c_event *event) {
@@ -211,6 +221,9 @@ weivel_c_status weivel_c_contexts_hear(void *data, weivel_c_core *core, const we
         break;
     case WEIVEL_EVENT_CAPACITY_WANTED:
         weivel_c_contexts_answer_capacity(contexts, event);
+        break;
+    case WEIVEL_EVENT_HOLDINGS_RELEASED:
+        tell_holdings_released(contexts, event);
         break;
     default:
         break;
