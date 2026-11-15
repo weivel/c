@@ -58,7 +58,6 @@ static void run_task(conformance_world *world, virtual_task *task) {
         time->fired[time->fired_count++] = time->now;
     }
     task->callback(task->callback_data);
-    conformance_world_note_timer(world);
 }
 
 void conformance_world_run_until(conformance_world *world, int64_t until) {
@@ -67,7 +66,6 @@ void conformance_world_run_until(conformance_world *world, int64_t until) {
         run_task(world, task);
     }
     conformance_world_move_clock_to(world, until);
-    conformance_world_note_timer(world);
 }
 
 void conformance_world_move_clock_to(conformance_world *world, int64_t until) {
@@ -76,22 +74,11 @@ void conformance_world_move_clock_to(conformance_world *world, int64_t until) {
     }
 }
 
-static int same_move(const timer_move *left, const timer_move *right) {
-    return left->armed == right->armed && (!left->armed || left->deadline == right->deadline);
-}
-
-void conformance_world_note_timer(conformance_world *world) {
-    weivel_c_timer *timer = NULL;
-    timer_move now = {world->time.now, 0, 0};
-    if (weivel_c_host_timer(world->host, &timer) != WEIVEL_C_STATUS_OK) {
-        return;
-    }
-    now.armed = weivel_c_timer_deadline(timer, &now.deadline) == WEIVEL_C_STATUS_OK;
-    if (same_move(&now, &world->noted)) {
-        return;
-    }
-    world->noted = now;
+weivel_c_status conformance_world_hear_timer_move(void *data, uint32_t armed, int64_t deadline) {
+    conformance_world *world = data;
+    timer_move moved = {world->time.now, armed ? deadline : 0, armed != 0};
     if (world->move_count < CONFORMANCE_MOVES) {
-        world->moves[world->move_count++] = now;
+        world->moves[world->move_count++] = moved;
     }
+    return WEIVEL_C_STATUS_OK;
 }

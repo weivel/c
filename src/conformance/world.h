@@ -74,7 +74,6 @@ typedef struct conformance_world {
     virtual_time time;
     timer_move moves[CONFORMANCE_MOVES];
     uint32_t move_count;
-    timer_move noted;
     uint32_t sink_failures;
     uint32_t listener_failures;
     uint32_t log_lines;
@@ -115,10 +114,10 @@ world_plugin *conformance_world_plugin(conformance_world *world, const char *nam
 /** The scheduler and the clock of the world, as the host is given them. */
 weivel_c_scheduler conformance_virtual_scheduler(conformance_world *world);
 
-/** Notes a move when what the host's timer says it is armed for changed since the last note. */
-void conformance_world_note_timer(conformance_world *world);
+/** The host's timer observer: records each move the host's timer tells, at the clock's time. */
+weivel_c_status conformance_world_hear_timer_move(void *data, uint32_t armed, int64_t deadline);
 
-/** Runs every task due by `time`, each at its own due time, then stands at `time`, noting the timer after each. */
+/** Runs every task due by `time`, each at its own due time, then stands at `time`. */
 void conformance_world_run_until(conformance_world *world, int64_t time);
 
 /** Moves the clock to `time` and runs no task, as a scheduler that has not yet taken its turn. */

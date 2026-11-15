@@ -83,6 +83,21 @@ typedef struct weivel_c_scheduler {
     int64_t maximum_wait;
 } weivel_c_scheduler;
 
+/**
+ * Hears each move the timer makes: `moved` and the `data` it is called with. `armed` 1 with the deadline it armed for,
+ * on the scheduler's clock, or 0 when it disarmed. A move is told once, on the thread that follows the deadline, after
+ * the timer has armed or disarmed and before any event of the call that drained the announcement is dispatched, outside
+ * every lock of the layer's, so it may call into the core. One thread tells it at a time, in the order the moves were
+ * made. Arming again for a deadline already armed, as a scheduler that cannot wait the whole way needs, is no move, and
+ * neither is the disarming a destroy makes. A status other than WEIVEL_C_STATUS_OK goes to the error sink.
+ *
+ * @implNote No `size`: it is embedded by value, so the struct embedding it is what grows.
+ */
+typedef struct weivel_c_timer_observer {
+    weivel_c_status (*moved)(void *data, uint32_t armed, int64_t deadline);
+    void *data;
+} weivel_c_timer_observer;
+
 /** One core's timer. Opaque; made by weivel_c_timer_create, ended by weivel_c_timer_destroy and freed by
  * weivel_c_timer_free. */
 typedef struct weivel_c_timer weivel_c_timer;
@@ -101,6 +116,8 @@ typedef struct weivel_c_timer weivel_c_timer;
  *
  * @param core the core to follow. Required. It must not be freed before the timer is destroyed.
  * @param scheduler the caller's clock and scheduler, copied; NULL for a timer that arms nothing and reads no clock.
+ * @param observer what hears each move, copied; NULL, or a NULL `moved`, for none. A timer without a scheduler never
+ * moves, so its observer hears nothing.
  * @param timer receives the timer, owned by the caller until weivel_c_timer_free. Required; NULL on every answer but
  * OK.
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE for a NULL `core` or `timer`, a scheduler smaller than its first
@@ -109,7 +126,7 @@ typedef struct weivel_c_timer weivel_c_timer;
  * Threading: any thread.
  */
 WEIVEL_C_API weivel_c_status weivel_c_timer_create(weivel_c_core *core, const weivel_c_scheduler *scheduler,
-                                                   weivel_c_timer **timer);
+                                                   const weivel_c_timer_observer *observer, weivel_c_timer **timer);
 
 /**
  * Disarms the timer for good: it cancels the one task it holds and takes its hooks off the core, when the core's

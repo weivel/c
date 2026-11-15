@@ -90,7 +90,6 @@ static void an_activate_that_finishes_is_verified_and_one_that_fails_is_quaranti
     test_plugin bad;
     test_plugin *both[2];
     weivel_ledger_row row = WEIVEL_INIT(weivel_ledger_row);
-    weivel_c_core *core = NULL;
     uint32_t kind = 0;
     begin_host_world(&in);
     name_acting_plugin(&good, &in, "good", activate_and_answer_done, NULL);
@@ -108,8 +107,7 @@ static void an_activate_that_finishes_is_verified_and_one_that_fails_is_quaranti
     CHECK(ledger_status_of(&in, &bad, &row) == WEIVEL_PLUGIN_STATUS_QUARANTINED);
     CHECK(row.refusal.detail != NULL && strstr(row.refusal.detail, "the disk is full") != NULL);
     CHECK(row.refusal.fix != NULL && row.refusal.fix[0] != '\0');
-    CHECK(weivel_c_host_core(in.host, &core) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_ledger_row_release(core, &row) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_host_ledger_row_release(in.host, &row) == WEIVEL_C_STATUS_OK);
     CHECK(sink_count(&in) == 0);
     end_host_world(&in);
 }
@@ -263,13 +261,11 @@ static void open_screens(screens *with) {
 
 static void check_the_quarantine_reason(screens *with) {
     weivel_ledger_row row = WEIVEL_INIT(weivel_ledger_row);
-    weivel_c_core *core = NULL;
     CHECK(ledger_status_of(&with->in, &with->flaky, &row) == WEIVEL_PLUGIN_STATUS_QUARANTINED);
     CHECK(row.refusal.code == WEIVEL_REFUSAL_ACTIVATION_MISMATCH);
     check_text(row.subject, "flaky", "the subject of a refused verify, as the ledger shows it");
     CHECK(row.has_fix == 1);
-    CHECK(weivel_c_host_core(with->in.host, &core) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_ledger_row_release(core, &row) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_host_ledger_row_release(with->in.host, &row) == WEIVEL_C_STATUS_OK);
     CHECK(ledger_status_of(&with->in, &with->agenda, NULL) == WEIVEL_PLUGIN_STATUS_ACTIVE);
 }
 
@@ -325,15 +321,13 @@ static weivel_c_status note_the_state_at_the_refusal(void *data, weivel_c_core *
 /** Opens the screens with a listener of the caller's on the core, and readies flaky's verify to be refused. */
 static void ready_a_refused_verify(screens *with, refusal_watch *watch) {
     weivel_c_listener listener = {note_the_state_at_the_refusal, watch};
-    weivel_c_core *core = NULL;
     uint64_t registration = 0;
     memset(with, 0, sizeof *with);
     memset(watch, 0, sizeof *watch);
     watch->with = with;
     begin_host_world(&with->in);
     open_screens(with);
-    CHECK(weivel_c_host_core(with->in.host, &core) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_core_add_listener(core, &listener, &registration) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_core_add_listener(wrapper_of(&with->in), &listener, &registration) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_context_provide_capability(with->flaky.context, "screens", &flaky_screen, NULL, NULL) ==
           WEIVEL_C_STATUS_OK);
 }
@@ -583,33 +577,106 @@ static weivel_c_status ignore_the_settlement(void *data, const weivel_c_settleme
     return WEIVEL_C_STATUS_OK;
 }
 
-static void want_one_within(host_world *in, int64_t timeout) {
+static void want_within(host_world *in, const char *id, int64_t timeout, weivel_c_status expected) {
     weivel_c_context *context = NULL;
     weivel_c_want_options options = WEIVEL_INIT(weivel_c_want_options);
     weivel_c_want_callback callback = {ignore_the_settlement, NULL};
     options.timed = WEIVEL_CHOICE_YES;
     options.timeout_millis = timeout;
     CHECK(weivel_c_host_context(in->host, &context) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_context_want_service(context, "one", &options, &callback, NULL, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_context_want_service(context, id, &options, &callback, NULL, NULL) == expected);
 }
 
-static void the_hosts_timer_answers_the_deadline_it_is_armed_for(void) {
+/** Reads the ledger through the host from inside the timer's observer, which a lock of the layer's would deadlock. */
+static void read_the_ledger_meanwhile(void *more) {
+    host_world *in = more;
+    weivel_ledger_snapshot snapshot = WEIVEL_INIT(weivel_ledger_snapshot);
+    CHECK(weivel_c_host_ledger(in->host, &snapshot, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_host_ledger_release(in->host, &snapshot) == WEIVEL_C_STATUS_OK);
+}
+
+static void the_hosts_caller_sees_each_move_of_its_timer_outside_every_lock(void) {
     host_world in;
-    weivel_c_timer *timer = NULL;
-    int64_t deadline = 0;
+    weivel_handle registration = 0;
     uint32_t finished = 0;
     begin_host_world(&in);
+    in.move_react = read_the_ledger_meanwhile;
+    in.move_more = &in;
     in.now = 100;
-    CHECK(weivel_c_host_timer(NULL, &timer) == WEIVEL_C_STATUS_MISUSE);
-    CHECK(weivel_c_host_timer(in.host, NULL) == WEIVEL_C_STATUS_MISUSE);
-    CHECK(weivel_c_host_timer(in.host, &timer) == WEIVEL_C_STATUS_OK && timer != NULL);
-    CHECK(weivel_c_timer_deadline(timer, &deadline) == WEIVEL_C_STATUS_NONE);
-    want_one_within(&in, 1000);
-    CHECK(weivel_c_timer_deadline(timer, &deadline) == WEIVEL_C_STATUS_OK && deadline == 1100);
+    want_within(&in, "one", 1000, WEIVEL_C_STATUS_OK);
+    CHECK(in.moves.count == 1 && timer_moved(&in, 0, 100, 1100));
+    in.now = 400;
+    CHECK(weivel_c_host_register_service(in.host, "one", &clock_object, NULL, &registration, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    CHECK(in.moves.count == 2 && timer_moved(&in, 1, 400, -1));
+    in.move_answer = WEIVEL_C_STATUS_FAILED;
+    want_within(&in, "two", 50, WEIVEL_C_STATUS_OK);
+    CHECK(in.moves.count == 3 && timer_moved(&in, 2, 400, 450));
+    CHECK(sink_count(&in) == 1 && in.sink.items[0].failure.kind == WEIVEL_C_FAILURE_TIMER_OBSERVER);
     CHECK(weivel_c_host_destroy(in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
-    CHECK(weivel_c_host_timer(in.host, &timer) == WEIVEL_C_STATUS_DESTROYED);
-    CHECK(sink_count(&in) == 0);
+    CHECK(in.moves.count == 3 && sink_count(&in) == 1);
     CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_OK);
+}
+
+static void a_host_given_no_scheduler_arms_none_and_a_want_that_needs_the_time_is_the_callers_mistake(void) {
+    host_world in;
+    begin_host_world_without_a_scheduler(&in);
+    want_within(&in, "one", 1000, WEIVEL_C_STATUS_MISUSE);
+    CHECK(in.moves.count == 0 && sink_count(&in) == 0);
+    end_host_world(&in);
+}
+
+static void the_host_answers_its_ledger_and_each_row_of_it(void) {
+    host_world in;
+    test_plugin agenda;
+    test_plugin mail;
+    weivel_ledger_snapshot snapshot = WEIVEL_INIT(weivel_ledger_snapshot);
+    weivel_ledger_row row = WEIVEL_INIT(weivel_ledger_row);
+    uint32_t finished = 0;
+    begin_host_world(&in);
+    name_acting_plugin(&agenda, &in, "agenda", activate_and_answer_done, NULL);
+    name_acting_plugin(&mail, &in, "mail", activate_and_answer_done, NULL);
+    register_test_plugin(&agenda);
+    register_test_plugin(&mail);
+    CHECK(weivel_c_host_ledger(in.host, &snapshot, NULL) == WEIVEL_C_STATUS_OK && snapshot.row_count == 2);
+    check_text(snapshot.rows[0].import_name, "agenda", "the ledger's first row");
+    check_text(snapshot.rows[1].import_name, "mail", "the ledger's second row");
+    CHECK(weivel_c_host_ledger_release(in.host, &snapshot) == WEIVEL_C_STATUS_OK && snapshot.rows == NULL);
+    CHECK(weivel_c_host_ledger_row(in.host, mail.handle, &row, NULL) == WEIVEL_C_STATUS_OK);
+    CHECK(row.plugin == mail.handle && row.status == WEIVEL_PLUGIN_STATUS_REGISTERED);
+    CHECK(weivel_c_host_ledger_row_release(in.host, &row) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_host_ledger(NULL, &snapshot, NULL) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_host_ledger(in.host, NULL, NULL) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_host_ledger_row(in.host, mail.handle, NULL, NULL) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_host_ledger_release(NULL, &snapshot) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_host_destroy(in.host, &finished) == WEIVEL_C_STATUS_OK && finished == 1);
+    CHECK(weivel_c_host_ledger(in.host, &snapshot, NULL) == WEIVEL_C_STATUS_DESTROYED);
+    CHECK(weivel_c_host_ledger_row(in.host, mail.handle, &row, NULL) == WEIVEL_C_STATUS_DESTROYED);
+    CHECK(sink_count(&in) == 0 && in.log.count == 0);
+    CHECK(weivel_c_host_free(in.host) == WEIVEL_C_STATUS_OK);
+}
+
+/**
+ * Where no dispatch runs, what an activate's own calls queue is heard once every activate of the plan was called,
+ * and an activate that settles before it returns is verified, its refusal quarantining it, before the next starts.
+ */
+static void a_plan_started_where_no_dispatch_runs_is_one_step_of_a_dispatch(void) {
+    host_world in;
+    refused_then_looking pair;
+    begin_host_world(&in);
+    register_refused_then_looking(&pair, &in);
+    trace_a_watch_as_the_host(&in, "first:events");
+    CHECK(activate_refused_then_looking(&pair, &in));
+    CHECK(pair.registering.answered == WEIVEL_C_STATUS_OK);
+    CHECK(pair.look.state == WEIVEL_C_PLUGIN_QUARANTINED);
+    CHECK(pair.look.ledger_status == WEIVEL_PLUGIN_STATUS_QUARANTINED);
+    CHECK(is_before(&in.heard, "activate first", "activate second"));
+    CHECK(is_before(&in.heard, "activate second", "heard first:events registered"));
+    CHECK(is_before(&in.heard, "activate second", "outcome first quarantined"));
+    CHECK(is_quarantined_with_its_verifications_refusal(&in, &pair));
+    CHECK(is_active_with_no_refusal(&in, &pair));
+    CHECK(sink_count(&in) == 0);
+    end_host_world(&in);
 }
 
 static void every_call_answers_its_mistakes_as_values(void) {
@@ -715,7 +782,6 @@ static void a_broken_shape_is_answered_as_the_core_answers_the_callers_own_manif
     host_world in;
     test_plugin plugin;
     shaped_manifest given;
-    weivel_c_core *core = NULL;
     weivel_c_refusal by_the_core = WEIVEL_INIT(weivel_c_refusal);
     weivel_c_refusal by_the_host = WEIVEL_INIT(weivel_c_refusal);
     weivel_handle direct = 0;
@@ -725,8 +791,7 @@ static void a_broken_shape_is_answered_as_the_core_answers_the_callers_own_manif
     name_acting_plugin(&plugin, &in, "shaped", activate_and_answer_done, NULL);
     lay_out_every_shape(&given);
     break_one_shape(&given, shape);
-    CHECK(weivel_c_host_core(in.host, &core) == WEIVEL_C_STATUS_OK);
-    answered_by_the_core = weivel_c_core_register_manifest(core, &given.manifest, &direct, &by_the_core);
+    answered_by_the_core = weivel_c_core_register_manifest(wrapper_of(&in), &given.manifest, &direct, &by_the_core);
     answered_by_the_host = weivel_c_host_register(in.host, &given.manifest, &plugin.entry, &plugin.handle, &by_the_host);
     if (answered_by_the_host != answered_by_the_core || !same_refusal(&by_the_core, &by_the_host)) {
         fprintf(stderr, "shape %u: the core answered %u (%u, %s), the host %u (%u, %s)\n", (unsigned)shape,
@@ -767,7 +832,10 @@ int main(int argument_count, char **arguments) {
     verifying_a_plugin_never_opened_answers_the_cores_refusal_and_quarantines_nothing();
     a_manifest_is_copied_so_its_caller_may_free_it_once_it_is_registered();
     every_broken_shape_is_answered_as_the_core_answers_it();
-    the_hosts_timer_answers_the_deadline_it_is_armed_for();
+    the_hosts_caller_sees_each_move_of_its_timer_outside_every_lock();
+    a_host_given_no_scheduler_arms_none_and_a_want_that_needs_the_time_is_the_callers_mistake();
+    the_host_answers_its_ledger_and_each_row_of_it();
+    a_plan_started_where_no_dispatch_runs_is_one_step_of_a_dispatch();
 #if !defined(WEIVEL_C_USING_SHARED)
     an_activation_short_of_memory_for_its_outcomes_starts_no_plugin();
     a_release_ends_its_plugins_entries_before_it_forgets_it_and_leaves_none();

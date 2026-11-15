@@ -62,6 +62,11 @@ typedef struct weivel_c_host_options {
     weivel_c_error_sink error_sink;
     /** Where log goes; a NULL `write` drops every line. */
     weivel_c_log log;
+    /**
+     * What hears each move of the host's timer, the deadline it arms or that it disarms (see weivel_c_timer_observer);
+     * a NULL `moved` for none. A host given no scheduler arms none, so its observer hears nothing.
+     */
+    weivel_c_timer_observer timer_observer;
 } weivel_c_host_options;
 
 /**
@@ -172,20 +177,40 @@ WEIVEL_C_API weivel_c_status weivel_c_host_unregister_service(weivel_c_host *hos
 WEIVEL_C_API weivel_c_status weivel_c_host_context(weivel_c_host *host, weivel_c_context **context);
 
 /**
- * Answers the host's core behind the wrapper, so its caller can read the ledger. The host's: the caller destroys and
- * frees nothing of it.
+ * Answers the core's ledger, every plugin's row as the core keeps it: where a plugin stands and why it is quarantined,
+ * the core's refusal of its verification among the reasons.
  *
- * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE; WEIVEL_C_STATUS_DESTROYED.
+ * @param snapshot the caller's struct with `size` set and nothing held, as WEIVEL_INIT leaves it; on OK it holds the
+ * ledger and is handed to weivel_c_host_ledger_release.
+ * @return as the core answers weivel_ledger; WEIVEL_C_STATUS_MISUSE for a NULL argument; WEIVEL_C_STATUS_DESTROYED,
+ * quietly.
  */
-WEIVEL_C_API weivel_c_status weivel_c_host_core(weivel_c_host *host, weivel_c_core **core);
+WEIVEL_C_API weivel_c_status weivel_c_host_ledger(weivel_c_host *host, weivel_ledger_snapshot *snapshot,
+                                                  weivel_c_refusal *refusal);
 
 /**
- * Answers the host's timer, so its caller can read what the layer says it armed (see weivel_c_timer_deadline). The
- * host's: the caller destroys and frees nothing of it.
+ * Frees a ledger weivel_c_host_ledger filled. It needs no core, so it may follow the host's destroy.
  *
- * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE; WEIVEL_C_STATUS_DESTROYED.
+ * @return WEIVEL_C_STATUS_OK or WEIVEL_C_STATUS_MISUSE.
  */
-WEIVEL_C_API weivel_c_status weivel_c_host_timer(weivel_c_host *host, weivel_c_timer **timer);
+WEIVEL_C_API weivel_c_status weivel_c_host_ledger_release(weivel_c_host *host, weivel_ledger_snapshot *snapshot);
+
+/**
+ * Answers one plugin's row of the core's ledger, as weivel_c_host_ledger answers every row.
+ *
+ * @param row the caller's struct with `size` set and nothing held; on OK handed to weivel_c_host_ledger_row_release.
+ * @return as the core answers weivel_ledger_entry; WEIVEL_C_STATUS_MISUSE for a NULL argument;
+ * WEIVEL_C_STATUS_DESTROYED, quietly.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_host_ledger_row(weivel_c_host *host, weivel_handle plugin, weivel_ledger_row *row,
+                                                      weivel_c_refusal *refusal);
+
+/**
+ * Frees a row weivel_c_host_ledger_row filled. It needs no core, so it may follow the host's destroy.
+ *
+ * @return WEIVEL_C_STATUS_OK or WEIVEL_C_STATUS_MISUSE.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_host_ledger_row_release(weivel_c_host *host, weivel_ledger_row *row);
 
 /** How one started plugin's activation came out. */
 typedef enum weivel_c_outcome_kind {

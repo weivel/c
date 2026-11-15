@@ -35,6 +35,14 @@ static weivel_c_status adopt_the_table(weivel_c_host *made, const weivel_c_host_
     return WEIVEL_C_STATUS_OK;
 }
 
+/** The caller's observer of the timer, NULL when its options end before it or give none. */
+static const weivel_c_timer_observer *timer_observer_of(const weivel_c_host_options *options) {
+    if (options->size < END_OF(weivel_c_host_options, timer_observer) || options->timer_observer.moved == NULL) {
+        return NULL;
+    }
+    return &options->timer_observer;
+}
+
 static weivel_c_status make_the_core(weivel_c_host *made, const weivel_c_host_options *options) {
     weivel_c_core_options core_options = WEIVEL_INIT(weivel_c_core_options);
     weivel_c_status status;
@@ -46,7 +54,7 @@ static weivel_c_status make_the_core(weivel_c_host *made, const weivel_c_host_op
         status = weivel_c_handles_create(&made->handles);
     }
     if (status == WEIVEL_C_STATUS_OK) {
-        status = weivel_c_timer_create(made->core, options->scheduler, &made->timer);
+        status = weivel_c_timer_create(made->core, options->scheduler, timer_observer_of(options), &made->timer);
     }
     return status;
 }

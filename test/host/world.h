@@ -14,6 +14,7 @@
 
 #include <weivel/c/host.h>
 
+#include "../../src/host/host.h"
 #include "core/fixture.h"
 #include "threads.h"
 
@@ -80,6 +81,9 @@ typedef struct outcomes {
     uint32_t kinds[HOST_WORLD_LINES];
     uint32_t codes[HOST_WORLD_LINES];
     char details[HOST_WORLD_LINES][HOST_WORLD_TEXT];
+    char fixes[HOST_WORLD_LINES][HOST_WORLD_TEXT];
+    char subjects[HOST_WORLD_LINES][HOST_WORLD_TEXT];
+    uint32_t has_fixes[HOST_WORLD_LINES];
     uint32_t count;
     trace *also;
 } outcomes;
@@ -95,6 +99,11 @@ static inline weivel_c_status hear_outcome(void *data, const weivel_c_outcome *o
         self->codes[self->count] = outcome->refusal.code;
         snprintf(self->details[self->count], HOST_WORLD_TEXT, "%s",
                  outcome->refusal.detail == NULL ? "" : outcome->refusal.detail);
+        snprintf(self->fixes[self->count], HOST_WORLD_TEXT, "%s",
+                 outcome->refusal.fix == NULL ? "" : outcome->refusal.fix);
+        snprintf(self->subjects[self->count], HOST_WORLD_TEXT, "%s",
+                 outcome->refusal.subject == NULL ? "" : outcome->refusal.subject);
+        self->has_fixes[self->count] = outcome->refusal.has_fix;
     }
     self->count++;
     unlock_test_mutex(&self->mutex);
@@ -141,6 +150,14 @@ static inline weivel_c_status count_log(void *data, const weivel_c_log_record *r
 }
 
 
+/** Each move the host's timer told its observer, in order: the clock's time, and the deadline armed or -1. */
+typedef struct timer_moves {
+    test_mutex mutex;
+    int64_t at[HOST_WORLD_LINES];
+    int64_t deadline[HOST_WORLD_LINES];
+    uint32_t count;
+} timer_moves;
+
 static inline int host_world_cancel(void *data, void *task) {
     (void)data;
     (void)task;
@@ -168,7 +185,46 @@ typedef struct host_world {
     /** Guarded by `schedule_mutex`: the callback of the task scheduled last and its data, run by no one but a test. */
     weivel_c_task_callback scheduled_callback;
     void *scheduled_data;
+    timer_moves moves;
+    /** What the timer's observer does about each move, outside its own mutex, and what it answers. */
+    void (*move_react)(void *more);
+    void *move_more;
+    weivel_c_status move_answer;
 } host_world;
+
+/** The host's timer observer: records each move at the clock's time. */
+static inline weivel_c_status hear_a_timer_move(void *data, uint32_t armed, int64_t deadline) {
+    host_world *self = data;
+    lock_test_mutex(&self->moves.mutex);
+    if (self->moves.count < HOST_WORLD_LINES) {
+        self->moves.at[self->moves.count] = self->now;
+        self->moves.deadline[self->moves.count] = armed ? deadline : -1;
+    }
+    self->moves.count++;
+    unlock_test_mutex(&self->moves.mutex);
+    if (self->move_react != NULL) {
+        self->move_react(self->move_more);
+    }
+    return self->move_answer;
+}
+
+/** 1 when the move at `index` was made at `at` for `deadline`, -1 for a disarm. */
+static inline int timer_moved(host_world *self, uint32_t index, int64_t at, int64_t deadline) {
+    int moved;
+    lock_test_mutex(&self->moves.mutex);
+    moved = index < self->moves.count && index < HOST_WORLD_LINES && self->moves.at[index] == at &&
+            self->moves.deadline[index] == deadline;
+    unlock_test_mutex(&self->moves.mutex);
+    return moved;
+}
+
+/**
+ * The host's wrapper, which its public surface hands nobody: the seam a test runs a step in a dispatch through, or
+ * listens on the core beside the host.
+ */
+static inline weivel_c_core *wrapper_of(host_world *self) {
+    return self->host->core;
+}
 
 static inline void *host_world_schedule(void *data, int64_t at, weivel_c_task_callback callback, void *callback_data) {
     host_world *self = data;
@@ -219,23 +275,40 @@ static inline weivel_c_host_options host_options_of(host_world *self, const weiv
     options.error_sink.data = self;
     options.log.write = count_log;
     options.log.data = &self->log;
+    options.timer_observer.moved = hear_a_timer_move;
+    options.timer_observer.data = self;
     return options;
+}
+
+static inline void start_host_world(host_world *self) {
+    memset(self, 0, sizeof *self);
+    start_test_mutex(&self->sink_mutex);
+    start_test_mutex(&self->schedule_mutex);
+    start_test_mutex(&self->log.mutex);
+    start_test_mutex(&self->told.mutex);
+    start_test_mutex(&self->moves.mutex);
+    start_trace(&self->heard);
+    self->told.also = &self->heard;
+    forget_crossings();
 }
 
 static inline void begin_host_world_with(host_world *self, const weivel_c_core_table *table,
                                          const weivel_core_options *core_options) {
     weivel_c_scheduler scheduler;
     weivel_c_host_options options;
-    memset(self, 0, sizeof *self);
-    start_test_mutex(&self->sink_mutex);
-    start_test_mutex(&self->schedule_mutex);
-    start_test_mutex(&self->log.mutex);
-    start_test_mutex(&self->told.mutex);
-    start_trace(&self->heard);
-    self->told.also = &self->heard;
-    forget_crossings();
+    start_host_world(self);
     options = host_options_of(self, table, &scheduler);
     options.core_options = core_options;
+    CHECK(weivel_c_host_create(&options, &self->host, NULL) == WEIVEL_C_STATUS_OK);
+}
+
+/** A host its caller gives no scheduler: it arms no timer, and its observer hears nothing. */
+static inline void begin_host_world_without_a_scheduler(host_world *self) {
+    weivel_c_scheduler scheduler;
+    weivel_c_host_options options;
+    start_host_world(self);
+    options = host_options_of(self, &counting_table, &scheduler);
+    options.scheduler = NULL;
     CHECK(weivel_c_host_create(&options, &self->host, NULL) == WEIVEL_C_STATUS_OK);
 }
 
@@ -358,16 +431,14 @@ static inline uint32_t state_of(host_world *in, const test_plugin *plugin) {
 /** The ledger row's status of a plugin, or 0 when the core holds no row for it. */
 static inline uint32_t ledger_status_of(host_world *in, const test_plugin *plugin, weivel_ledger_row *kept) {
     weivel_ledger_row row = WEIVEL_INIT(weivel_ledger_row);
-    weivel_c_core *core = NULL;
     uint32_t status = 0;
-    CHECK(weivel_c_host_core(in->host, &core) == WEIVEL_C_STATUS_OK);
-    if (weivel_c_core_ledger_entry(core, plugin->handle, &row, NULL) == WEIVEL_C_STATUS_OK) {
+    if (weivel_c_host_ledger_row(in->host, plugin->handle, &row, NULL) == WEIVEL_C_STATUS_OK) {
         status = row.status;
         if (kept != NULL) {
             *kept = row;
             return status;
         }
-        CHECK(weivel_c_core_ledger_row_release(core, &row) == WEIVEL_C_STATUS_OK);
+        CHECK(weivel_c_host_ledger_row_release(in->host, &row) == WEIVEL_C_STATUS_OK);
     }
     return status;
 }

@@ -226,26 +226,40 @@ weivel_c_status weivel_c_host_context(weivel_c_host *host, weivel_c_context **co
     return WEIVEL_C_STATUS_OK;
 }
 
-weivel_c_status weivel_c_host_core(weivel_c_host *host, weivel_c_core **core) {
-    if (host == NULL || core == NULL) {
+weivel_c_status weivel_c_host_ledger(weivel_c_host *host, weivel_ledger_snapshot *snapshot,
+                                     weivel_c_refusal *refusal) {
+    if (host == NULL || snapshot == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     if (!weivel_c_host_is_running(host)) {
         return WEIVEL_C_STATUS_DESTROYED;
     }
-    *core = host->core;
-    return WEIVEL_C_STATUS_OK;
+    return weivel_c_core_ledger(host->core, snapshot, refusal);
 }
 
-weivel_c_status weivel_c_host_timer(weivel_c_host *host, weivel_c_timer **timer) {
-    if (host == NULL || timer == NULL) {
+weivel_c_status weivel_c_host_ledger_release(weivel_c_host *host, weivel_ledger_snapshot *snapshot) {
+    if (host == NULL || snapshot == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    return weivel_c_core_ledger_snapshot_release(host->core, snapshot);
+}
+
+weivel_c_status weivel_c_host_ledger_row(weivel_c_host *host, weivel_handle plugin, weivel_ledger_row *row,
+                                         weivel_c_refusal *refusal) {
+    if (host == NULL || row == NULL) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     if (!weivel_c_host_is_running(host)) {
         return WEIVEL_C_STATUS_DESTROYED;
     }
-    *timer = host->timer;
-    return WEIVEL_C_STATUS_OK;
+    return weivel_c_core_ledger_entry(host->core, plugin, row, refusal);
+}
+
+weivel_c_status weivel_c_host_ledger_row_release(weivel_c_host *host, weivel_ledger_row *row) {
+    if (host == NULL || row == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    return weivel_c_core_ledger_row_release(host->core, row);
 }
 
 int weivel_c_host_holds_service_id(const weivel_c_host *host, const char *id) {

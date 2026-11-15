@@ -335,7 +335,9 @@ typedef enum weivel_c_failure_kind {
     /** A plugin's library could not be closed. */
     WEIVEL_C_FAILURE_UNLOAD = 17,
     /** An activation's outcome listener answered a status other than WEIVEL_C_STATUS_OK. */
-    WEIVEL_C_FAILURE_OUTCOME_LISTENER = 18
+    WEIVEL_C_FAILURE_OUTCOME_LISTENER = 18,
+    /** A timer's observer answered a status other than WEIVEL_C_STATUS_OK for a move. */
+    WEIVEL_C_FAILURE_TIMER_OBSERVER = 19
 } weivel_c_failure_kind;
 
 /** One failure, as the error sink is told it. Everything in it lives for the length of the sink's call. */
