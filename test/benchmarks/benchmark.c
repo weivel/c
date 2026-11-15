@@ -9,6 +9,8 @@
  * - `control-ratio <core> <c.txt> [brief]`, `library-ratio <core> <library> <c.txt> [brief]` and
  *   `same-language <core> <c.txt> [brief]`: the ratio gates and the same-language noise gate against the C layer's
  *   budget, failing on a platform the budget gives no line.
+ * - `same-language-judge <core> <c.txt> <ratio> <noise-ratio>`: the same-language gate's verdict on the ratios given,
+ *   measured by nobody, so the bounds it judges by are tested on every platform whatever its clock resolves.
  * - `measure <core> <library> <repetitions>`: prints every measurement the bounds are set from.
  *
  * Exits 0 when the gate holds, 1 when it does not, 2 when nothing usable was measured or read. `brief` samples a
@@ -336,24 +338,46 @@ static int judge_same_language(benchmark_noise_bounds noise_bounds, const benchm
     return EXIT_HOLDS;
 }
 
-static int run_same_language(const char *budget_path, const benchmark_sampling *sampling) {
+/** Reads this platform's noise bounds; answers EXIT_HOLDS when it has them, else the gate's verdict. */
+static int noise_bounds_here(const char *budget_path, benchmark_noise_bounds *noise_bounds) {
     benchmark_budget budget;
-    benchmark_same_language result;
-    benchmark_noise_bounds noise_bounds;
     if (!read_language_budget(budget_path, &budget)) {
         return EXIT_UNUSABLE;
     }
-    noise_bounds = benchmark_noise_bounds_of(&budget, benchmark_platform());
-    if (!benchmark_noise_bounded(noise_bounds)) {
+    *noise_bounds = benchmark_noise_bounds_of(&budget, benchmark_platform());
+    if (!benchmark_noise_bounded(*noise_bounds)) {
         printf("weivel-c-benchmark same-language: the budget gives no line for quiet-noise, worst-noise or noise-margin on %s, so "
                "the gate fails rather than passing unbounded\n",
                platform_text());
         return EXIT_FAILS;
     }
+    return EXIT_HOLDS;
+}
+
+static int run_same_language(const char *budget_path, const benchmark_sampling *sampling) {
+    benchmark_same_language result;
+    benchmark_noise_bounds noise_bounds;
+    int bounded = noise_bounds_here(budget_path, &noise_bounds);
+    if (bounded != EXIT_HOLDS) {
+        return bounded;
+    }
     if (!measure_same_language(sampling, &result)) {
         fprintf(stderr, "the same-language call measured nothing usable\n");
         return EXIT_UNUSABLE;
     }
+    return judge_same_language(noise_bounds, &result);
+}
+
+static int judge_given_ratios(const char *budget_path, const char *ratio, const char *noise_ratio) {
+    benchmark_same_language result;
+    benchmark_noise_bounds noise_bounds;
+    int bounded = noise_bounds_here(budget_path, &noise_bounds);
+    if (bounded != EXIT_HOLDS) {
+        return bounded;
+    }
+    memset(&result, 0, sizeof result);
+    result.ratio = atof(ratio);
+    result.noise_ratio = atof(noise_ratio);
     return judge_same_language(noise_bounds, &result);
 }
 
@@ -377,6 +401,9 @@ static int run_mode(const char *mode, int argument_count, char **arguments) {
     }
     if (strcmp(mode, "same-language") == 0 && argument_count >= 4) {
         return run_same_language(arguments[3], sampling_of(argument_count, arguments, 4, &same_language_sampling));
+    }
+    if (strcmp(mode, "same-language-judge") == 0 && argument_count >= 6) {
+        return judge_given_ratios(arguments[3], arguments[4], arguments[5]);
     }
     if (strcmp(mode, "measure") == 0 && argument_count >= 5) {
         return run_measure(arguments[3], atoi(arguments[4]));

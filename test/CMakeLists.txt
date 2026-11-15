@@ -387,6 +387,8 @@ weivel_c_benchmark(same_language_fails_on_a_platform_the_budget_gives_no_noise_l
     same-language ${benchmark_core} ${benchmark_fixtures}/no_platform_line.txt brief)
 weivel_c_benchmark(a_budget_with_a_single_noise_margin_is_refused 2 "'noise-margin 11.68' is neither"
     control-ratio ${benchmark_core} ${benchmark_fixtures}/single_noise_margin.txt brief)
+# With a quiet noise of 1 and no noise of its own, a run's bound is 1 plus its platform's margin: half over the margin
+# holds only by this platform's margin, and a whole unit and a half over it fails by it.
 if(WIN32)
     set(benchmark_platform_margin 202)
 elseif(APPLE)
@@ -394,9 +396,15 @@ elseif(APPLE)
 else()
     set(benchmark_platform_margin 101)
 endif()
+math(EXPR benchmark_margin_plus_one "${benchmark_platform_margin} + 1")
 weivel_c_benchmark(same_language_judges_by_the_noise_margin_of_its_own_platform 0
     "same-language platform=[a-z]+ ratio=[0-9.]+ bound=[0-9.]+ noise_margin=${benchmark_platform_margin}[.]0000 "
-    same-language ${benchmark_core} ${benchmark_fixtures}/noise_margin_per_platform.txt brief)
+    same-language-judge ${benchmark_core} ${benchmark_fixtures}/noise_margin_per_platform.txt
+    ${benchmark_platform_margin}.5 1)
+weivel_c_benchmark(same_language_refuses_a_ratio_past_the_noise_margin_of_its_own_platform 1
+    "is outside its bound of ${benchmark_margin_plus_one}[.]0000"
+    same-language-judge ${benchmark_core} ${benchmark_fixtures}/noise_margin_per_platform.txt
+    ${benchmark_margin_plus_one}.5 1)
 
 set(WEIVEL_C_BENCHMARK_RELEASE_ONLY -DRELEASE_ONLY=ON)
 weivel_c_benchmark(measure_prints_every_measurement 0 "weivel-c-benchmark same-language platform=[a-z]+ repetition=10 "
