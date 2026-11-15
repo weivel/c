@@ -348,8 +348,8 @@ control call through the wrapper against the core's own budget, `benchmarks/budg
 ratio gates against `benchmarks/c.txt` of the pinned kit, each round's measured path over its reference, the
 per-round median held to the highest ratio measured on that runner times the margin; the same-language call against
 that runner's noise bounds in the same file, failing a run too noisy to judge, and the library call's definition row
-against the same bounds; and a measuring mode that prints every measurement the bounds are set from. Every bound is the kit's; the layer sets none, and the commit that adds `c.txt`
-to the kit lists the samples.
+against the same bounds; and a measuring mode that prints every measurement the bounds are set from. Every bound is
+the kit's; the layer sets none, and the commit that adds `c.txt` to the kit lists the samples.
 
 ## Building
 
