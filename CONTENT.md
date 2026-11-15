@@ -21,7 +21,7 @@ the layer runs against whichever core binary its caller loads.
 library of its own, and its tests are in `test/<module>/`. Every public name begins with `weivel_c_` and every call
 answers a `weivel_c_status`. Every public struct begins with its `size` but two kinds, each saying so in its header: a
 callback that is only a function and the data it is called with (the error sink, the log, the listeners, watchers
-and outcome listener, the want callback), and the queue place inside a step, each embedded by value or copied whole
+and outcome listener, the want callback, the timer observer), and the queue place inside a step, each embedded by value or copied whole
 so that the struct holding it is what grows.
 
 ## What is built
@@ -70,8 +70,11 @@ runs it hands the core the clock's time, and when the scheduler says it cannot w
 it waits as long as it may and arms again. While a deadline is armed the wrapper reads the clock before each call
 and advances the core first when the deadline has passed, so a registration at or after a want's deadline settles
 nothing even when the task has not run. `weivel_c_timer_destroy` cancels the task, so nothing of the layer's fires
-once its core is gone. A timer made without a scheduler arms nothing and reads no clock, and `weivel_c_timer_now`,
-where the layer takes the time for a want that needs it, then answers the caller's mistake.
+once its core is gone. A `weivel_c_timer_observer` given at creation hears each move the timer makes, the deadline it
+arms or that it disarms, outside every lock, before any event of the call that drained the announcement is
+dispatched; arming again for the deadline already armed is no move. A timer made without a scheduler arms nothing and
+reads no clock, and `weivel_c_timer_now`, where the layer takes the time for a want that needs it, then answers the
+caller's mistake.
 
 `weivel_c_contexts_create` makes what the contexts of one host share: the core, the handles table, the timer and
 the host's log, behind one listener that routes each event of the core to the plugin it names. The host builds a
@@ -127,22 +130,35 @@ contexts. It never links or loads the standard: `weivel_c_host_register` takes a
 whole, so its caller may free its own at once, and an entry. A manifest, or a list in it, below its first shape or
 declaring two strides is handed to the core as the caller built it, so the host answers it exactly as the core does.
 
-- `weivel_c_host_core` and `weivel_c_host_timer` answer the host's core, so its caller can read the ledger, and its
-  timer, so its caller can read what the layer says it armed.
+- `weivel_c_host_ledger` and `weivel_c_host_ledger_row` answer the core's ledger, every plugin's row as the core
+  keeps it, and the `timer_observer` of the host's options hears each move of its timer. The host hands its caller
+  nothing of the wrapper's dispatch, clock or deadline hooks: its core and its timer are its own, so nothing but the
+  layer drains the core or moves the timer.
+- A host given no scheduler arms none, rather than a timer of the layer's: the layer owns no thread and no clock. A
+  want that needs the time, one with a timeout or with constraints, is then the caller's mistake, answered
+  `WEIVEL_C_STATUS_MISUSE` with nothing asked of the core, and the observer hears nothing.
 - `weivel_c_host_register_service` registers a service of the host's own under `WEIVEL_HOST`, offered to every plan
   as provided by the host and answered to a plugin as the very pointer given.
 - `weivel_c_host_activate` asks the core for the plan with the edge source its caller chooses, answers the plan at
-  once, and starts each plugin of the plan's order in that order inside a dispatch: it opens the plugin with its
-  context's token as payload and calls its activate, never waiting for one before starting the next. Each started
-  plugin's outcome reaches the caller's listener once, from the dispatch: `active`, `quarantined` (its activate
-  failed, with a reason and a fix, or the core refused its verification, quarantined before any event of the
-  verification is dispatched and before the next plugin is started), `refused` (the core refused the open),
+  once, and starts each plugin of the plan's order in that order as one step of a dispatch: it opens the plugin with
+  its context's token as payload and calls its activate, never waiting for one before starting the next. Where no
+  dispatch runs, the activating thread starts the plan as the dispatcher, so what an activate's own calls queue is
+  heard once every activate of the plan has been called; where another thread dispatches, the plan is started as a
+  call made while that dispatch runs, and those events join the end of its queue. Either way an activate that
+  settles before it returns is verified, and quarantined if the core refuses, before the next plugin is started. An
+  activate may therefore run as the dispatcher, so it must not block on an event another thread causes: one that
+  must wait for such an event answers `WEIVEL_C_ENTRY_PENDING` and finishes later. Each started plugin's outcome
+  reaches the caller's listener once, from the dispatch: `active`, `quarantined` (its activate failed, the reason and
+  a fix in its ledger row, or the core refused its verification, quarantined before any event of the verification is
+  dispatched and before the next plugin is started), `refused` (the core refused the open),
   `released` (released while its activate was in flight, told as that release begins, or kept from its activate
   because the host's destroy had begun) or `failed` (an open that failed for no refusal, told to the sink, the plugin
   released and forgotten at once when the core held it open). Every completion is made before the first open, so an
   activation short of memory starts nothing, and the plugins are started on the calling thread exactly once whatever
-  other thread dispatches meanwhile. A verification the caller asks for, or one an activate finishing later sets off,
-  is the same one step with its quarantine where no dispatch runs.
+  other thread dispatches meanwhile. An outcome carries the refusal that decided it: a `refused` one the core's
+  refusal of the open, a `quarantined` one the core's refusal of the verification when that refusal quarantined it,
+  and every other none, a quarantine for a reason of the host's among them. A verification the caller asks for, or
+  one an activate finishing later sets off, is the same one step with its quarantine where no dispatch runs.
 - `weivel_c_host_release` calls the deactivate while the plugin is whole, releases it in the core, lets that
   release's events reach the plugin, then ends its entries, forgets it and detaches its context, those last three as
   one step queued in the release's own hold of the layer lock behind its events, the detach made in the forget's own
@@ -260,7 +276,7 @@ pass. `weivel_c_conformance_vector_ids` lists every vector under a directory at 
 
 - The driver owns the clock and the scheduler the host is given: a task runs only when the driver moves time over its
   due time, `fired` records each run, and a vector with `schedulerRunsBeforeRegistering` false moves the clock without
-  running a task. `timer` is what the host's timer says it is armed for, noted after every call and every task.
+  running a task. `timer` is every move the host's timer observer was told, at the clock's time of the move.
 - A `consume` vector's plugins are opened through the host's activation with an activate that stays pending, so none
   is verified before a `verify` step asks. A listener that "throws" answers a status other than OK, which goes to the
   error sink. A refusal of the run is a refusal a context call answered; a `verify` step's refusal is the check the
