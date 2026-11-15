@@ -250,6 +250,55 @@ weivel_c_status weivel_c_core_register_service(weivel_c_core *core, weivel_handl
     return weivel_c_core_register_service_then(core, owner, id, registration, refusal, NULL);
 }
 
+static weivel_status call_register_service_awaiting_releases(const weivel_c_core_table *table, weivel_core *core,
+                                                             void *arguments, uint32_t *pending_events) {
+    register_service_arguments *given = arguments;
+    return table->register_service_awaiting_releases(core, given->owner, given->id, given->registration,
+                                                     pending_events);
+}
+
+weivel_c_status weivel_c_core_register_service_awaiting_releases_then(weivel_c_core *core, weivel_handle owner,
+                                                                      const char *id, weivel_handle *registration,
+                                                                      weivel_c_refusal *refusal,
+                                                                      const weivel_c_answered_step *then) {
+    register_service_arguments arguments = {owner, id, registration};
+    if (!is_an_id(id) || registration == NULL) {
+        return WEIVEL_C_STATUS_MISUSE;
+    }
+    return weivel_c_core_invoke_then(core, call_register_service_awaiting_releases, &arguments,
+                                     WEIVEL_C_CALL_BUILT_BY_THE_LAYER, refusal, then);
+}
+
+weivel_c_status weivel_c_core_register_service_awaiting_releases(weivel_c_core *core, weivel_handle owner,
+                                                                 const char *id, weivel_handle *registration,
+                                                                 weivel_c_refusal *refusal) {
+    return weivel_c_core_register_service_awaiting_releases_then(core, owner, id, registration, refusal, NULL);
+}
+
+typedef struct release_holding_arguments {
+    weivel_handle holder;
+    weivel_handle registration;
+} release_holding_arguments;
+
+static weivel_status call_release_holding(const weivel_c_core_table *table, weivel_core *core, void *arguments,
+                                          uint32_t *pending_events) {
+    release_holding_arguments *given = arguments;
+    return table->release_holding(core, given->holder, given->registration, pending_events);
+}
+
+weivel_c_status weivel_c_core_release_holding_then(weivel_c_core *core, weivel_handle holder,
+                                                   weivel_handle registration, weivel_c_refusal *refusal,
+                                                   const weivel_c_answered_step *then) {
+    release_holding_arguments arguments = {holder, registration};
+    return weivel_c_core_invoke_then(core, call_release_holding, &arguments, WEIVEL_C_CALL_BUILT_BY_THE_LAYER,
+                                     refusal, then);
+}
+
+weivel_c_status weivel_c_core_release_holding(weivel_c_core *core, weivel_handle holder, weivel_handle registration,
+                                              weivel_c_refusal *refusal) {
+    return weivel_c_core_release_holding_then(core, holder, registration, refusal, NULL);
+}
+
 typedef struct unregister_arguments {
     weivel_handle handle;
 } unregister_arguments;

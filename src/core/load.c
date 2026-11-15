@@ -18,7 +18,7 @@ static const table_slot SLOTS[] = {WEIVEL_C_CORE_FUNCTIONS(SLOT)};
 
 #define SLOT_COUNT (sizeof SLOTS / sizeof SLOTS[0])
 #define END_OF(type, field) (offsetof(type, field) + sizeof(((type *)0)->field))
-#define FIRST_TABLE_SIZE END_OF(weivel_c_core_table, ledger_row_release)
+#define FIRST_TABLE_SIZE END_OF(weivel_c_core_table, release_holding)
 #define FIRST_FAILURE_SIZE END_OF(weivel_c_core_load_failure, missing_symbol)
 
 /**

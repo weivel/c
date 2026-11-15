@@ -157,6 +157,10 @@ typedef struct weivel_c_core_table {
     weivel_status (*ledger_entry)(weivel_core *core, weivel_handle plugin, weivel_ledger_row *row,
                                   uint32_t *pending_events);
     weivel_status (*ledger_row_release)(weivel_ledger_row *row);
+    weivel_status (*register_service_awaiting_releases)(weivel_core *core, weivel_handle owner, const char *id,
+                                                        weivel_handle *registration, uint32_t *pending_events);
+    weivel_status (*release_holding)(weivel_core *core, weivel_handle holder, weivel_handle registration,
+                                     uint32_t *pending_events);
 } weivel_c_core_table;
 
 /** Why weivel_c_core_load did not load, beyond its status. */
@@ -282,6 +286,7 @@ typedef struct weivel_c_event {
         weivel_capacity_event capacity;
         weivel_capability_event capability;
         weivel_deadline_event deadline;
+        weivel_holdings_released_event released;
         uint64_t reserved[WEIVEL_EVENT_PAYLOAD_WORDS];
     } data;
     /**
@@ -616,6 +621,12 @@ WEIVEL_C_API weivel_c_status weivel_c_core_forget_plugin(weivel_c_core *core, we
                                                          weivel_c_refusal *refusal);
 WEIVEL_C_API weivel_c_status weivel_c_core_register_service(weivel_c_core *core, weivel_handle owner, const char *id,
                                                             weivel_handle *registration, weivel_c_refusal *refusal);
+WEIVEL_C_API weivel_c_status weivel_c_core_register_service_awaiting_releases(weivel_c_core *core,
+                                                                              weivel_handle owner, const char *id,
+                                                                              weivel_handle *registration,
+                                                                              weivel_c_refusal *refusal);
+WEIVEL_C_API weivel_c_status weivel_c_core_release_holding(weivel_c_core *core, weivel_handle holder,
+                                                           weivel_handle registration, weivel_c_refusal *refusal);
 WEIVEL_C_API weivel_c_status weivel_c_core_unregister(weivel_c_core *core, weivel_handle handle,
                                                       weivel_c_refusal *refusal);
 WEIVEL_C_API weivel_c_status weivel_c_core_handle_state(weivel_c_core *core, weivel_handle handle,

@@ -111,8 +111,9 @@ if(NOT EXISTS ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer/LAYER.md)
         "at siblings/conformance, or set WEIVEL_C_KIT_DIRECTORY to it")
 endif()
 weivel_c_test(conformance_layer_vectors_test "conformance/layer_vectors_test.c;conformance/layer_vectors.c"
-    weivel_c_conformance $<TARGET_FILE:weivel_core_shared> ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer)
-add_dependencies(conformance_layer_vectors_test weivel_core_shared)
+    weivel_c_conformance $<TARGET_FILE:weivel_core_shared> ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer
+    $<TARGET_FILE:echo_library>)
+add_dependencies(conformance_layer_vectors_test weivel_core_shared echo_library)
 set(conformance_probe ${CMAKE_CURRENT_BINARY_DIR}/conformance_probe)
 file(MAKE_DIRECTORY ${conformance_probe}/nested/deeper)
 weivel_c_test(conformance_coverage_test "conformance/coverage_test.c;conformance/layer_vectors.c"
@@ -182,6 +183,9 @@ add_dependencies(host_library_test weivel_core_shared service_library echo_libra
 weivel_c_test(host_library_loading_test host/library_loading_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library> $<TARGET_FILE:echo_library>)
 add_dependencies(host_library_loading_test weivel_core_shared service_library echo_library)
+weivel_c_test(host_definition_test host/definition_test.c weivel_c_testing
+    $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:echo_library>)
+add_dependencies(host_definition_test weivel_core_shared echo_library)
 weivel_c_test(host_references_test host/references_test.c weivel_c_testing)
 weivel_c_test(host_seams_test host/seams_test.c weivel_c_testing $<TARGET_FILE:weivel_core_shared>)
 add_dependencies(host_seams_test weivel_core_shared)
@@ -385,6 +389,9 @@ weivel_c_benchmark(library_ratio_fails_on_a_platform_the_budget_gives_no_line 1 
 weivel_c_benchmark(same_language_fails_on_a_platform_the_budget_gives_no_noise_line 1
     "gives no line for quiet-noise, worst-noise or noise-margin on"
     same-language ${benchmark_core} ${benchmark_fixtures}/no_platform_line.txt brief)
+weivel_c_benchmark(library_definition_fails_on_a_platform_the_budget_gives_no_noise_line 1
+    "library-call-definition: the budget gives no line for quiet-noise, worst-noise or noise-margin on"
+    library-definition ${benchmark_core} ${benchmark_library} ${benchmark_fixtures}/no_platform_line.txt brief)
 weivel_c_benchmark(a_budget_with_a_single_noise_margin_is_refused 2 "'noise-margin 11.68' is neither"
     control-ratio ${benchmark_core} ${benchmark_fixtures}/single_noise_margin.txt brief)
 # With a quiet noise of 1 and no noise of its own, a run's bound is 1 plus its platform's margin: half over the margin
@@ -421,6 +428,10 @@ weivel_c_benchmark(library_call_holds_its_bound_over_a_direct_call 0
     library-ratio ${benchmark_core} ${benchmark_library} ${WEIVEL_C_KIT_BENCHMARKS}/c.txt)
 weivel_c_benchmark(same_language_call_holds_the_noise_bounds 0 "same-language platform=[a-z]+ ratio=[0-9.]+ bound="
     same-language ${benchmark_core} ${WEIVEL_C_KIT_BENCHMARKS}/c.txt)
+weivel_c_benchmark(library_call_definition_holds_the_noise_bounds 0
+    "library-call-definition platform=[a-z]+ ratio=[0-9.]+ bound="
+    library-definition ${benchmark_core} ${benchmark_library} ${WEIVEL_C_KIT_BENCHMARKS}/c.txt)
 set_tests_properties(benchmarks_control_call_holds_its_bound_over_the_bare_table_call
     benchmarks_library_call_holds_its_bound_over_a_direct_call benchmarks_same_language_call_holds_the_noise_bounds
+    benchmarks_library_call_definition_holds_the_noise_bounds
     PROPERTIES LABELS release-benchmark)

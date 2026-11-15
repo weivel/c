@@ -30,15 +30,15 @@ static int summarise_same_language(const benchmark_samples *samples, benchmark_s
     return usable;
 }
 
-int benchmark_measure_same_language(benchmark_same_language_world *world, const benchmark_sampling *sampling,
-                                    benchmark_same_language *result) {
+int benchmark_measure_same_language(benchmark_call call, void *direct, void *direct_again, void *through_weivel,
+                                    const benchmark_sampling *sampling, benchmark_same_language *result) {
     benchmark_path paths[3];
     benchmark_samples samples;
     int usable;
-    paths[0].call = paths[1].call = paths[2].call = benchmark_same_language_call;
-    paths[0].data = &world->direct;
-    paths[1].data = &world->direct_again;
-    paths[2].data = &world->resolved;
+    paths[0].call = paths[1].call = paths[2].call = call;
+    paths[0].data = direct;
+    paths[1].data = direct_again;
+    paths[2].data = through_weivel;
     if (!benchmark_sample(paths, 3, sampling, &samples)) {
         return 0;
     }

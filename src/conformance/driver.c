@@ -20,7 +20,8 @@ typedef struct conformance_op {
 
 static const conformance_op OPS[] = {{"consume", conformance_drive_consume, NULL},
                                      {"want", conformance_drive_want, conformance_want_core_options},
-                                     {"lifecycle", conformance_drive_lifecycle, NULL}};
+                                     {"lifecycle", conformance_drive_lifecycle, NULL},
+                                     {"library", conformance_drive_library, NULL}};
 
 static const conformance_op *op_named(const char *name) {
     uint32_t index;
@@ -57,6 +58,7 @@ static int drive_vector(const weivel_c_conformance_options *options, const confo
     if (!conformance_world_begin(world, options->core_path, &core_options, problem)) {
         return 0;
     }
+    world->library_path = options->library_path;
     if (!op->drive(world, vector, observed)) {
         conformance_world_end(world);
         return 0;

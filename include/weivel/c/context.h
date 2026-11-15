@@ -430,6 +430,32 @@ WEIVEL_C_API weivel_c_status weivel_c_context_register_service(weivel_c_context 
                                                                weivel_c_refusal *refusal);
 
 /**
+ * Registers `service` under `id` as weivel_c_context_register_service does, for a plugin that must learn when
+ * nothing holds it any more, as one whose object stays usable only until each holder lets go: the core's
+ * weivel_register_service_awaiting_releases. Once it is unregistered and every holding of it has ended, its plugin's
+ * listeners hear WEIVEL_C_PLUGIN_EVENT_HOLDINGS_RELEASED naming `*registration`, after which whatever stood behind the
+ * object may be freed.
+ *
+ * @return as weivel_c_context_register_service answers.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_context_register_service_awaiting_releases(
+    weivel_c_context *context, const char *id, void *service, const weivel_c_capacity_answerer *answerer,
+    weivel_handle *registration, weivel_c_refusal *refusal);
+
+/**
+ * Says the plugin no longer uses what it held of a registration made awaiting releases, once it has heard that
+ * registration revoked: the core's weivel_release_holding for the plugin and `registration`, the `handle` the
+ * revocation named. Every answer, refusal and handle the object gave the plugin must be released first. It is how a
+ * holding ends whichever way the plugin came to hold it, a get, a settled want or a watch hearing it registered.
+ *
+ * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_REFUSED with the core's refusal, for a holding still live, one of a
+ * registration made without awaiting releases, one ended already or none at all; WEIVEL_C_STATUS_MISUSE; and what the
+ * wrapper answers for any call.
+ */
+WEIVEL_C_API weivel_c_status weivel_c_context_release_holding(weivel_c_context *context, weivel_handle registration,
+                                                              weivel_c_refusal *refusal);
+
+/**
  * Unregisters a service the plugin registered.
  *
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_NONE, with nothing asked of the core, for a handle that names no
@@ -522,7 +548,13 @@ typedef enum weivel_c_plugin_event_kind {
     /** The plugin reached for what it may not; `refusal` says why. Reported once per reach kind and id. */
     WEIVEL_C_PLUGIN_EVENT_REACH_REFUSED = 2,
     /** A constrained want of the plugin's settled degraded; `refusal.subject` is the constraint accepted unmet. */
-    WEIVEL_C_PLUGIN_EVENT_DEGRADED = 3
+    WEIVEL_C_PLUGIN_EVENT_DEGRADED = 3,
+    /**
+     * Every holding of a registration the plugin made awaiting releases has ended since it was unregistered, so
+     * nothing holds what it registered any more; `handle` is that registration, already stale, and `id` and `object`
+     * are NULL.
+     */
+    WEIVEL_C_PLUGIN_EVENT_HOLDINGS_RELEASED = 4
 } weivel_c_plugin_event_kind;
 
 /** One thing the core reported about a plugin. */
@@ -538,6 +570,12 @@ typedef struct weivel_c_plugin_event {
     void *object;
     /** The core's refusal, as weivel_c_settlement carries one; code WEIVEL_REFUSAL_NONE for a revocation. */
     weivel_c_refusal refusal;
+    /**
+     * For a revocation, the registration or implementation the plugin held, which weivel_c_context_release_holding
+     * takes for a registration made awaiting releases; for WEIVEL_C_PLUGIN_EVENT_HOLDINGS_RELEASED, the plugin's own
+     * registration; 0 otherwise.
+     */
+    weivel_handle handle;
 } weivel_c_plugin_event;
 
 /**

@@ -28,6 +28,11 @@ typedef struct weivel_c_conformance_options {
     const char *core_path;
     /** The kit's layer vector directory, `vectors/layer` of the kit commit the language pins. Required. */
     const char *vector_directory;
+    /**
+     * The C library a `library` vector loads: the core's echo test library, built beside the core. Required for such a
+     * vector alone, which is otherwise a problem; NULL for every other.
+     */
+    const char *library_path;
 } weivel_c_conformance_options;
 
 /** What the driver saw of one vector. Everything in it lives until weivel_c_conformance_witness_release. */

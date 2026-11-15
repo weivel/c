@@ -19,7 +19,7 @@ static void a_reference_is_taken_until_the_count_holds_the_most(void) {
     CHECK(weivel_c_references_take(&references) == WEIVEL_C_REFERENCE_TAKEN);
     CHECK(weivel_c_references_close(&references) == 1);
     CHECK(weivel_c_references_take(&references) == WEIVEL_C_REFERENCE_CLOSED);
-    CHECK(weivel_c_references_held(&references));
+    CHECK(weivel_c_references_held_beyond(&references, 0));
 }
 
 static void the_last_drop_of_a_closed_library_answers_it_may_close(void) {
@@ -30,11 +30,21 @@ static void the_last_drop_of_a_closed_library_answers_it_may_close(void) {
     CHECK(weivel_c_references_take(&references) == WEIVEL_C_REFERENCE_CLOSED);
     CHECK(weivel_c_references_drop(&references) == 0);
     CHECK(weivel_c_references_drop(&references) == 1);
-    CHECK(!weivel_c_references_held(&references));
+    CHECK(!weivel_c_references_held_beyond(&references, 0));
+}
+
+static void held_beyond_counts_only_the_references_past_the_number_given(void) {
+    weivel_c_references references;
+    weivel_c_references_start_holding(&references, 3);
+    CHECK(weivel_c_references_held_beyond(&references, 2));
+    CHECK(!weivel_c_references_held_beyond(&references, 3));
+    CHECK(weivel_c_references_close(&references) == 1);
+    CHECK(weivel_c_references_held_beyond(&references, 2) && !weivel_c_references_held_beyond(&references, 3));
 }
 
 int main(void) {
     a_reference_is_taken_until_the_count_holds_the_most();
     the_last_drop_of_a_closed_library_answers_it_may_close();
+    held_beyond_counts_only_the_references_past_the_number_given();
     return check_summary("host references");
 }

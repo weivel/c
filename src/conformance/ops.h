@@ -21,6 +21,7 @@ int conformance_drive_consume(conformance_world *world, const conformance_vector
 int conformance_drive_want(conformance_world *world, const conformance_vector *vector, conformance_text *observed);
 int conformance_drive_lifecycle(conformance_world *world, const conformance_vector *vector,
                                 conformance_text *observed);
+int conformance_drive_library(conformance_world *world, const conformance_vector *vector, conformance_text *observed);
 
 /**
  * The core options a `want` vector runs under: its service is well-known, so the provider registers it as named.

@@ -61,7 +61,10 @@ static weivel_c_status make_the_core(weivel_c_host *made, const weivel_c_host_op
 
 static weivel_c_status make_the_contexts(weivel_c_host *made, const weivel_c_host_options *options) {
     weivel_c_contexts_options contexts_options = WEIVEL_INIT(weivel_c_contexts_options);
+    weivel_c_plugin_listener own_events = {weivel_c_host_hear_own_events, NULL};
+    uint64_t registration = 0;
     weivel_c_status status;
+    own_events.data = made;
     contexts_options.core = made->core;
     contexts_options.handles = made->handles;
     contexts_options.timer = made->timer;
@@ -69,6 +72,9 @@ static weivel_c_status make_the_contexts(weivel_c_host *made, const weivel_c_hos
     status = weivel_c_contexts_create(&contexts_options, &made->contexts);
     if (status == WEIVEL_C_STATUS_OK) {
         status = weivel_c_context_create(made->contexts, WEIVEL_HOST, NULL, &made->own_context);
+    }
+    if (status == WEIVEL_C_STATUS_OK) {
+        status = weivel_c_context_add_listener(made->own_context, &own_events, &registration);
     }
     return status;
 }

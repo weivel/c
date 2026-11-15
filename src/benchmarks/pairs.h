@@ -31,8 +31,11 @@ typedef struct benchmark_same_language {
     double ratio;
 } benchmark_same_language;
 
-/** Samples the three same-language paths of `world` interleaved. Answers 1 with `result` filled, or 0. */
-int benchmark_measure_same_language(benchmark_same_language_world *world, const benchmark_sampling *sampling,
-                                    benchmark_same_language *result);
+/**
+ * Samples `call` on three objects interleaved: `direct` and `direct_again` the provider's own, `through_weivel` what
+ * the layer answered. Answers 1 with `result` filled, or 0.
+ */
+int benchmark_measure_same_language(benchmark_call call, void *direct, void *direct_again, void *through_weivel,
+                                    const benchmark_sampling *sampling, benchmark_same_language *result);
 
 #endif

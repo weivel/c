@@ -12,6 +12,7 @@
 
 const char *layer_core_path;
 const char *layer_vector_directory;
+const char *layer_library_path;
 
 /** Drives the vector; answers 1 when the run agrees with its `then`, printing both sides when it does not. */
 static int witnessed(const char *id, weivel_c_conformance_witness *witness) {
@@ -19,6 +20,7 @@ static int witnessed(const char *id, weivel_c_conformance_witness *witness) {
     weivel_c_status status;
     options.core_path = layer_core_path;
     options.vector_directory = layer_vector_directory;
+    options.library_path = layer_library_path;
     status = weivel_c_conformance_witness_vector(&options, id, witness);
     if (status == WEIVEL_C_STATUS_OK && witness->agrees) {
         return 1;
@@ -59,7 +61,17 @@ const layer_vector_test LAYER_VECTOR_TESTS[] = {
     {"lifecycle/destroy-releases-a-plugin-whose-activate-is-in-flight", witness_alone},
     {"lifecycle/events-of-an-activate-wait-for-every-activate-of-the-plan", witness_alone},
     {"lifecycle/an-activate-that-settles-at-once-is-verified-before-the-next-starts", witness_alone},
-    {"lifecycle/an-activate-refused-at-once-is-quarantined-before-the-next-starts", witness_alone}};
+    {"lifecycle/an-activate-refused-at-once-is-quarantined-before-the-next-starts", witness_alone},
+    {"library/a-definition-is-the-providers-own-pointer", witness_alone},
+    {"library/a-null-definition-fails-the-load", witness_alone},
+    {"library/a-definition-below-its-size-fails-the-load", witness_alone},
+    {"library/a-definition-at-its-size-loads", witness_alone},
+    {"library/an-unload-revokes-every-holding-of-a-definition", witness_alone},
+    {"library/a-binary-stays-open-while-a-holding-lives", witness_alone},
+    {"library/a-binary-closes-once-every-definition-service-is-released", witness_alone},
+    {"library/a-binary-with-no-holding-closes-at-the-unload", witness_alone},
+    {"library/a-holding-ended-with-its-holder-closes-the-binary", witness_alone},
+    {"library/a-held-bytes-answer-keeps-the-binary-open-past-the-last-holding", witness_alone}};
 
 const uint32_t LAYER_VECTOR_TEST_COUNT = sizeof LAYER_VECTOR_TESTS / sizeof LAYER_VECTOR_TESTS[0];
 

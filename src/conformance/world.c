@@ -3,8 +3,15 @@
 #include <stdio.h>
 #include <string.h>
 
+static void keep_report(conformance_world *world, const char *text) {
+    if (world->reported_count < CONFORMANCE_REPORTED) {
+        snprintf(world->reported[world->reported_count++], CONFORMANCE_REPORT_TEXT, "%s", text == NULL ? "" : text);
+    }
+}
+
 static weivel_c_status count_failure(void *data, const weivel_c_failure *failure) {
     conformance_world *world = data;
+    keep_report(world, failure->text);
     world->sink_failures++;
     world->listener_failures += failure->kind == WEIVEL_C_FAILURE_LISTENER;
     return WEIVEL_C_STATUS_OK;
@@ -12,6 +19,7 @@ static weivel_c_status count_failure(void *data, const weivel_c_failure *failure
 
 static weivel_c_status count_line(void *data, const weivel_c_log_record *record) {
     conformance_world *world = data;
+    keep_report(world, record->text);
     world->log_lines++;
     world->error_lines += record->level == WEIVEL_LOG_ERROR;
     return WEIVEL_C_STATUS_OK;
