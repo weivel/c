@@ -6,9 +6,10 @@
  *   provider's own pointer, and calls through it cross into the core not once; `identity-copied <core>` resolves
  *   through a wrapper that copies the object, which the gate must refuse.
  * - `control-budget <core> <budget.txt> [brief]`: the wrapper's control call against the core's budget.
- * - `control-ratio <core> <c.txt> [brief]`, `library-ratio <core> <library> <c.txt> [brief]` and
- *   `same-language <core> <c.txt> [brief]`: the ratio gates and the same-language noise gate against the C layer's
- *   budget, failing on a platform the budget gives no line.
+ * - `control-ratio <core> <c.txt> [brief]`, `library-ratio <core> <library> <c.txt> [brief]`,
+ *   `same-language <core> <c.txt> [brief]` and `library-definition <core> <library> <c.txt> [brief]`: the ratio gates,
+ *   the same-language noise gate and the library call's definition row, which the noise bounds judge as they judge the
+ *   same-language pair, against the C layer's budget, failing on a platform the budget gives no line.
  * - `same-language-judge <core> <c.txt> <ratio> <noise-ratio>`: the same-language gate's verdict on the ratios given,
  *   measured by nobody, so the bounds it judges by are tested on every platform whatever its clock resolves.
  * - `measure <core> <library> <repetitions>`: prints every measurement the bounds are set from.
@@ -197,8 +198,46 @@ static int measure_same_language(const benchmark_sampling *sampling, benchmark_s
         return 0;
     }
     usable = benchmark_resolved_the_providers_object(&world) &&
-             benchmark_measure_same_language(&world, sampling, result);
+             benchmark_measure_same_language(benchmark_same_language_call, &world.direct, &world.direct_again,
+                                             &world.resolved, sampling, result);
     benchmark_same_language_world_end(&world);
+    return usable;
+}
+
+static weivel_standard_library_function definition_function;
+static weivel_standard_library_service definition_service;
+static weivel_standard_library definition_declaration;
+
+/** The core's echo test library declared with one service, its `echo_service_definition`. */
+static const weivel_standard_library *declare_the_definition(void) {
+    definition_function.name = "definition";
+    definition_function.symbol = "echo_service_definition";
+    definition_function.kind = WEIVEL_STANDARD_FUNCTION_DEFINITION;
+    definition_service.id = benchmark_definition_service;
+    definition_service.functions = &definition_function;
+    definition_service.function_count = 1;
+    definition_declaration = (weivel_standard_library)WEIVEL_INIT(weivel_standard_library);
+    definition_declaration.import_name = "echo";
+    definition_declaration.version = "1.0.0";
+    definition_declaration.services = &definition_service;
+    definition_declaration.service_count = 1;
+    return &definition_declaration;
+}
+
+/** Answers 1 with `result` filled; 0 when nothing usable was measured, or -1 when the identity does not hold. */
+static int measure_definition(const char *library_path, const benchmark_sampling *sampling,
+                              benchmark_same_language *result) {
+    benchmark_definition_world world;
+    int usable;
+    if (!benchmark_definition_world_start(&world, &real_table, library_path, declare_the_definition())) {
+        return 0;
+    }
+    usable = !benchmark_resolved_the_definitions_own_pointer(&world)
+                 ? -1
+                 : benchmark_measure_same_language(benchmark_definition_call, (void *)&world.direct,
+                                                   (void *)&world.direct_again, (void *)&world.resolved, sampling,
+                                                   result);
+    benchmark_definition_world_end(&world);
     return usable;
 }
 
@@ -209,11 +248,12 @@ static void print_pair(const char *name, int repetition, const benchmark_pair *p
            pair->round_ratio.lower_quartile, pair->round_ratio.upper_quartile);
 }
 
-static void print_same_language(int repetition, const benchmark_same_language *result) {
-    printf("weivel-c-benchmark same-language platform=%s repetition=%d direct_median_ns=%.3f "
+static void print_noise_judged(const char *name, int repetition, const benchmark_same_language *result) {
+    printf("weivel-c-benchmark %s platform=%s repetition=%d direct_median_ns=%.3f "
            "through_weivel_median_ns=%.3f noise_ratio=%.6f noise=%.6f ratio=%.6f deviation=%.6f\n",
-           platform_text(), repetition, result->direct.median, result->through_weivel.median, result->noise_ratio,
-           benchmark_deviation(result->noise_ratio), result->ratio, benchmark_deviation(result->ratio));
+           name, platform_text(), repetition, result->direct.median, result->through_weivel.median,
+           result->noise_ratio, benchmark_deviation(result->noise_ratio), result->ratio,
+           benchmark_deviation(result->ratio));
 }
 
 static int measure_once(const char *library_path, int repetition) {
@@ -230,7 +270,11 @@ static int measure_once(const char *library_path, int repetition) {
     if (!measure_same_language(&same_language_sampling, &same_language)) {
         return 0;
     }
-    print_same_language(repetition, &same_language);
+    print_noise_judged("same-language", repetition, &same_language);
+    if (measure_definition(library_path, &same_language_sampling, &same_language) != 1) {
+        return 0;
+    }
+    print_noise_judged("library-call-definition", repetition, &same_language);
     return 1;
 }
 
@@ -318,37 +362,37 @@ static int run_library_ratio(const char *library_path, const char *budget_path, 
     return judge_ratio("library-call", &pair, bound);
 }
 
-static int judge_same_language(benchmark_noise_bounds noise_bounds, const benchmark_same_language *result) {
+static int judge_by_the_noise(const char *name, benchmark_noise_bounds noise_bounds,
+                              const benchmark_same_language *result) {
     double bound = benchmark_same_language_bound(noise_bounds, result->noise_ratio);
-    print_same_language(1, result);
-    printf("weivel-c-benchmark same-language platform=%s ratio=%.4f bound=%.4f noise_margin=%.4f quiet_noise=%.6f "
+    print_noise_judged(name, 1, result);
+    printf("weivel-c-benchmark %s platform=%s ratio=%.4f bound=%.4f noise_margin=%.4f quiet_noise=%.6f "
            "worst_noise=%.4f\n",
-           platform_text(), result->ratio, bound, noise_bounds.margin, noise_bounds.quiet, noise_bounds.worst);
+           name, platform_text(), result->ratio, bound, noise_bounds.margin, noise_bounds.quiet, noise_bounds.worst);
     if (benchmark_too_noisy_to_judge(noise_bounds, result->noise_ratio)) {
-        printf("weivel-c-benchmark same-language: the run was too noisy to judge, its two identical direct paths "
+        printf("weivel-c-benchmark %s: the run was too noisy to judge, its two identical direct paths "
                "differing by %.4f\n",
-               benchmark_deviation(result->noise_ratio));
+               name, benchmark_deviation(result->noise_ratio));
         return EXIT_FAILS;
     }
     if (!benchmark_within(result->ratio, bound)) {
-        printf("weivel-c-benchmark same-language: the ratio %.4f is outside its bound of %.4f\n", result->ratio,
-               bound);
+        printf("weivel-c-benchmark %s: the ratio %.4f is outside its bound of %.4f\n", name, result->ratio, bound);
         return EXIT_FAILS;
     }
     return EXIT_HOLDS;
 }
 
 /** Reads this platform's noise bounds; answers EXIT_HOLDS when it has them, else the gate's verdict. */
-static int noise_bounds_here(const char *budget_path, benchmark_noise_bounds *noise_bounds) {
+static int noise_bounds_here(const char *name, const char *budget_path, benchmark_noise_bounds *noise_bounds) {
     benchmark_budget budget;
     if (!read_language_budget(budget_path, &budget)) {
         return EXIT_UNUSABLE;
     }
     *noise_bounds = benchmark_noise_bounds_of(&budget, benchmark_platform());
     if (!benchmark_noise_bounded(*noise_bounds)) {
-        printf("weivel-c-benchmark same-language: the budget gives no line for quiet-noise, worst-noise or noise-margin on %s, so "
-               "the gate fails rather than passing unbounded\n",
-               platform_text());
+        printf("weivel-c-benchmark %s: the budget gives no line for quiet-noise, worst-noise or noise-margin on %s, "
+               "so the gate fails rather than passing unbounded\n",
+               name, platform_text());
         return EXIT_FAILS;
     }
     return EXIT_HOLDS;
@@ -357,7 +401,7 @@ static int noise_bounds_here(const char *budget_path, benchmark_noise_bounds *no
 static int run_same_language(const char *budget_path, const benchmark_sampling *sampling) {
     benchmark_same_language result;
     benchmark_noise_bounds noise_bounds;
-    int bounded = noise_bounds_here(budget_path, &noise_bounds);
+    int bounded = noise_bounds_here("same-language", budget_path, &noise_bounds);
     if (bounded != EXIT_HOLDS) {
         return bounded;
     }
@@ -365,20 +409,42 @@ static int run_same_language(const char *budget_path, const benchmark_sampling *
         fprintf(stderr, "the same-language call measured nothing usable\n");
         return EXIT_UNUSABLE;
     }
-    return judge_same_language(noise_bounds, &result);
+    return judge_by_the_noise("same-language", noise_bounds, &result);
+}
+
+static int run_library_definition(const char *library_path, const char *budget_path,
+                                  const benchmark_sampling *sampling) {
+    benchmark_same_language result;
+    benchmark_noise_bounds noise_bounds;
+    int bounded = noise_bounds_here("library-call-definition", budget_path, &noise_bounds);
+    int measured;
+    if (bounded != EXIT_HOLDS) {
+        return bounded;
+    }
+    measured = measure_definition(library_path, sampling, &result);
+    if (measured < 0) {
+        printf("weivel-c-benchmark library-call-definition: the host's context resolved another object than the "
+               "pointer the definition's symbol answered\n");
+        return EXIT_FAILS;
+    }
+    if (measured == 0) {
+        fprintf(stderr, "the definition's operation measured nothing usable\n");
+        return EXIT_UNUSABLE;
+    }
+    return judge_by_the_noise("library-call-definition", noise_bounds, &result);
 }
 
 static int judge_given_ratios(const char *budget_path, const char *ratio, const char *noise_ratio) {
     benchmark_same_language result;
     benchmark_noise_bounds noise_bounds;
-    int bounded = noise_bounds_here(budget_path, &noise_bounds);
+    int bounded = noise_bounds_here("same-language", budget_path, &noise_bounds);
     if (bounded != EXIT_HOLDS) {
         return bounded;
     }
     memset(&result, 0, sizeof result);
     result.ratio = atof(ratio);
     result.noise_ratio = atof(noise_ratio);
-    return judge_same_language(noise_bounds, &result);
+    return judge_by_the_noise("same-language", noise_bounds, &result);
 }
 
 static const benchmark_sampling *sampling_of(int argument_count, char **arguments, int position,
@@ -401,6 +467,10 @@ static int run_mode(const char *mode, int argument_count, char **arguments) {
     }
     if (strcmp(mode, "same-language") == 0 && argument_count >= 4) {
         return run_same_language(arguments[3], sampling_of(argument_count, arguments, 4, &same_language_sampling));
+    }
+    if (strcmp(mode, "library-definition") == 0 && argument_count >= 5) {
+        return run_library_definition(arguments[3], arguments[4],
+                                      sampling_of(argument_count, arguments, 5, &same_language_sampling));
     }
     if (strcmp(mode, "same-language-judge") == 0 && argument_count >= 6) {
         return judge_given_ratios(arguments[3], arguments[4], arguments[5]);

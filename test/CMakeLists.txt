@@ -389,6 +389,9 @@ weivel_c_benchmark(library_ratio_fails_on_a_platform_the_budget_gives_no_line 1 
 weivel_c_benchmark(same_language_fails_on_a_platform_the_budget_gives_no_noise_line 1
     "gives no line for quiet-noise, worst-noise or noise-margin on"
     same-language ${benchmark_core} ${benchmark_fixtures}/no_platform_line.txt brief)
+weivel_c_benchmark(library_definition_fails_on_a_platform_the_budget_gives_no_noise_line 1
+    "library-call-definition: the budget gives no line for quiet-noise, worst-noise or noise-margin on"
+    library-definition ${benchmark_core} ${benchmark_library} ${benchmark_fixtures}/no_platform_line.txt brief)
 weivel_c_benchmark(a_budget_with_a_single_noise_margin_is_refused 2 "'noise-margin 11.68' is neither"
     control-ratio ${benchmark_core} ${benchmark_fixtures}/single_noise_margin.txt brief)
 # With a quiet noise of 1 and no noise of its own, a run's bound is 1 plus its platform's margin: half over the margin
@@ -425,6 +428,10 @@ weivel_c_benchmark(library_call_holds_its_bound_over_a_direct_call 0
     library-ratio ${benchmark_core} ${benchmark_library} ${WEIVEL_C_KIT_BENCHMARKS}/c.txt)
 weivel_c_benchmark(same_language_call_holds_the_noise_bounds 0 "same-language platform=[a-z]+ ratio=[0-9.]+ bound="
     same-language ${benchmark_core} ${WEIVEL_C_KIT_BENCHMARKS}/c.txt)
+weivel_c_benchmark(library_call_definition_holds_the_noise_bounds 0
+    "library-call-definition platform=[a-z]+ ratio=[0-9.]+ bound="
+    library-definition ${benchmark_core} ${benchmark_library} ${WEIVEL_C_KIT_BENCHMARKS}/c.txt)
 set_tests_properties(benchmarks_control_call_holds_its_bound_over_the_bare_table_call
     benchmarks_library_call_holds_its_bound_over_a_direct_call benchmarks_same_language_call_holds_the_noise_bounds
+    benchmarks_library_call_definition_holds_the_noise_bounds
     PROPERTIES LABELS release-benchmark)

@@ -7,6 +7,8 @@
 
 static const char *const arithmetic_id = "provider:arithmetic";
 
+const char *const benchmark_definition_service = "echo";
+
 static int64_t add(int64_t left, int64_t right) {
     return left + right;
 }

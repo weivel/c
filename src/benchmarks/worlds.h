@@ -11,12 +11,15 @@
  * - a C library's function called through the object the host registers for it, and the same function called
  *   directly through the platform's loader, each releasing what it answered;
  * - a same-language call: a consumer plugin resolves another plugin's service through its context, and calls the
- *   resolved object, beside the same call made on the provider's own object.
+ *   resolved object, beside the same call made on the provider's own object;
+ * - an operation of a C library's definition called through the definition the host's own context resolved, beside
+ *   the same operation called through the pointer the definition's symbol answered.
  */
 
 #include <stdint.h>
 
 #include <weivel/c.h>
+#include <weivel/library.h>
 
 #include "measure.h"
 
@@ -117,5 +120,42 @@ int benchmark_resolved_the_providers_object(const benchmark_same_language_world 
 int benchmark_same_language_call(void *data, uint32_t call);
 
 void benchmark_same_language_world_end(benchmark_same_language_world *world);
+
+/** The id of the one service the definition world's declaration declares, a definition. */
+extern const char *const benchmark_definition_service;
+
+/**
+ * A host that loaded a library whose one service is a definition, what its own context resolved for it, and the
+ * pointer the definition's symbol answered through the library opened again by the platform's loader.
+ */
+typedef struct benchmark_definition_world {
+    weivel_c_host *host;
+    void *binary;
+    const void *direct;
+    const void *direct_again;
+    const void *resolved;
+} benchmark_definition_world;
+
+/**
+ * Builds the world on `table`: loads the library at `path` as `declaration` declares it, its first service the
+ * definition `benchmark_definition_service` names. Answers 1, or 0 with nothing held.
+ */
+int benchmark_definition_world_start(benchmark_definition_world *world, const weivel_c_core_table *table,
+                                     const char *path, const weivel_standard_library *declaration);
+
+/** 1 when what the host's context resolved is the very pointer the definition's symbol answered. */
+int benchmark_resolved_the_definitions_own_pointer(const benchmark_definition_world *world);
+
+/**
+ * The echo definition's `count_unloads` handed NULL, called through the definition `data` points to, a
+ * `const void **`: `&world->direct`, `&world->direct_again` or `&world->resolved`.
+ *
+ * @implNote It is the definition's one operation that allocates nothing, so the paths differ by the call alone and not
+ * by the allocator; one function serves all three, reading the operation out of the struct on every call, as
+ * benchmark_same_language_call does.
+ */
+int benchmark_definition_call(void *data, uint32_t call);
+
+void benchmark_definition_world_end(benchmark_definition_world *world);
 
 #endif
