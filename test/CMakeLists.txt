@@ -111,8 +111,9 @@ if(NOT EXISTS ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer/LAYER.md)
         "at siblings/conformance, or set WEIVEL_C_KIT_DIRECTORY to it")
 endif()
 weivel_c_test(conformance_layer_vectors_test "conformance/layer_vectors_test.c;conformance/layer_vectors.c"
-    weivel_c_conformance $<TARGET_FILE:weivel_core_shared> ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer)
-add_dependencies(conformance_layer_vectors_test weivel_core_shared)
+    weivel_c_conformance $<TARGET_FILE:weivel_core_shared> ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer
+    $<TARGET_FILE:echo_library>)
+add_dependencies(conformance_layer_vectors_test weivel_core_shared echo_library)
 set(conformance_probe ${CMAKE_CURRENT_BINARY_DIR}/conformance_probe)
 file(MAKE_DIRECTORY ${conformance_probe}/nested/deeper)
 weivel_c_test(conformance_coverage_test "conformance/coverage_test.c;conformance/layer_vectors.c"

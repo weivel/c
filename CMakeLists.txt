@@ -106,7 +106,8 @@ endfunction()
 set(WEIVEL_C_CONFORMANCE_SOURCES
     src/conformance/text.c src/conformance/equality.c src/conformance/vectors.c src/conformance/ids.c
     src/conformance/world.c src/conformance/time.c src/conformance/observe.c src/conformance/consume.c
-    src/conformance/want.c src/conformance/actions.c src/conformance/lifecycle.c src/conformance/driver.c)
+    src/conformance/want.c src/conformance/actions.c src/conformance/lifecycle.c src/conformance/library.c
+    src/conformance/driver.c)
 if(WIN32)
     list(APPEND WEIVEL_C_CONFORMANCE_SOURCES src/conformance/directory_windows.c)
 else()
@@ -118,6 +119,7 @@ endif()
 function(weivel_c_add_the_conformance_module)
     add_library(weivel_c_conformance STATIC ${WEIVEL_C_CONFORMANCE_SOURCES})
     target_link_libraries(weivel_c_conformance PUBLIC weivel_c weivel_standard)
+    target_include_directories(weivel_c_conformance PRIVATE ${WEIVEL_C_CORE_INCLUDE_DIRECTORY}/../test/echo)
     weivel_c_strict_warnings(weivel_c_conformance)
 endfunction()
 
