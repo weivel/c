@@ -316,12 +316,12 @@ static int run_library_ratio(const char *library_path, const char *budget_path, 
     return judge_ratio("library-call", &pair, bound);
 }
 
-static int judge_same_language(const benchmark_budget *budget, benchmark_noise_bounds noise_bounds,
-                               const benchmark_same_language *result) {
-    double bound = benchmark_same_language_bound(budget, noise_bounds, result->noise_ratio);
+static int judge_same_language(benchmark_noise_bounds noise_bounds, const benchmark_same_language *result) {
+    double bound = benchmark_same_language_bound(noise_bounds, result->noise_ratio);
     print_same_language(1, result);
-    printf("weivel-c-benchmark same-language platform=%s ratio=%.4f bound=%.4f quiet_noise=%.6f worst_noise=%.4f\n",
-           platform_text(), result->ratio, bound, noise_bounds.quiet, noise_bounds.worst);
+    printf("weivel-c-benchmark same-language platform=%s ratio=%.4f bound=%.4f noise_margin=%.4f quiet_noise=%.6f "
+           "worst_noise=%.4f\n",
+           platform_text(), result->ratio, bound, noise_bounds.margin, noise_bounds.quiet, noise_bounds.worst);
     if (benchmark_too_noisy_to_judge(noise_bounds, result->noise_ratio)) {
         printf("weivel-c-benchmark same-language: the run was too noisy to judge, its two identical direct paths "
                "differing by %.4f\n",
@@ -345,7 +345,7 @@ static int run_same_language(const char *budget_path, const benchmark_sampling *
     }
     noise_bounds = benchmark_noise_bounds_of(&budget, benchmark_platform());
     if (!benchmark_noise_bounded(noise_bounds)) {
-        printf("weivel-c-benchmark same-language: the budget gives no line for quiet-noise or worst-noise on %s, so "
+        printf("weivel-c-benchmark same-language: the budget gives no line for quiet-noise, worst-noise or noise-margin on %s, so "
                "the gate fails rather than passing unbounded\n",
                platform_text());
         return EXIT_FAILS;
@@ -354,7 +354,7 @@ static int run_same_language(const char *budget_path, const benchmark_sampling *
         fprintf(stderr, "the same-language call measured nothing usable\n");
         return EXIT_UNUSABLE;
     }
-    return judge_same_language(&budget, noise_bounds, &result);
+    return judge_same_language(noise_bounds, &result);
 }
 
 static const benchmark_sampling *sampling_of(int argument_count, char **arguments, int position,

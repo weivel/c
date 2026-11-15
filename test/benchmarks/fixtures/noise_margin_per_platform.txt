@@ -1,0 +1,10 @@
+ratio-margin 1.5
+quiet-noise linux 1
+quiet-noise windows 1
+quiet-noise macos 1
+worst-noise linux 1000
+worst-noise windows 1000
+worst-noise macos 1000
+noise-margin linux 101
+noise-margin windows 202
+noise-margin macos 303
