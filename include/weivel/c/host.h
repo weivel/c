@@ -238,9 +238,9 @@ typedef struct weivel_c_outcome {
     /** A weivel_c_outcome_kind. */
     uint32_t kind;
     /**
-     * For REFUSED, the core's refusal of the open. For QUARANTINED, the core's refusal of the verification, or, when
-     * the activate failed, the reason the host quarantined it with, code WEIVEL_REFUSAL_NONE, saying so and with a
-     * fix. Otherwise empty. Never released by the listener.
+     * The refusal that decided the outcome: for REFUSED, the core's refusal of the open; for QUARANTINED, the core's
+     * refusal of the verification when that refusal is what quarantined it. Otherwise empty, a plugin quarantined for
+     * a reason of the host's included: that reason is in its ledger row. Never released by the listener.
      */
     weivel_c_refusal refusal;
 } weivel_c_outcome;

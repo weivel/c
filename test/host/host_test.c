@@ -84,7 +84,7 @@ static void a_service_of_the_hosts_own_is_offered_to_a_plan_and_answered_as_the_
     end_host_world(&in);
 }
 
-static void an_activate_that_finishes_is_verified_and_one_that_fails_is_quarantined_with_a_reason(void) {
+static void an_activate_that_fails_is_quarantined_with_a_reason_its_outcome_does_not_carry(void) {
     host_world in;
     test_plugin good;
     test_plugin bad;
@@ -102,7 +102,8 @@ static void an_activate_that_finishes_is_verified_and_one_that_fails_is_quaranti
     CHECK(outcomes_of(&in.told, good.handle, &kind) == 1 && kind == WEIVEL_C_OUTCOME_ACTIVE);
     CHECK(state_of(&in, &good) == WEIVEL_C_PLUGIN_ACTIVE);
     CHECK(outcomes_of(&in.told, bad.handle, &kind) == 1 && kind == WEIVEL_C_OUTCOME_QUARANTINED);
-    CHECK(strstr(in.told.details[1], "the disk is full") != NULL);
+    CHECK(in.told.codes[1] == WEIVEL_REFUSAL_NONE && in.told.details[1][0] == 0 && in.told.fixes[1][0] == 0);
+    CHECK(in.told.has_fixes[1] == 0);
     CHECK(state_of(&in, &bad) == WEIVEL_C_PLUGIN_QUARANTINED);
     CHECK(ledger_status_of(&in, &bad, &row) == WEIVEL_PLUGIN_STATUS_QUARANTINED);
     CHECK(row.refusal.detail != NULL && strstr(row.refusal.detail, "the disk is full") != NULL);
@@ -821,7 +822,7 @@ int main(int argument_count, char **arguments) {
     }
     a_plugin_is_registered_from_a_manifest_value_and_an_entry_alone();
     a_service_of_the_hosts_own_is_offered_to_a_plan_and_answered_as_the_hosts_pointer();
-    an_activate_that_finishes_is_verified_and_one_that_fails_is_quarantined_with_a_reason();
+    an_activate_that_fails_is_quarantined_with_a_reason_its_outcome_does_not_carry();
     a_plugin_the_core_refuses_to_open_is_answered_refused_with_its_refusal();
     a_plugin_released_while_its_activate_is_in_flight_is_answered_released_and_its_activate_settles_nothing();
     an_open_that_fails_for_no_refusal_is_answered_failed_and_leaves_nothing_open_in_the_core();

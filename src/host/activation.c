@@ -498,17 +498,17 @@ static void tell_unless_told(weivel_c_completion *activation, uint32_t kind) {
     }
 }
 
-/** The reason a plugin whose activate failed is quarantined with: what happened, the plugin's own words, and a fix. */
+/**
+ * The reason a plugin whose activate failed is quarantined with: what happened, the plugin's own words, and a fix.
+ *
+ * @implNote The reason is the host's, so the outcome carries no refusal; the plugin's ledger row shows the reason.
+ */
 static weivel_quarantine_reason reason_of_a_failed_activate(host_outcome *outcome, const char *said) {
     weivel_quarantine_reason reason = WEIVEL_INIT(weivel_quarantine_reason);
     snprintf(outcome->detail, sizeof outcome->detail, "the plugin's activate failed: %s",
              said == NULL || said[0] == '\0' ? "it gave no reason" : said);
     snprintf(outcome->fix, sizeof outcome->fix, "%s",
              "remove what makes the plugin's activate fail, then activate the plugin again");
-    outcome->refusal.code = WEIVEL_REFUSAL_NONE;
-    outcome->refusal.detail = outcome->detail;
-    outcome->refusal.fix = outcome->fix;
-    outcome->refusal.has_fix = 1;
     reason.detail = outcome->detail;
     reason.fix = outcome->fix;
     return reason;
