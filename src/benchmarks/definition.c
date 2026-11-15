@@ -54,9 +54,9 @@ int benchmark_resolved_the_definitions_own_pointer(const benchmark_definition_wo
 }
 
 int benchmark_definition_call(void *data, uint32_t call) {
-    const echo_definition *const *definition = data;
+    const echo_definition *definition = data;
     (void)call;
-    (*definition)->count_unloads((*definition)->context, NULL);
+    definition->count_unloads(definition->context, NULL);
     return 1;
 }
 

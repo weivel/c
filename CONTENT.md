@@ -333,9 +333,9 @@ through the layer's public surface on a table its caller loaded:
   with it;
 - the library call's definition row: an operation of the echo library's definition called through the definition the
   host's own context resolved, beside the same operation called twice through the pointer the definition's symbol
-  answered, each reading the operation's function pointer out of the struct on every call. The two are one pointer,
-  so the row is judged by its platform's noise bounds, as the same-language call is, and fails when the host
-  resolved anything else.
+  answered, each handed the definition itself and reading the operation's function pointer out of the struct on every
+  call. The two are one pointer, so the row is judged by its platform's noise bounds, as the same-language call is,
+  and fails when the host resolved anything else.
 
 `test/benchmarks/` holds the gates. In every build: the identity gate, a consumer handed the provider's very pointer
 by `weivel_c_context_get_service` and a thousand calls through it crossing into the core not once on a table that
