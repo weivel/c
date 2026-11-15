@@ -1,0 +1,5 @@
+control-call linux 1.2
+control-call windows 1.2
+control-call macos 1.2
+ratio-margin 1.5
+noise-margin 11.68

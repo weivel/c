@@ -383,8 +383,20 @@ weivel_c_benchmark(control_ratio_fails_on_a_platform_the_budget_gives_no_line 1 
 weivel_c_benchmark(library_ratio_fails_on_a_platform_the_budget_gives_no_line 1 "gives no line for library-call on"
     library-ratio ${benchmark_core} ${benchmark_library} ${benchmark_fixtures}/no_platform_line.txt brief)
 weivel_c_benchmark(same_language_fails_on_a_platform_the_budget_gives_no_noise_line 1
-    "gives no line for quiet-noise or worst-noise on"
+    "gives no line for quiet-noise, worst-noise or noise-margin on"
     same-language ${benchmark_core} ${benchmark_fixtures}/no_platform_line.txt brief)
+weivel_c_benchmark(a_budget_with_a_single_noise_margin_is_refused 2 "'noise-margin 11.68' is neither"
+    control-ratio ${benchmark_core} ${benchmark_fixtures}/single_noise_margin.txt brief)
+if(WIN32)
+    set(benchmark_platform_margin 202)
+elseif(APPLE)
+    set(benchmark_platform_margin 303)
+else()
+    set(benchmark_platform_margin 101)
+endif()
+weivel_c_benchmark(same_language_judges_by_the_noise_margin_of_its_own_platform 0
+    "same-language platform=[a-z]+ ratio=[0-9.]+ bound=[0-9.]+ noise_margin=${benchmark_platform_margin}[.]0000 "
+    same-language ${benchmark_core} ${benchmark_fixtures}/noise_margin_per_platform.txt brief)
 
 set(WEIVEL_C_BENCHMARK_RELEASE_ONLY -DRELEASE_ONLY=ON)
 weivel_c_benchmark(measure_prints_every_measurement 0 "weivel-c-benchmark same-language platform=[a-z]+ repetition=10 "
