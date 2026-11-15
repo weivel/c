@@ -40,6 +40,6 @@
     FUNCTION(ledger)                      \
     FUNCTION(ledger_snapshot_release)     \
     FUNCTION(ledger_entry)                \
-    FUNCTION(ledger_row_release)
+    FUNCTION(ledger_row_release)              FUNCTION(register_service_awaiting_releases)     FUNCTION(release_holding)
 
 #endif

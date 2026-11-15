@@ -27,7 +27,7 @@ static const char TEXT_NOT_COPIED[] = WEIVEL_C_TEXT_NOT_COPIED;
 static const char EMPTY_TEXT[] = "";
 
 static int is_known(uint32_t kind) {
-    return kind >= WEIVEL_EVENT_LOG && kind <= WEIVEL_EVENT_DEADLINE;
+    return kind >= WEIVEL_EVENT_LOG && kind <= WEIVEL_EVENT_HOLDINGS_RELEASED;
 }
 
 static size_t text_size(const char *text) {
