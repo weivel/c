@@ -4,8 +4,9 @@
 /**
  * @file
  * C libraries as host services. The host loads a C library from a declaration value, the standard's published
- * weivel_standard_library, whether the standard read it or the caller built it, binds each declared function of the
- * bytes kind, and registers each declared service under WEIVEL_HOST as one weivel_c_library_service object.
+ * weivel_standard_library, whether the standard read it or the caller built it, and registers each declared service
+ * under WEIVEL_HOST: a service of bytes functions as one weivel_c_library_service object, and a service that declares
+ * a definition as that definition.
  *
  * - A consumer that resolves the service, by a get, a settled want or a watch, is answered that very object, as any
  *   provider's object is. Calling a function through it is a plain call into the library that crosses no core call,
@@ -13,9 +14,18 @@
  * - The input is borrowed: the library is handed the caller's own pointer and length for the length of the call.
  * - The output is answered in place, as a weivel_c_bytes holding the library's own pointer: never copied, and freed
  *   only by the library's declared release symbol, exactly once, when its holder releases it.
+ * - A definition (WEIVEL_STANDARD_FUNCTION_DEFINITION) is a symbol `const void *f(void)` answering a static struct of
+ *   function pointers that begins with its `uint32_t size`. The host calls it once at the load and registers the very
+ *   pointer it answered, with no wrapper, count or copy, through weivel_c_context_register_service_awaiting_releases,
+ *   so a consumer's call through it is a plain call into the library. The host reads its `size` and nothing past it.
  * - A library unloaded, by weivel_c_host_unload_library or by the host's destroy, has its services unregistered and
- *   refuses every call made after it. Its binary is closed only once no call runs in it and no bytes it answered are
- *   still held, so nothing ever calls into a closed library, and bytes still held stay readable until released.
+ *   refuses every call made after it through a bytes object. A definition is called directly, so no call to it can be
+ *   refused: its unregistration revokes every holding of it, each holder told by a WEIVEL_C_PLUGIN_EVENT_REVOKED whose
+ *   `handle` it hands weivel_c_context_release_holding once it has let go.
+ * - Its binary is closed only once no call runs in it, no bytes it answered are still held, and the core has told the
+ *   host that nothing holds any of its definitions, whichever ends last, so nothing ever calls into a closed library,
+ *   and bytes still held stay readable until released. A holder that never lets go of a definition keeps the binary
+ *   open until weivel_c_host_free.
  *
  * The host includes the standard's declaration types and never loads, links or calls the standard's binary.
  *
@@ -132,8 +142,10 @@ typedef struct weivel_c_library_load_failure {
      */
     const char *missing_symbol;
     /**
-     * After WEIVEL_C_STATUS_MISUSE for a function of a kind other than WEIVEL_STANDARD_FUNCTION_BYTES, that function's
-     * name, the declaration's own text. NULL otherwise.
+     * After WEIVEL_C_STATUS_MISUSE for a function the host does not load as declared, that function's name, the
+     * declaration's own text: one of a kind other than WEIVEL_STANDARD_FUNCTION_BYTES and
+     * WEIVEL_STANDARD_FUNCTION_DEFINITION, a definition beside another function of its service, or a definition given
+     * context facts. NULL otherwise.
      */
     const char *wrong_kind;
     /**
@@ -142,6 +154,11 @@ typedef struct weivel_c_library_load_failure {
      * NULL otherwise.
      */
     const char *taken_id;
+    /**
+     * After WEIVEL_C_STATUS_MISUSE for a definition whose symbol answered NULL, or a struct whose `size` is below
+     * `2 * sizeof(void *)`, that definition's symbol, the declaration's own text. NULL otherwise.
+     */
+    const char *refused_definition;
 } weivel_c_library_load_failure;
 
 /**
@@ -149,22 +166,25 @@ typedef struct weivel_c_library_load_failure {
  *
  * Opens the shared library at `path` with the platform's loader, as weivel_c_core_load does: a path with no directory
  * separator is searched for by the platform, so give an absolute path to load exactly one file. Binds the declared
- * release symbol and every declared function's symbol, then registers each service through the host's own context.
+ * release symbol and every declared function's symbol, calls each definition's symbol once, then registers each
+ * service through the host's own context.
  *
  * A load that does not finish once a service is registered is undone as an unload is: its services are closed to
  * calls and unregistered, and its binary closes once nothing holds it, so an object a consumer was told of meanwhile
  * stays readable until weivel_c_host_free and answers WEIVEL_C_STATUS_UNLOADED.
  *
  * @param path the library, UTF-8; the declaration names none. Read only during the call. Required.
- * @param declaration read only during the call: every text the host keeps it copies. Required, with a release symbol,
- * at least one service, each with an id no other service of it repeats and at least one function, and each function
- * with a name, a symbol and the kind WEIVEL_STANDARD_FUNCTION_BYTES.
+ * @param declaration read only during the call: every text the host keeps it copies. Required, with at least one
+ * service, each with an id no other service of it repeats and at least one function, and each function with a name, a
+ * symbol and the kind WEIVEL_STANDARD_FUNCTION_BYTES or WEIVEL_STANDARD_FUNCTION_DEFINITION, a definition being its
+ * service's only function and reading no context; and with a release symbol when any function is of the bytes kind.
  * @param library receives the loaded library. Required; NULL on every answer but OK.
  * @param failure receives what a status alone cannot say; may be NULL. Cleared first when given and large enough.
  * @param refusal the core's refusal of a service's registration; may be NULL.
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE (a NULL or empty path, a NULL argument, a declaration or failure
- * smaller than its first shape, an empty text or list the declaration needs, a function of another kind, an id it
- * lists twice, or an id a registration under this host holds already, a plugin's, another live library's or the
+ * smaller than its first shape, an empty text or list the declaration needs, a function the host does not load as
+ * declared, a definition that answers NULL or a struct whose `size` is below `2 * sizeof(void *)`, an id it lists
+ * twice, or an id a registration under this host holds already, a plugin's, another live library's or the
  * host's own, since registering it under WEIVEL_HOST would replace that registration; each the caller's mistake that
  * is told to nobody else); WEIVEL_C_STATUS_NOT_A_LIBRARY; WEIVEL_C_STATUS_MISSING_SYMBOL; WEIVEL_C_STATUS_REFUSED with
  * the core's refusal of a registration; WEIVEL_C_STATUS_OUT_OF_MEMORY; WEIVEL_C_STATUS_DESTROYED. Nothing stays
@@ -189,9 +209,9 @@ WEIVEL_C_API weivel_c_status weivel_c_host_load_library(weivel_c_host *host, con
                                                         weivel_c_refusal *refusal);
 
 /**
- * Unloads a library: every later call through its services answers WEIVEL_C_STATUS_UNLOADED, every service it
- * registered is unregistered, and its binary is closed as soon as no call runs in it and no bytes it answered are
- * held: at once when none are, else by whichever of them ends last.
+ * Unloads a library: every later call through its bytes objects answers WEIVEL_C_STATUS_UNLOADED, every service it
+ * registered is unregistered at once, and its binary is closed as soon as no call runs in it, no bytes it answered are
+ * held and nothing holds any of its definitions: at once when none of them is so, else by whichever ends last.
  *
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_NOT_UNLOADED when the platform refused to close the binary now;
  * WEIVEL_C_STATUS_NONE for a library unloaded already; WEIVEL_C_STATUS_MISUSE for NULL or a library of another host;

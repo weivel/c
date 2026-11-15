@@ -37,6 +37,6 @@ int weivel_c_references_drop(weivel_c_references *references) {
     return InterlockedExchangeAdd(&references->word, -2) == 3;
 }
 
-int weivel_c_references_held(weivel_c_references *references) {
-    return InterlockedOr(&references->word, 0) > 1;
+int weivel_c_references_held_beyond(weivel_c_references *references, uint32_t count) {
+    return (uint32_t)InterlockedOr(&references->word, 0) / 2u > count;
 }

@@ -25,16 +25,32 @@ typedef int32_t (*library_function)(const uint8_t *input, size_t input_length, u
 /** A declaration's release symbol. */
 typedef void (*library_release)(uint8_t *buffer);
 
-/** One declared service. Its object comes first, so the object a consumer calls through leads back to it. */
+/** A declared function of the definition kind, as WEIVEL_STANDARD_FUNCTION_DEFINITION gives its signature. */
+typedef const void *(*library_definition)(void);
+
+/** The smallest `size` a definition's struct may have: the `size` and one pointer under the platform's alignment. */
+#define WEIVEL_C_DEFINITION_FLOOR (2 * sizeof(void *))
+
+/**
+ * One declared service. Its object comes first, so the object a consumer calls through leads back to it. A service
+ * that declares a definition is registered as `definition` instead, and its object is left empty.
+ */
 typedef struct library_service {
     weivel_c_library_service object;
     weivel_c_library *library;
     library_function *functions;
     char **names;
     char *id;
+    /** What its definition's symbol answered, the very pointer registered; NULL for a service of bytes functions. */
+    const void *definition;
     weivel_handle registration;
     /** 1 while its registration under WEIVEL_HOST stands. */
     uint32_t registered;
+    /**
+     * 1 while a definition service holds a reference on its library: from its load until the core tells the host
+     * nothing holds it any more, or until the host is freed; guarded by the host's lock.
+     */
+    uint32_t holds_reference;
 } library_service;
 
 struct weivel_c_library {
@@ -46,6 +62,8 @@ struct weivel_c_library {
     library_release release;
     /** 1 once an unload or the destroy took the library; guarded by the host's lock. */
     uint32_t unloaded;
+    /** How many of its definition services hold a reference on it; guarded by the host's lock. */
+    uint32_t definitions_holding;
     uint32_t service_count;
     library_service *services;
 };
@@ -66,6 +84,12 @@ void weivel_c_host_report_unclosed(weivel_c_host *host, const char *text);
 
 /** Drops a reference on a library, closing its binary when it was the last one, and reports when that fails. */
 void weivel_c_host_drop_library_reference(weivel_c_library *library);
+
+/**
+ * Lets go of the reference a definition service holds, closing the binary when it was the last one. Answers 1 when it
+ * held one, which only one caller is ever answered.
+ */
+int weivel_c_host_release_definition(library_service *service);
 
 /** The id a later service of the declaration repeats from an earlier one, the declaration's own text, or NULL. */
 const char *weivel_c_host_repeated_id(const weivel_standard_library *declaration);

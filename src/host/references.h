@@ -63,7 +63,7 @@ int weivel_c_references_close(weivel_c_references *references);
 /** Drops a reference. Answers 1 when it was the last one of a library closed to calls, so its binary may close. */
 int weivel_c_references_drop(weivel_c_references *references);
 
-/** Answers 1 while any reference is held. */
-int weivel_c_references_held(weivel_c_references *references);
+/** Answers 1 while more than `count` references are held. */
+int weivel_c_references_held_beyond(weivel_c_references *references, uint32_t count);
 
 #endif

@@ -320,7 +320,8 @@ static void settle_the_claim(weivel_c_host *host, host_service *kept, weivel_c_s
 
 static weivel_c_status register_claimed(weivel_c_host *host, const char *id, void *service,
                                         const weivel_c_capacity_answerer *answerer, int library_ids_refused,
-                                        weivel_handle *registration, weivel_c_refusal *refusal) {
+                                        int awaiting_releases, weivel_handle *registration,
+                                        weivel_c_refusal *refusal) {
     host_service *kept;
     weivel_c_status status;
     if (host == NULL || id == NULL || id[0] == '\0' || service == NULL) {
@@ -336,8 +337,11 @@ static weivel_c_status register_claimed(weivel_c_host *host, const char *id, voi
         free(kept);
         return status;
     }
-    status = weivel_c_context_register_service(host->own_context, id, service, answerer, &kept->registration,
-                                               refusal);
+    status = awaiting_releases
+                 ? weivel_c_context_register_service_awaiting_releases(host->own_context, id, service, answerer,
+                                                                       &kept->registration, refusal)
+                 : weivel_c_context_register_service(host->own_context, id, service, answerer, &kept->registration,
+                                                     refusal);
     if (status == WEIVEL_C_STATUS_OK && registration != NULL) {
         *registration = kept->registration;
     }
@@ -351,15 +355,16 @@ weivel_c_status weivel_c_host_register_service(weivel_c_host *host, const char *
     if (registration != NULL) {
         *registration = 0;
     }
-    return register_claimed(host, id, service, answerer, 1, registration, refusal);
+    return register_claimed(host, id, service, answerer, 1, 0, registration, refusal);
 }
 
 weivel_c_status weivel_c_host_register_library_service(weivel_c_host *host, const char *id, void *service,
-                                                       weivel_handle *registration, weivel_c_refusal *refusal) {
+                                                       int awaiting_releases, weivel_handle *registration,
+                                                       weivel_c_refusal *refusal) {
     if (registration != NULL) {
         *registration = 0;
     }
-    return register_claimed(host, id, service, NULL, 0, registration, refusal);
+    return register_claimed(host, id, service, NULL, 0, awaiting_releases, registration, refusal);
 }
 
 static void forget_service(weivel_c_host *host, weivel_handle registration) {

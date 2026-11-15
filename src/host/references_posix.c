@@ -31,6 +31,6 @@ int weivel_c_references_drop(weivel_c_references *references) {
     return atomic_fetch_sub(&references->word, 2u) == 3u;
 }
 
-int weivel_c_references_held(weivel_c_references *references) {
-    return atomic_load(&references->word) > 1u;
+int weivel_c_references_held_beyond(weivel_c_references *references, uint32_t count) {
+    return atomic_load(&references->word) / 2u > count;
 }

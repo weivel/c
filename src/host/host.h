@@ -173,10 +173,19 @@ int weivel_c_host_manifest_is_whole(const weivel_manifest *given);
 
 /**
  * Registers a service under WEIVEL_HOST as weivel_c_host_register_service does, but without refusing an id a live
- * library declares: how a library the host loads registers its own services.
+ * library declares: how a library the host loads registers its own services. With `awaiting_releases` it registers
+ * with the core's weivel_register_service_awaiting_releases, as a definition is.
  */
 weivel_c_status weivel_c_host_register_library_service(weivel_c_host *host, const char *id, void *service,
-                                                       weivel_handle *registration, weivel_c_refusal *refusal);
+                                                       int awaiting_releases, weivel_handle *registration,
+                                                       weivel_c_refusal *refusal);
+
+/**
+ * The listener of the host's own context: a WEIVEL_C_PLUGIN_EVENT_HOLDINGS_RELEASED for a definition a library
+ * registered lets go of that definition's reference on its library, which closes the binary once nothing else holds
+ * it. `data` is the host.
+ */
+weivel_c_status weivel_c_host_hear_own_events(void *data, const weivel_c_plugin_event *event);
 
 /** Under the host's lock: 1 when a service the host registered or is registering holds `id`. */
 int weivel_c_host_holds_service_id(const weivel_c_host *host, const char *id);
@@ -282,10 +291,16 @@ void weivel_c_host_end_the_destroy(weivel_c_host *host);
  */
 void weivel_c_host_unload_every_library(weivel_c_host *host);
 
-/** Under the host's lock: 1 while a call runs in one of the host's libraries or bytes one answered are held. */
+/**
+ * Under the host's lock: 1 while a call runs in one of the host's libraries or bytes one answered are held. A
+ * definition's reference is not counted, since a holder that never releases keeps its binary open until the free.
+ */
 int weivel_c_host_libraries_are_held(weivel_c_host *host);
 
-/** Frees every library record of a host whose libraries nothing holds. */
+/**
+ * Lets go of every definition's reference still held, closing each binary that held only those, and frees every
+ * library record of a host whose libraries nothing else holds.
+ */
 void weivel_c_host_free_libraries(weivel_c_host *host);
 
 #endif
