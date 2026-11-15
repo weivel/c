@@ -84,7 +84,7 @@ typedef struct conformance_world {
     uint32_t sink_failures_of_the_run;
     uint32_t listener_failures_of_the_run;
     uint32_t error_lines_of_the_run;
-    /** The texts that reached the sink and the log, in order, the first CONFORMANCE_REPORTED of them, each cut short. */
+    /** What reached the sink and the log, in order: the first CONFORMANCE_REPORTED texts, each cut short. */
     char reported[CONFORMANCE_REPORTED][CONFORMANCE_REPORT_TEXT];
     uint32_t reported_count;
     world_plugin plugins[CONFORMANCE_PLUGINS];

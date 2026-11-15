@@ -234,8 +234,8 @@ static int measure_definition(const char *library_path, const benchmark_sampling
     }
     usable = !benchmark_resolved_the_definitions_own_pointer(&world)
                  ? -1
-                 : benchmark_measure_same_language(benchmark_definition_call, (void *)&world.direct,
-                                                   (void *)&world.direct_again, (void *)&world.resolved, sampling,
+                 : benchmark_measure_same_language(benchmark_definition_call, (void *)world.direct,
+                                                   (void *)world.direct_again, (void *)world.resolved, sampling,
                                                    result);
     benchmark_definition_world_end(&world);
     return usable;

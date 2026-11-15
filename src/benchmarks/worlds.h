@@ -147,12 +147,13 @@ int benchmark_definition_world_start(benchmark_definition_world *world, const we
 int benchmark_resolved_the_definitions_own_pointer(const benchmark_definition_world *world);
 
 /**
- * The echo definition's `count_unloads` handed NULL, called through the definition `data` points to, a
- * `const void **`: `&world->direct`, `&world->direct_again` or `&world->resolved`.
+ * The echo definition's `count_unloads` handed NULL, called through the definition `data` is: `world->direct`,
+ * `world->direct_again` or `world->resolved`, each read out of the struct on every call.
  *
- * @implNote It is the definition's one operation that allocates nothing, so the paths differ by the call alone and not
- * by the allocator; one function serves all three, reading the operation out of the struct on every call, as
- * benchmark_same_language_call does.
+ * @implNote It is the definition's one operation that allocates nothing. Each path is handed the definition itself
+ * rather than the place that holds it, since the operation stores into the library: a load from a place of each path's
+ * own can alias that store on one path alone, which costs that path a sixth for the whole run, as one Windows run
+ * measured. The identity is checked before anything is measured.
  */
 int benchmark_definition_call(void *data, uint32_t call);
 

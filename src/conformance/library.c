@@ -118,7 +118,7 @@ static library_holding *holding_of(library_run *run, world_plugin *holder, const
     return NULL;
 }
 
-/** The holding of `holder` for `id`, made when it has none; NULL with a problem past the limit or for an id undeclared. */
+/** The holding of `holder` for `id`, made if it has none; NULL with a problem past the limit or for an id unlisted. */
 static library_holding *holding_for(library_run *run, world_plugin *holder, const char *id) {
     library_holding *holding;
     const char *kept = declared_id(run, id);
@@ -213,7 +213,8 @@ static int open_the_holders(library_run *run) {
     activation.count = world->plugin_count;
     activation.edge_source = WEIVEL_EDGES_CAPABILITIES;
     activation.listener.hear = ignore_outcome;
-    if (world->plugin_count > 0 && weivel_c_host_activate(world->host, &activation, &plan, NULL) != WEIVEL_C_STATUS_OK) {
+    if (world->plugin_count > 0 &&
+        weivel_c_host_activate(world->host, &activation, &plan, NULL) != WEIVEL_C_STATUS_OK) {
         return conformance_world_fail(world, "the host did not open the vector's holders", NULL);
     }
     weivel_c_host_plan_release(world->host, &plan);
@@ -289,7 +290,8 @@ static int echo_step(library_run *run, world_plugin *holder, const char *text) {
     size_t length = 0;
     int32_t status;
     if (definition == NULL || text == NULL || run->echoed_count == LIBRARY_STEPS) {
-        return definition == NULL ? 0 : conformance_world_fail(run->world, "an echo step is not as LAYER.md has it", NULL);
+        return definition == NULL ? 0
+                                  : conformance_world_fail(run->world, "an echo step is not as LAYER.md has it", NULL);
     }
     status = definition->echo(definition->context, (const uint8_t *)text, strlen(text), &output, &length);
     if (status == 0 && length < LIBRARY_TEXT) {

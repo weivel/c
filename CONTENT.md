@@ -333,9 +333,9 @@ through the layer's public surface on a table its caller loaded:
   with it;
 - the library call's definition row: an operation of the echo library's definition called through the definition the
   host's own context resolved, beside the same operation called twice through the pointer the definition's symbol
-  answered, each reading the operation's function pointer out of the struct on every call. The two are one pointer,
-  so the row is judged by its platform's noise bounds, as the same-language call is, and fails when the host
-  resolved anything else.
+  answered, each handed the definition itself and reading the operation's function pointer out of the struct on every
+  call. The two are one pointer, so the row is judged by its platform's noise bounds, as the same-language call is,
+  and fails when the host resolved anything else.
 
 `test/benchmarks/` holds the gates. In every build: the identity gate, a consumer handed the provider's very pointer
 by `weivel_c_context_get_service` and a thousand calls through it crossing into the core not once on a table that
@@ -348,8 +348,8 @@ control call through the wrapper against the core's own budget, `benchmarks/budg
 ratio gates against `benchmarks/c.txt` of the pinned kit, each round's measured path over its reference, the
 per-round median held to the highest ratio measured on that runner times the margin; the same-language call against
 that runner's noise bounds in the same file, failing a run too noisy to judge, and the library call's definition row
-against the same bounds; and a measuring mode that prints every measurement the bounds are set from. Every bound is the kit's; the layer sets none, and the commit that adds `c.txt`
-to the kit lists the samples.
+against the same bounds; and a measuring mode that prints every measurement the bounds are set from. Every bound is
+the kit's; the layer sets none, and the commit that adds `c.txt` to the kit lists the samples.
 
 ## Building
 
