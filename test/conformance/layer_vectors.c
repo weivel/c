@@ -56,7 +56,10 @@ const layer_vector_test LAYER_VECTOR_TESTS[] = {
     {"want/a-registration-past-an-unfired-deadline-loses", witness_alone},
     {"lifecycle/an-awaited-want-does-not-hold-back-a-later-plugin", witness_alone},
     {"lifecycle/a-release-deactivates-then-releases-then-forgets", witness_alone},
-    {"lifecycle/destroy-releases-a-plugin-whose-activate-is-in-flight", witness_alone}};
+    {"lifecycle/destroy-releases-a-plugin-whose-activate-is-in-flight", witness_alone},
+    {"lifecycle/events-of-an-activate-wait-for-every-activate-of-the-plan", witness_alone},
+    {"lifecycle/an-activate-that-settles-at-once-is-verified-before-the-next-starts", witness_alone},
+    {"lifecycle/an-activate-refused-at-once-is-quarantined-before-the-next-starts", witness_alone}};
 
 const uint32_t LAYER_VECTOR_TEST_COUNT = sizeof LAYER_VECTOR_TESTS / sizeof LAYER_VECTOR_TESTS[0];
 
