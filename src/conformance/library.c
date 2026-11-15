@@ -8,6 +8,11 @@
  *
  * In C a holder lets go of a revoked holding with weivel_c_context_release_holding, handed the `handle` its
  * revocation named, and of a kept bytes answer with the object's `release_bytes`.
+ *
+ * A C host's release forgets the plugin in the same call, once the events the core's release queued have been heard,
+ * so a released plugin's late call can be made only while it hears them. The `get` steps a holder makes straight after
+ * its `releaseHolder` are therefore made from its listener, as it hears the revocation its release queued, and the
+ * `forgetHolder` that follows finds the plugin forgotten already.
  */
 
 #include <stdio.h>
@@ -35,10 +40,18 @@ typedef struct library_holding {
     weivel_c_library_answer kept;
 } library_holding;
 
+/** A pair of names a run answers: a holder and an id it was revoked, or an owner and an id whose holdings ended. */
 typedef struct revocation {
     const char *holder;
     const char *id;
 } revocation;
+
+/** A registration an owner made awaiting releases, so its release event can be told by the id it was made under. */
+typedef struct owner_registration {
+    world_plugin *owner;
+    const char *id;
+    weivel_handle registration;
+} owner_registration;
 
 typedef struct library_run {
     conformance_world *world;
@@ -58,6 +71,21 @@ typedef struct library_run {
     uint64_t unloads[LIBRARY_STEPS];
     uint32_t unloads_count;
     int same_object;
+    /** Every id the owners provide, the vector's own texts. */
+    const char *provided[CONFORMANCE_DECLARED];
+    uint32_t provided_count;
+    owner_registration registrations[LIBRARY_HOLDINGS];
+    uint32_t registration_count;
+    revocation released[LIBRARY_HOLDINGS];
+    uint32_t released_count;
+    const weivel_json_value *steps;
+    /** The step the run goes on with after the one running. */
+    size_t next_step;
+    /** While a holder is being released: that holder, and the steps of its late gets, [late_from, late_to). */
+    world_plugin *releasing;
+    size_t late_from;
+    size_t late_to;
+    int late_made;
 } library_run;
 
 /**
@@ -83,12 +111,20 @@ static uint32_t open_and_wait(void *data, weivel_c_context *context, weivel_c_co
     return WEIVEL_C_ENTRY_PENDING;
 }
 
-/** The declared id equal to `id`, the declaration's own text, so a kept pointer outlives the event it came from. */
+/**
+ * The declared or provided id equal to `id`, the declaration's or the vector's own text, so a kept pointer outlives the
+ * event it came from.
+ */
 static const char *declared_id(library_run *run, const char *id) {
     size_t at;
     for (at = 0; id != NULL && at < run->declaration.service_count; at++) {
         if (strcmp(run->declaration.services[at].id, id) == 0) {
             return run->declaration.services[at].id;
+        }
+    }
+    for (at = 0; id != NULL && at < run->provided_count; at++) {
+        if (strcmp(run->provided[at], id) == 0) {
+            return run->provided[at];
         }
     }
     return NULL;
@@ -143,21 +179,55 @@ static library_holding *holding_for(library_run *run, world_plugin *holder, cons
     return holding;
 }
 
-static weivel_c_status hear_revoked(void *data, const weivel_c_plugin_event *event) {
-    world_plugin *holder = data;
-    library_run *run = run_of(holder);
+static int get_step(library_run *run, world_plugin *holder, const char *id);
+
+static const char *string_at(const weivel_json_value *step, const char *key) {
+    return weivel_json_as_string(weivel_json_object_get(step, key));
+}
+
+/** Makes a released holder's late gets, once, from the first revocation its own release queued. */
+static void make_the_late_gets(library_run *run, world_plugin *holder) {
+    size_t at;
+    if (run->releasing != holder || run->late_made) {
+        return;
+    }
+    run->late_made = 1;
+    for (at = run->late_from; at < run->late_to; at++) {
+        get_step(run, holder, string_at(weivel_json_array_at(run->steps, at), "get"));
+    }
+}
+
+static void hear_released(library_run *run, world_plugin *owner, weivel_handle registration) {
+    uint32_t at;
+    for (at = 0; at < run->registration_count; at++) {
+        if (run->registrations[at].owner == owner && run->registrations[at].registration == registration &&
+            run->released_count < LIBRARY_HOLDINGS) {
+            run->released[run->released_count].holder = owner->name;
+            run->released[run->released_count++].id = run->registrations[at].id;
+        }
+    }
+}
+
+static weivel_c_status hear_plugin_event(void *data, const weivel_c_plugin_event *event) {
+    world_plugin *plugin = data;
+    library_run *run = run_of(plugin);
     const char *id = declared_id(run, event->id);
-    library_holding *holding = id == NULL ? NULL : holding_of(run, holder, id);
+    library_holding *holding = id == NULL ? NULL : holding_of(run, plugin, id);
+    if (event->kind == WEIVEL_C_PLUGIN_EVENT_HOLDINGS_RELEASED) {
+        hear_released(run, plugin, event->handle);
+        return WEIVEL_C_STATUS_OK;
+    }
     if (event->kind != WEIVEL_C_PLUGIN_EVENT_REVOKED || id == NULL) {
         return WEIVEL_C_STATUS_OK;
     }
     if (run->revoked_count < LIBRARY_HOLDINGS) {
-        run->revoked[run->revoked_count].holder = holder->name;
+        run->revoked[run->revoked_count].holder = plugin->name;
         run->revoked[run->revoked_count++].id = id;
     }
     if (holding != NULL) {
         holding->revoked = event->handle;
     }
+    make_the_late_gets(run, plugin);
     return WEIVEL_C_STATUS_OK;
 }
 
@@ -176,21 +246,52 @@ static int read_declaration(library_run *run, const weivel_json_value *declared)
     return 1;
 }
 
+static void wants(world_plugin *plugin, const char *id) {
+    plugin->wants[plugin->want_count] = (weivel_service_want)WEIVEL_INIT(weivel_service_want);
+    plugin->wants[plugin->want_count++].id = id;
+}
+
 static int add_holder(library_run *run, const char *name) {
     world_plugin *plugin = conformance_world_add(run->world, name, open_and_wait);
     size_t at;
     if (plugin == NULL || name == NULL) {
         return conformance_world_fail(run->world, "a holder is no string", NULL);
     }
-    if (run->declaration.service_count > CONFORMANCE_DECLARED) {
-        return conformance_world_fail(run->world, "the declaration lists more ids than a holder consumes", NULL);
+    if (run->declaration.service_count + run->provided_count > CONFORMANCE_DECLARED) {
+        return conformance_world_fail(run->world, "the vector lists more ids than a holder consumes", NULL);
     }
     plugin->more = run;
     for (at = 0; at < run->declaration.service_count; at++) {
-        plugin->wants[at] = (weivel_service_want)WEIVEL_INIT(weivel_service_want);
-        plugin->wants[at].id = run->declaration.services[at].id;
+        wants(plugin, run->declaration.services[at].id);
     }
-    plugin->want_count = (uint32_t)run->declaration.service_count;
+    for (at = 0; at < run->provided_count; at++) {
+        wants(plugin, run->provided[at]);
+    }
+    return conformance_world_register(run->world, plugin);
+}
+
+static int add_owner(library_run *run, const weivel_json_value *given) {
+    static const char *const keys[] = {"id", "provides"};
+    world_plugin *plugin;
+    uint32_t at;
+    if (!conformance_world_knows_keys(run->world, given, keys, 2, "an owner")) {
+        return 0;
+    }
+    plugin = conformance_world_add(run->world, string_at(given, "id"), open_and_wait);
+    if (plugin == NULL || plugin->name == NULL) {
+        return conformance_world_fail(run->world, "an owner has no string id", NULL);
+    }
+    plugin->more = run;
+    if (!conformance_world_strings(run->world, weivel_json_object_get(given, "provides"),
+                                   run->provided + run->provided_count, &at) ||
+        run->provided_count + at > CONFORMANCE_DECLARED) {
+        return conformance_world_fail(run->world, "the owners provide more ids than the driver holds", NULL);
+    }
+    for (plugin->offer_count = 0; plugin->offer_count < at; plugin->offer_count++) {
+        plugin->offers[plugin->offer_count] = (weivel_service_offer)WEIVEL_INIT(weivel_service_offer);
+        plugin->offers[plugin->offer_count].id = run->provided[run->provided_count + plugin->offer_count];
+    }
+    run->provided_count += at;
     return conformance_world_register(run->world, plugin);
 }
 
@@ -220,7 +321,7 @@ static int open_the_holders(library_run *run) {
     weivel_c_host_plan_release(world->host, &plan);
     for (index = 0; index < world->plugin_count; index++) {
         world_plugin *plugin = &world->plugins[index];
-        weivel_c_plugin_listener listener = {hear_revoked, plugin};
+        weivel_c_plugin_listener listener = {hear_plugin_event, plugin};
         uint64_t registration = 0;
         if (plugin->context == NULL ||
             weivel_c_context_add_listener(plugin->context, &listener, &registration) != WEIVEL_C_STATUS_OK) {
@@ -386,10 +487,84 @@ static int read_unloads_step(library_run *run) {
     return 1;
 }
 
-static int host_step(library_run *run, const weivel_json_value *step) {
+static const char *plugin_named_by(const weivel_json_value *step) {
+    static const char *const keys[] = {"releaseHolder", "quarantine", "forgetHolder"};
+    uint32_t at;
+    for (at = 0; at < 3; at++) {
+        if (weivel_json_object_get(step, keys[at]) != NULL) {
+            return string_at(step, keys[at]);
+        }
+    }
+    return NULL;
+}
+
+/** The end of the run of `get` steps `holder` makes straight after the step at `at`. */
+static size_t late_gets_end(library_run *run, const world_plugin *holder, size_t at) {
+    size_t end = at + 1;
+    while (end < weivel_json_array_length(run->steps)) {
+        const weivel_json_value *step = weivel_json_array_at(run->steps, end);
+        const char *named = string_at(step, "holder");
+        if (named == NULL || strcmp(named, holder->name) != 0 || weivel_json_object_get(step, "get") == NULL) {
+            break;
+        }
+        end++;
+    }
+    return end;
+}
+
+static int release_step(library_run *run, world_plugin *plugin) {
     uint32_t finished = 0;
+    size_t at = run->next_step - 1;
+    run->releasing = plugin;
+    run->late_from = at + 1;
+    run->late_to = late_gets_end(run, plugin, at);
+    run->late_made = 0;
+    weivel_c_host_release(run->world->host, plugin->handle, &finished);
+    run->releasing = NULL;
+    if (run->late_to == run->late_from) {
+        return 1;
+    }
+    if (!run->late_made) {
+        return conformance_world_fail(run->world, "a released holder heard nothing of its release to call from",
+                                      plugin->name);
+    }
+    run->next_step = run->late_to;
+    return 1;
+}
+
+/** In C the release forgot the plugin already, so the step holds the host to having done so. */
+static int forget_step(library_run *run, world_plugin *plugin) {
+    uint32_t state = 0;
+    if (weivel_c_host_plugin_state(run->world->host, plugin->handle, &state) != WEIVEL_C_STATUS_NONE) {
+        return conformance_world_fail(run->world, "the host has not forgotten a holder it released", plugin->name);
+    }
+    return 1;
+}
+
+static int register_awaiting_step(library_run *run, const weivel_json_value *step) {
+    world_plugin *owner = conformance_world_plugin(run->world, string_at(step, "owner"));
+    const char *id = declared_id(run, string_at(step, "registerAwaitingReleases"));
+    owner_registration *made;
+    if (owner == NULL || owner->context == NULL || id == NULL || run->registration_count == LIBRARY_HOLDINGS) {
+        return owner == NULL ? 0
+                             : conformance_world_fail(run->world, "a registration step is not as LAYER.md has it", id);
+    }
+    made = &run->registrations[run->registration_count++];
+    made->owner = owner;
+    made->id = id;
+    if (weivel_c_context_register_service_awaiting_releases(owner->context, id, owner, NULL, &made->registration,
+                                                            NULL) != WEIVEL_C_STATUS_OK) {
+        return conformance_world_fail(run->world, "an owner's registration awaiting releases was refused", id);
+    }
+    return 1;
+}
+
+static int host_step(library_run *run, const weivel_json_value *step) {
     world_plugin *plugin;
     if (weivel_json_object_get(step, "load") != NULL) {
+        if (run->declaration.service_count == 0) {
+            return conformance_world_fail(run->world, "a load step comes with no declaration", NULL);
+        }
         run->load_made = 1;
         run->load_status = weivel_c_host_load_library(run->world->host, run->world->library_path, &run->declaration,
                                                       &run->library, NULL, NULL);
@@ -405,21 +580,17 @@ static int host_step(library_run *run, const weivel_json_value *step) {
     if (weivel_json_object_get(step, "readUnloads") != NULL) {
         return read_unloads_step(run);
     }
-    plugin = conformance_world_plugin(
-        run->world, weivel_json_as_string(weivel_json_object_get(
-                        step, weivel_json_object_get(step, "releaseHolder") != NULL ? "releaseHolder" : "quarantine")));
+    plugin = conformance_world_plugin(run->world, plugin_named_by(step));
     if (plugin == NULL) {
         return 0;
     }
     if (weivel_json_object_get(step, "quarantine") != NULL) {
         return quarantine_step(run, plugin);
     }
-    weivel_c_host_release(run->world->host, plugin->handle, &finished);
-    return 1;
-}
-
-static const char *string_at(const weivel_json_value *step, const char *key) {
-    return weivel_json_as_string(weivel_json_object_get(step, key));
+    if (weivel_json_object_get(step, "forgetHolder") != NULL) {
+        return forget_step(run, plugin);
+    }
+    return release_step(run, plugin);
 }
 
 static int holder_step(library_run *run, const weivel_json_value *step) {
@@ -447,12 +618,19 @@ static int holder_step(library_run *run, const weivel_json_value *step) {
 
 /** Refuses a step whose keys are not exactly those of one step LAYER.md names. */
 static int check_step(library_run *run, const weivel_json_value *step) {
-    static const char *const alone[] = {"load", "unload", "readUnloads", "releaseHolder", "quarantine"};
+    static const char *const alone[] = {"load",          "unload",     "readUnloads",
+                                        "releaseHolder", "quarantine", "forgetHolder"};
+    static const char *const owner_keys[] = {"owner", "registerAwaitingReleases"};
     static const char *const held[] = {"get", "echo", "drop", "countUnloads", "releaseHolding"};
     static const char *const call_keys[] = {"holder", "call", "function", "text", "keep"};
     const char *keys[2] = {"holder", NULL};
     uint32_t at;
-    for (at = 0; at < 5; at++) {
+    if (weivel_json_object_get(step, "owner") != NULL) {
+        return conformance_world_knows_keys(run->world, step, owner_keys, 2, "a step") &&
+               (weivel_json_object_size(step) == 2 ||
+                conformance_world_fail(run->world, "an owner's step is not as LAYER.md has it", NULL));
+    }
+    for (at = 0; at < 6; at++) {
         if (weivel_json_object_get(step, alone[at]) != NULL) {
             return conformance_world_knows_keys(run->world, step, &alone[at], 1, "a step");
         }
@@ -472,16 +650,24 @@ static int check_step(library_run *run, const weivel_json_value *step) {
 }
 
 static int build_and_check(library_run *run, const weivel_json_value *given) {
-    static const char *const keys[] = {"declaration", "holders", "steps"};
+    static const char *const keys[] = {"declaration", "owners", "holders", "steps"};
+    const weivel_json_value *declaration = weivel_json_object_get(given, "declaration");
+    const weivel_json_value *owners = weivel_json_object_get(given, "owners");
     const weivel_json_value *holders = weivel_json_object_get(given, "holders");
     const weivel_json_value *steps = weivel_json_object_get(given, "steps");
     size_t at;
+    run->declaration = (weivel_standard_library)WEIVEL_INIT(weivel_standard_library);
     if (run->world->library_path == NULL) {
         return conformance_world_fail(run->world, "a library vector needs the echo library's path", NULL);
     }
-    if (!conformance_world_knows_keys(run->world, given, keys, 3, "the given") ||
-        !read_declaration(run, weivel_json_object_get(given, "declaration"))) {
+    if (!conformance_world_knows_keys(run->world, given, keys, 4, "the given") ||
+        (declaration != NULL && !read_declaration(run, declaration))) {
         return 0;
+    }
+    for (at = 0; at < weivel_json_array_length(owners); at++) {
+        if (!add_owner(run, weivel_json_array_at(owners, at))) {
+            return 0;
+        }
     }
     for (at = 0; at < weivel_json_array_length(holders); at++) {
         if (!add_holder(run, weivel_json_as_string(weivel_json_array_at(holders, at)))) {
@@ -497,6 +683,9 @@ static int build_and_check(library_run *run, const weivel_json_value *given) {
 }
 
 static int run_step(library_run *run, const weivel_json_value *step) {
+    if (weivel_json_object_get(step, "owner") != NULL) {
+        return register_awaiting_step(run, step);
+    }
     if (weivel_json_object_get(step, "holder") != NULL) {
         return holder_step(run, step);
     }
@@ -577,6 +766,21 @@ static void observe_revoked(void *data, const weivel_json_value *expectation, co
     conformance_text_append(out, "]");
 }
 
+static void observe_holdings_released(void *data, const weivel_json_value *expectation, conformance_text *out) {
+    library_run *run = data;
+    uint32_t at;
+    (void)expectation;
+    conformance_text_append(out, "[");
+    for (at = 0; at < run->released_count; at++) {
+        const char *pair[2];
+        pair[0] = run->released[at].holder;
+        pair[1] = run->released[at].id;
+        conformance_text_append(out, at == 0 ? "" : ",");
+        conformance_write_names(out, pair, 2, 0);
+    }
+    conformance_text_append(out, "]");
+}
+
 static void observe_unloads(void *data, const weivel_json_value *expectation, conformance_text *out) {
     library_run *run = data;
     uint32_t at;
@@ -603,7 +807,8 @@ static void observe_reported(void *data, const weivel_json_value *expectation, c
 static const conformance_field LIBRARY_FIELDS[] = {
     {"loaded", observe_loaded}, {"callersMistake", observe_callers_mistake}, {"got", observe_got},
     {"sameObject", observe_same_object}, {"echoed", observe_echoed},        {"revoked", observe_revoked},
-    {"unloads", observe_unloads},        {"reported", observe_reported}};
+    {"unloads", observe_unloads},        {"holdingsReleased", observe_holdings_released},
+    {"reported", observe_reported}};
 
 /** Lets go of every bytes answer still kept, so the host's destroy and free find nothing of the run's held. */
 static void drop_what_is_kept(library_run *run) {
@@ -624,8 +829,11 @@ int conformance_drive_library(conformance_world *world, const conformance_vector
     run.world = world;
     run.same_object = 1;
     unload_counter = 0;
+    run.steps = steps;
     driven = build_and_check(&run, vector->given);
-    for (at = 0; driven && at < weivel_json_array_length(steps); at++) {
+    world->reported_count = 0;
+    for (at = 0; driven && at < weivel_json_array_length(steps); at = run.next_step) {
+        run.next_step = at + 1;
         driven = run_step(&run, weivel_json_array_at(steps, at)) && !world->has_problem;
     }
     driven = driven && !world->has_problem &&

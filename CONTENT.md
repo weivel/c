@@ -312,6 +312,12 @@ pass. `weivel_c_conformance_vector_ids` lists every vector under a directory at 
   `weivel_c_context_release_holding`, handed the `handle` its revocation named, and of a kept bytes answer with the
   object's `release_bytes`. `sameObject` is read at each get of a definition, by opening the binary again while the
   host holds it open and closing it at once, so no handle of the driver's outlives the step and the counter moves.
+  Its owners are opened before its holders, each holder consuming every declared and every provided id, and each
+  hears its release events through a listener of its context. `reported` counts the sink's and the log's lines from
+  the first step on, the core's own log lines included. A C host's release forgets the plugin in the same call, once
+  the events the core's release queued have been heard, so the `get` steps a holder makes straight after its
+  `releaseHolder` are made as late calls from its listener, as it hears its release revoke what it held, and the
+  `forgetHolder` that follows holds the host to having forgotten it.
 
 `test/conformance/` holds one test per layer vector of the pinned kit, named by its id and reading the kit's file at
 run time, and a coverage test that lists the kit's vector directory and fails on a vector no test names. The kit's
@@ -335,7 +341,10 @@ through the layer's public surface on a table its caller loaded:
   host's own context resolved, beside the same operation called twice through the pointer the definition's symbol
   answered, each handed the definition itself and reading the operation's function pointer out of the struct on every
   call. The two are one pointer, so the row is judged by its platform's noise bounds, as the same-language call is,
-  and fails when the host resolved anything else.
+  and fails when the host resolved anything else. It is sampled in more and shorter rounds than the same-language
+  call, as RUNNER.md lets a language: 2,000,000 warm-up calls, then 3,001 rounds of 100,000 calls each, where the
+  same-language call takes 301 rounds of 1,000,000, since a call into another binary spreads more within a long
+  batch.
 
 `test/benchmarks/` holds the gates. In every build: the identity gate, a consumer handed the provider's very pointer
 by `weivel_c_context_get_service` and a thousand calls through it crossing into the core not once on a table that

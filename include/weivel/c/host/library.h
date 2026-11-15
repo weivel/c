@@ -25,7 +25,8 @@
  * - Its binary is closed only once no call runs in it, no bytes it answered are still held, and the core has told the
  *   host that nothing holds any of its definitions, whichever ends last, so nothing ever calls into a closed library,
  *   and bytes still held stay readable until released. A holder that never lets go of a definition keeps the binary
- *   open until weivel_c_host_free.
+ *   open until weivel_c_host_free, which closes it, since the destroy ends every registration without the core's
+ *   release event. Every address a definition answered is invalid once its binary is closed.
  *
  * The host includes the standard's declaration types and never loads, links or calls the standard's binary.
  *

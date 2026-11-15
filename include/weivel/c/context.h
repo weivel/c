@@ -447,6 +447,9 @@ WEIVEL_C_API weivel_c_status weivel_c_context_register_service_awaiting_releases
  * registration revoked: the core's weivel_release_holding for the plugin and `registration`, the `handle` the
  * revocation named. Every answer, refusal and handle the object gave the plugin must be released first. It is how a
  * holding ends whichever way the plugin came to hold it, a get, a settled want or a watch hearing it registered.
+ * Once it returns OK, a call through the object is the plugin's defect and undefined, as any use of memory after its
+ * free is: for a definition nothing then keeps its library's binary open, so the call may land in a closed binary.
+ * The same holds once the host has released, quarantined or forgotten the plugin, which ends the holding itself.
  *
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_REFUSED with the core's refusal, for a holding still live, one of a
  * registration made without awaiting releases, one ended already or none at all; WEIVEL_C_STATUS_MISUSE; and what the

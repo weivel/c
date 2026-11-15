@@ -71,7 +71,10 @@ const layer_vector_test LAYER_VECTOR_TESTS[] = {
     {"library/a-binary-closes-once-every-definition-service-is-released", witness_alone},
     {"library/a-binary-with-no-holding-closes-at-the-unload", witness_alone},
     {"library/a-holding-ended-with-its-holder-closes-the-binary", witness_alone},
-    {"library/a-held-bytes-answer-keeps-the-binary-open-past-the-last-holding", witness_alone}};
+    {"library/a-held-bytes-answer-keeps-the-binary-open-past-the-last-holding", witness_alone},
+    {"library/an-owner-hears-the-release-its-own-release-queued", witness_alone},
+    {"library/a-release-event-after-its-owner-was-quarantined-reaches-no-one", witness_alone},
+    {"library/a-forgotten-holder-ends-its-late-holding", witness_alone}};
 
 const uint32_t LAYER_VECTOR_TEST_COUNT = sizeof LAYER_VECTOR_TESTS / sizeof LAYER_VECTOR_TESTS[0];
 
