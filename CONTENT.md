@@ -91,6 +91,12 @@ borrows, and opens the plugin with the context's token as its payload. Through i
   asked;
 - may give an answerer when it registers a service, which is put each question a constrained want asks and whose
   answer is reported to the core. A registration without one answers at once: nothing live, and that it serves;
+- may register a service awaiting its releases, `weivel_c_context_register_service_awaiting_releases`, for an object
+  that stays usable only until each holder lets go: once it is unregistered and every holding of it has ended, its
+  listeners hear `WEIVEL_C_PLUGIN_EVENT_HOLDINGS_RELEASED` naming the registration. A holder of such a registration,
+  told of its revocation by a `WEIVEL_C_PLUGIN_EVENT_REVOKED` whose `handle` names it, says it no longer uses the
+  object with `weivel_c_context_release_holding`, however it came to hold it, a watch hearing it registered
+  included;
 - provides an implementation of a capability, lists the verified ones and watches them join and leave;
 - hears what the core reports about it: which object it holds was revoked, a refusal of reach, a want that settled
   degraded;
@@ -180,10 +186,20 @@ tables and is let go before it calls anything.
 
 `weivel_c_host_load_library` (`include/weivel/c/host/library.h`) loads a C library from a declaration value, the
 standard's published `weivel_standard_library`, whether the standard read it or the caller built it, and a path the
-caller gives, since a declaration names none. It binds the declared release symbol and each declared function of the
-bytes kind, and registers each declared service under `WEIVEL_HOST` as one `weivel_c_library_service`: the service
-id, the declared function names in order, and a `call` that takes the object, a function's index, the input and an
-answer. A consumer that resolves the service is answered that very object.
+caller gives, since a declaration names none. A declared function is of one of the standard's two kinds, bytes or
+definition. The host binds the declared release symbol, which a library whose services are all definitions need not
+declare, and each declared function, and registers each declared service under `WEIVEL_HOST`: a service of bytes
+functions as one `weivel_c_library_service`, the service id, the declared function names in order, and a `call` that
+takes the object, a function's index, the input and an answer; and a service that declares a definition as that
+definition. A consumer that resolves the service is answered that very object.
+
+- A definition is a symbol `const void *f(void)` answering a static struct of function pointers that begins with its
+  `uint32_t size`, whose layout is the library's own. The host calls it once at the load and registers the pointer it
+  answered, with no wrapper, count or copy, through `weivel_c_context_register_service_awaiting_releases`, so a
+  consumer's call through it is a plain call into the library. It reads the `size` and nothing past it: NULL, or a
+  `size` below `2 * sizeof(void *)`, refuses the load as the caller's mistake, the symbol named in the failure's
+  `refused_definition`, with nothing registered. So is a definition beside another function of its service, or one
+  given context facts (named in `wrong_kind`).
 
 - A call crosses no core call and takes no lock: the input is the caller's own pointer and length, handed to the
   library for the call, and the output is answered in place, as a `weivel_c_bytes` holding the library's own
@@ -209,15 +225,20 @@ answer. A consumer that resolves the service is answered that very object.
   once one is (the destroy begun meanwhile, or a later service's registration refused) is undone as an unload is: an
   object a consumer was told of meanwhile answers `WEIVEL_C_STATUS_UNLOADED`, nothing stays registered, and the binary
   closes once nothing holds it.
-- `weivel_c_host_unload_library` unregisters every service of the library, and every later call through an object a
-  consumer still holds answers `WEIVEL_C_STATUS_UNLOADED`. Its binary closes only once no call runs in it and no bytes
-  it answered are held, on whichever of them ends last, so nothing ever calls into a closed library and bytes still
-  held stay readable. A call and each held body count themselves on one atomic word per library, which is also how
-  an unload is seen; the host's own lock guards only its list of libraries.
+- `weivel_c_host_unload_library` unregisters every service of the library at once, and every later call through a
+  bytes object a consumer still holds answers `WEIVEL_C_STATUS_UNLOADED`. A definition is called directly, so no call
+  to it can be refused: its unregistration revokes every holding of it, and each holder lets go with
+  `weivel_c_context_release_holding`. Its binary closes only once no call runs in it, no bytes it answered are held and
+  the host's own context has heard `WEIVEL_C_PLUGIN_EVENT_HOLDINGS_RELEASED` for every one of its definitions, on
+  whichever of them ends last, so nothing ever calls into a closed library and bytes still held stay readable. A call,
+  each held body and each definition not yet released count themselves on one atomic word per library, which is also
+  how an unload is seen; the host's own lock guards only its list of libraries. A holding the core ends with its
+  holder, released, quarantined or forgotten, counts as released.
 - The destroy unloads every library, the last loaded first, after every plugin release and its events and steps,
   before the core is destroyed, and `weivel_c_host_free` refuses while bytes a library answered are still held. A
-  close refused once the host is destroyed, when the last body held across the destroy is released, is told to
-  nobody.
+  definition whose release the core never told, its holder never letting go or its service still registered as the
+  destroy began, keeps its binary open until `weivel_c_host_free`, which closes it. A close refused once the host is
+  destroyed, when the last body held across the destroy is released, is told to nobody.
 
 The host includes the standard's `weivel/library.h` for its types and never links, loads or calls the standard's
 binary, and three tests read that from three sides. One reads every source outside the `standard` and `conformance`
@@ -285,6 +306,12 @@ pass. `weivel_c_conformance_vector_ids` lists every vector under a directory at 
   goes on from the want's callback. A step "throws" when the host answers a status that is no answer to a well-made
   call (anything but OK, REFUSED, NONE and DESTROYED), and a verify is `quiet` when it does not and nothing reached the
   log or the sink meanwhile.
+- A `library` vector reads its declaration with the standard's reader and loads it, with the core's echo library the
+  caller names in the options' `library_path`, through the host's public load call. Its holders are opened with an
+  activate that stays pending, so a `quarantine` step finishes it failed. A holder lets go of a revoked holding with
+  `weivel_c_context_release_holding`, handed the `handle` its revocation named, and of a kept bytes answer with the
+  object's `release_bytes`. `sameObject` is read at each get of a definition, by opening the binary again while the
+  host holds it open and closing it at once, so no handle of the driver's outlives the step and the counter moves.
 
 `test/conformance/` holds one test per layer vector of the pinned kit, named by its id and reading the kit's file at
 run time, and a coverage test that lists the kit's vector directory and fails on a vector no test names. The kit's
@@ -303,7 +330,12 @@ through the layer's public surface on a table its caller loaded:
   directly through the platform's loader, each releasing what it answered;
 - a same-language call: a consumer plugin resolves another plugin's service through its context and calls the object
   it was handed, beside the same call made twice on the provider's own object, so the run's own noise is measured
-  with it.
+  with it;
+- the library call's definition row: an operation of the echo library's definition called through the definition the
+  host's own context resolved, beside the same operation called twice through the pointer the definition's symbol
+  answered, each reading the operation's function pointer out of the struct on every call. The two are one pointer,
+  so the row is judged by its platform's noise bounds, as the same-language call is, and fails when the host
+  resolved anything else.
 
 `test/benchmarks/` holds the gates. In every build: the identity gate, a consumer handed the provider's very pointer
 by `weivel_c_context_get_service` and a thousand calls through it crossing into the core not once on a table that
@@ -315,8 +347,8 @@ the budget gives no line, before anything is measured, never passing unbounded. 
 control call through the wrapper against the core's own budget, `benchmarks/budget.txt` of the pinned kit; the two
 ratio gates against `benchmarks/c.txt` of the pinned kit, each round's measured path over its reference, the
 per-round median held to the highest ratio measured on that runner times the margin; the same-language call against
-that runner's noise bounds in the same file, failing a run too noisy to judge; and a measuring mode that prints every
-measurement the bounds are set from. Every bound is the kit's; the layer sets none, and the commit that adds `c.txt`
+that runner's noise bounds in the same file, failing a run too noisy to judge, and the library call's definition row
+against the same bounds; and a measuring mode that prints every measurement the bounds are set from. Every bound is the kit's; the layer sets none, and the commit that adds `c.txt`
 to the kit lists the samples.
 
 ## Building
