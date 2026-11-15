@@ -121,7 +121,7 @@ static void dispatch_and_hold(void *argument) {
     uint32_t here = 0;
     step.run = hold_the_dispatch;
     step.data = self;
-    CHECK(weivel_c_host_core(self->in.host, &core) == WEIVEL_C_STATUS_OK);
+    core = wrapper_of(&self->in);
     CHECK(weivel_c_core_defer(core, &step, &here) == WEIVEL_C_STATUS_OK && here == 1);
 }
 
@@ -283,6 +283,30 @@ static void an_activation_alongside_another_threads_dispatch_starts_its_plugin_o
     let_the_held_dispatch_go(&racing);
     CHECK(times_traced(&racing.in.heard, "activate late") == 1);
     CHECK(outcomes_of(&racing.in.told, racing.late.handle, &kind) == 1 && kind == WEIVEL_C_OUTCOME_ACTIVE);
+    destroy_and_finish(&racing);
+}
+
+/**
+ * Where another thread's dispatch runs, the plan is started as a call made while it runs: what its activates queue
+ * joins that dispatch's queue, and an activate that settles before it returns is still verified, and quarantined
+ * when the core refuses, before the next plugin is started.
+ */
+static void a_plan_started_while_another_thread_dispatches_joins_its_queue_and_verifies_each_settled_activate_first(void) {
+    refused_then_looking pair;
+    begin_the_race(&racing);
+    register_refused_then_looking(&pair, &racing.in);
+    trace_a_watch_as_the_host(&racing.in, "first:events");
+    hold_another_threads_dispatch(&racing);
+    CHECK(activate_refused_then_looking(&pair, &racing.in));
+    CHECK(pair.look.state == WEIVEL_C_PLUGIN_QUARANTINED);
+    CHECK(pair.look.ledger_status == WEIVEL_PLUGIN_STATUS_QUARANTINED);
+    CHECK(is_before(&racing.in.heard, "activate first", "activate second"));
+    CHECK(times_traced(&racing.in.heard, "heard first:events registered") == 0);
+    CHECK(outcome_place_of(&racing.in.told, pair.first.handle) < 0);
+    let_the_held_dispatch_go(&racing);
+    CHECK(is_before(&racing.in.heard, "activate second", "heard first:events registered"));
+    CHECK(is_quarantined_with_its_verifications_refusal(&racing.in, &pair));
+    CHECK(is_active_with_no_refusal(&racing.in, &pair));
     destroy_and_finish(&racing);
 }
 
@@ -468,7 +492,7 @@ static void dispatch_and_hold_the_ending(void *argument) {
     uint32_t here = 0;
     step.run = hold_the_ending_dispatch;
     step.data = self;
-    CHECK(weivel_c_host_core(self->in.host, &core) == WEIVEL_C_STATUS_OK);
+    core = wrapper_of(&self->in);
     CHECK(weivel_c_core_defer(core, &step, &here) == WEIVEL_C_STATUS_OK && here == 1);
 }
 
@@ -558,6 +582,7 @@ int main(int argument_count, char **arguments) {
     a_registration_that_races_the_destroy_answers_destroyed_and_keeps_nothing();
     a_free_while_another_thread_is_still_inside_the_layer_frees_nothing();
     an_activation_alongside_another_threads_dispatch_starts_its_plugin_once_before_it_returns();
+    a_plan_started_while_another_thread_dispatches_joins_its_queue_and_verifies_each_settled_activate_first();
     the_ending_of_a_quarantine_ends_no_entry_of_a_later_activation();
     a_call_whose_plugin_is_forgotten_on_its_way_in_answers_detached();
     an_activate_settling_while_the_destroy_ends_is_still_told_its_outcome();

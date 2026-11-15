@@ -218,7 +218,7 @@ static weivel_c_status run_again_until_stopped(void *data, weivel_c_core *core) 
 static void keep_dispatching(void *argument) {
     busy_dispatcher *self = argument;
     weivel_c_core *core = NULL;
-    CHECK(weivel_c_host_core(self->in->host, &core) == WEIVEL_C_STATUS_OK);
+    core = wrapper_of(self->in);
     CHECK(weivel_c_core_defer(core, &self->step, NULL) == WEIVEL_C_STATUS_OK);
 }
 

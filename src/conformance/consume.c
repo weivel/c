@@ -278,20 +278,17 @@ static void observe_refusal(void *data, const weivel_json_value *expectation, co
 /** Calls `visit` with each plugin's ledger row whose status is WEIVEL_PLUGIN_STATUS_QUARANTINED, in ledger order. */
 static void each_quarantined_row(consume_run *run, void (*visit)(void *data, const weivel_ledger_row *row),
                                  void *data) {
-    weivel_c_core *core = NULL;
+    weivel_c_host *host = run->world->host;
     uint32_t index;
-    if (weivel_c_host_core(run->world->host, &core) != WEIVEL_C_STATUS_OK) {
-        return;
-    }
     for (index = 0; index < run->world->plugin_count; index++) {
         weivel_ledger_row row = WEIVEL_INIT(weivel_ledger_row);
-        if (weivel_c_core_ledger_entry(core, run->world->plugins[index].handle, &row, NULL) != WEIVEL_C_STATUS_OK) {
+        if (weivel_c_host_ledger_row(host, run->world->plugins[index].handle, &row, NULL) != WEIVEL_C_STATUS_OK) {
             continue;
         }
         if (row.status == WEIVEL_PLUGIN_STATUS_QUARANTINED) {
             visit(data, &row);
         }
-        weivel_c_core_ledger_row_release(core, &row);
+        weivel_c_host_ledger_row_release(host, &row);
     }
 }
 

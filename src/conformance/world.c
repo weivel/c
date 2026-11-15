@@ -41,6 +41,8 @@ int conformance_world_begin(conformance_world *world, const char *core_path, con
     options.error_sink.data = world;
     options.log.write = count_line;
     options.log.data = world;
+    options.timer_observer.moved = conformance_world_hear_timer_move;
+    options.timer_observer.data = world;
     status = weivel_c_host_create(&options, &world->host, NULL);
     if (status != WEIVEL_C_STATUS_OK) {
         return conformance_world_fail(world, "the host could not be made on the core", core_path);

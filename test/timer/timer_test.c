@@ -155,7 +155,10 @@ typedef struct rig {
     weivel_handle consumer;
     timer_move moves[MOVES];
     uint32_t move_count;
-    int64_t last_deadline;
+    /** What the observer answers; a call it makes into the core while it hears a move, and what that answered. */
+    weivel_c_status observer_answers;
+    uint32_t observer_calls_in;
+    weivel_c_status called_in_as;
 } rig;
 
 static const char *const ACCOUNTS[] = {"accounts"};
@@ -165,28 +168,35 @@ static int64_t armed_deadline(weivel_c_timer *timer) {
     return weivel_c_timer_deadline(timer, &deadline) == WEIVEL_C_STATUS_OK ? deadline : DISARMED;
 }
 
-/** Notes a move when what the timer says it is armed for changed since the last note. */
-static void note_move(rig *self) {
-    int64_t deadline = armed_deadline(self->timer);
-    if (deadline != self->last_deadline && self->move_count < MOVES) {
-        self->moves[self->move_count++] = (timer_move){self->time.clock, deadline};
+/** The rig's observer: records each move the timer tells, at the clock's time. */
+static weivel_c_status record_move(void *data, uint32_t armed, int64_t deadline) {
+    rig *self = data;
+    if (self->move_count < MOVES) {
+        self->moves[self->move_count] = (timer_move){self->time.clock, armed ? deadline : DISARMED};
     }
-    self->last_deadline = deadline;
+    self->move_count++;
+    if (self->observer_calls_in) {
+        weivel_ledger_snapshot snapshot = WEIVEL_INIT(weivel_ledger_snapshot);
+        self->called_in_as = weivel_c_core_ledger(self->core, &snapshot, NULL);
+        weivel_c_core_ledger_snapshot_release(self->core, &snapshot);
+    }
+    return self->observer_answers;
 }
 
 static void begin_rig(rig *self, const weivel_c_scheduler *scheduler) {
     weivel_service_want consumed = want_of("accounts");
+    weivel_c_timer_observer observer = {record_move, NULL};
     memset(self, 0, sizeof *self);
-    self->last_deadline = DISARMED;
+    observer.data = self;
     self->core = make_core(NULL, &self->listener, &self->sink);
     self->provider = open_plugin(self->core, "provider", ACCOUNTS, 0, NULL, 0);
     self->consumer = open_plugin(self->core, "consumer", NULL, 0, &consumed, 1);
     if (scheduler != NULL) {
         weivel_c_scheduler given = *scheduler;
         given.data = &self->time;
-        CHECK(weivel_c_timer_create(self->core, &given, &self->timer) == WEIVEL_C_STATUS_OK);
+        CHECK(weivel_c_timer_create(self->core, &given, &observer, &self->timer) == WEIVEL_C_STATUS_OK);
     } else {
-        CHECK(weivel_c_timer_create(self->core, NULL, &self->timer) == WEIVEL_C_STATUS_OK);
+        CHECK(weivel_c_timer_create(self->core, NULL, &observer, &self->timer) == WEIVEL_C_STATUS_OK);
     }
     self->listener.count = 0;
     forget_crossings();
@@ -208,7 +218,6 @@ static weivel_handle want_within(rig *self, weivel_handle asker, const char *id,
     options.now = self->time.clock;
     options.timeout_millis = timeout;
     CHECK(weivel_c_core_want_service(self->core, asker, id, &options, &want, NULL) == WEIVEL_C_STATUS_OK);
-    note_move(self);
     return want;
 }
 
@@ -216,17 +225,14 @@ static weivel_handle register_accounts(rig *self) {
     weivel_handle registration = 0;
     CHECK(weivel_c_core_register_service(self->core, WEIVEL_HOST, "accounts", &registration, NULL) ==
           WEIVEL_C_STATUS_OK);
-    note_move(self);
     return registration;
 }
 
-/** Moves time to `until`, running each task due on the way and noting what the timer says after each. */
+/** Moves time to `until`, running each task due on the way. */
 static void run_rig_to(rig *self, int64_t until) {
     while (run_the_next_task(&self->time, until)) {
-        note_move(self);
     }
     self->time.clock = until;
-    note_move(self);
 }
 
 static const heard *settlement_of(const rig *self) {
@@ -353,6 +359,7 @@ static void a_scheduler_that_cannot_wait_the_whole_way_waits_as_long_as_it_can_a
     CHECK(tested.time.fired_count == 4 && crossed.advance == 1 && crossed.advanced_to == 1000);
     CHECK(timed_out(&tested) && waiting_tasks(&tested.time) == 0);
     CHECK(tested.time.cancels == 0);
+    CHECK(tested.move_count == 2 && moved(&tested, 0, 0, 1000) && moved(&tested, 1, 1000, DISARMED));
     end_rig(&tested);
 }
 
@@ -578,7 +585,7 @@ static void a_timer_made_while_the_core_waits_on_a_deadline_is_armed_at_once(voi
     memset(&time, 0, sizeof time);
     begin_rig(&tested, NULL);
     want_within(&tested, tested.consumer, "accounts", 1000);
-    CHECK(weivel_c_timer_create(tested.core, &scheduler, &second) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_timer_create(tested.core, &scheduler, NULL, &second) == WEIVEL_C_STATUS_OK);
     CHECK(waits_for_one_task_at(&time, 1000) && armed_deadline(second) == 1000);
     CHECK(weivel_c_timer_destroy(second) == WEIVEL_C_STATUS_OK);
     CHECK(waiting_tasks(&time) == 0);
@@ -616,7 +623,7 @@ static void a_second_timer_that_keeps_time_is_refused_and_the_first_still_follow
     weivel_c_timer *second = (weivel_c_timer *)&other_time;
     memset(&other_time, 0, sizeof other_time);
     begin_rig(&tested, &scheduler);
-    CHECK(weivel_c_timer_create(tested.core, &other, &second) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_timer_create(tested.core, &other, NULL, &second) == WEIVEL_C_STATUS_MISUSE);
     CHECK(second == NULL);
     want_within(&tested, tested.consumer, "accounts", 1000);
     CHECK(waits_for_one_task_at(&tested.time, 1000) && armed_deadline(tested.timer) == 1000);
@@ -643,7 +650,7 @@ static void a_timer_without_a_scheduler_leaves_the_hooks_of_the_core_alone(void)
     weivel_c_timer *second = NULL;
     begin_rig(&tested, NULL);
     set_plain_hooks(tested.core, &follower);
-    CHECK(weivel_c_timer_create(tested.core, NULL, &second) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_timer_create(tested.core, NULL, NULL, &second) == WEIVEL_C_STATUS_OK);
     want_within(&tested, tested.consumer, "accounts", 1000);
     CHECK(follower.follows == 1 && follower.at == 1000);
     CHECK(weivel_c_timer_destroy(second) == WEIVEL_C_STATUS_OK);
@@ -677,32 +684,32 @@ static void a_misused_creation_makes_no_timer(void) {
     weivel_c_core *core = make_core(NULL, NULL, NULL);
     int64_t deadline = 0;
     memset(&time, 0, sizeof time);
-    CHECK(weivel_c_timer_create(NULL, &scheduler, &timer) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_timer_create(NULL, &scheduler, NULL, &timer) == WEIVEL_C_STATUS_MISUSE);
     CHECK(timer == NULL);
-    CHECK(weivel_c_timer_create(core, &scheduler, NULL) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_timer_create(core, &scheduler, NULL, NULL) == WEIVEL_C_STATUS_MISUSE);
     scheduler.now = NULL;
-    CHECK(weivel_c_timer_create(core, &scheduler, &timer) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_timer_create(core, &scheduler, NULL, &timer) == WEIVEL_C_STATUS_MISUSE);
     scheduler = scheduler_of(&time);
     scheduler.schedule = NULL;
-    CHECK(weivel_c_timer_create(core, &scheduler, &timer) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_timer_create(core, &scheduler, NULL, &timer) == WEIVEL_C_STATUS_MISUSE);
     scheduler = scheduler_of(&time);
     scheduler.cancel = NULL;
-    CHECK(weivel_c_timer_create(core, &scheduler, &timer) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_timer_create(core, &scheduler, NULL, &timer) == WEIVEL_C_STATUS_MISUSE);
     scheduler = scheduler_of(&time);
     scheduler.maximum_wait = -1;
-    CHECK(weivel_c_timer_create(core, &scheduler, &timer) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_timer_create(core, &scheduler, NULL, &timer) == WEIVEL_C_STATUS_MISUSE);
     small.size = (uint32_t)offsetof(weivel_c_scheduler, data);
-    CHECK(weivel_c_timer_create(core, &small, &timer) == WEIVEL_C_STATUS_MISUSE);
+    CHECK(weivel_c_timer_create(core, &small, NULL, &timer) == WEIVEL_C_STATUS_MISUSE);
     small.size = (uint32_t)offsetof(weivel_c_scheduler, maximum_wait);
     small.maximum_wait = -1;
-    CHECK(weivel_c_timer_create(core, &small, &timer) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_timer_create(core, &small, NULL, &timer) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_timer_deadline(timer, NULL) == WEIVEL_C_STATUS_MISUSE);
     CHECK(weivel_c_timer_deadline(NULL, &deadline) == WEIVEL_C_STATUS_MISUSE);
     CHECK(weivel_c_timer_destroy(timer) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_timer_free(timer) == WEIVEL_C_STATUS_OK);
     CHECK(weivel_c_core_destroy(core) == WEIVEL_C_STATUS_OK);
     scheduler = scheduler_of(&time);
-    CHECK(weivel_c_timer_create(core, &scheduler, &timer) == WEIVEL_C_STATUS_DESTROYED);
+    CHECK(weivel_c_timer_create(core, &scheduler, NULL, &timer) == WEIVEL_C_STATUS_DESTROYED);
     CHECK(timer == NULL);
     CHECK(weivel_c_core_free(core) == WEIVEL_C_STATUS_OK);
     CHECK(time.clock_reads == 0 && time.schedules == 0);
@@ -1109,7 +1116,7 @@ static void a_callback_racing_a_re_arm_never_advances_before_the_deadline(void) 
     weivel_c_core *core = make_core(NULL, NULL, NULL);
     int index;
     begin_racing(&time, &scheduler, 0);
-    CHECK(weivel_c_timer_create(core, &scheduler, &timer) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_timer_create(core, &scheduler, NULL, &timer) == WEIVEL_C_STATUS_OK);
     forget_crossings();
     CHECK(start_test_thread(&runner, run_waiting_tasks, &time));
     for (index = 0; index < 2; index++) {
@@ -1179,7 +1186,7 @@ static void a_destroy_racing_a_re_arm_leaves_nothing_scheduled_and_reads_no_cloc
     weivel_c_timer *timer = NULL;
     weivel_c_core *core = make_core(NULL, NULL, NULL);
     begin_racing(&time, &scheduler, 1000000);
-    CHECK(weivel_c_timer_create(core, &scheduler, &timer) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_timer_create(core, &scheduler, NULL, &timer) == WEIVEL_C_STATUS_OK);
     want_far_ahead(core);
     churn = churn_of(core, &time, 0, 0);
     churn.wants_may_time_out = 1;
@@ -1203,6 +1210,30 @@ static void a_destroy_racing_a_re_arm_leaves_nothing_scheduled_and_reads_no_cloc
     end_core(core);
     CHECK(weivel_c_timer_free(timer) == WEIVEL_C_STATUS_OK);
     free(time.tasks);
+}
+
+static void the_observer_hears_each_move_once_outside_every_lock_and_a_failing_one_goes_to_the_sink(void) {
+    rig tested;
+    weivel_c_scheduler scheduler = scheduler_of(&tested.time);
+    weivel_handle registration;
+    begin_rig(&tested, &scheduler);
+    tested.observer_calls_in = 1;
+    tested.called_in_as = WEIVEL_C_STATUS_FAILED;
+    want_within(&tested, WEIVEL_HOST, "one", 1000);
+    CHECK(tested.move_count == 1 && moved(&tested, 0, 0, 1000) && tested.called_in_as == WEIVEL_C_STATUS_OK);
+    want_within(&tested, WEIVEL_HOST, "two", 2000);
+    CHECK(tested.move_count == 1);
+    tested.observer_answers = WEIVEL_C_STATUS_FAILED;
+    tested.time.clock = 100;
+    want_within(&tested, WEIVEL_HOST, "three", 400);
+    CHECK(tested.move_count == 2 && moved(&tested, 1, 100, 500));
+    CHECK(tested.sink.count == 1 && tested.sink.items[0].failure.kind == WEIVEL_C_FAILURE_TIMER_OBSERVER);
+    CHECK(tested.sink.items[0].failure.status == WEIVEL_C_STATUS_FAILED);
+    tested.observer_answers = WEIVEL_C_STATUS_OK;
+    registration = register_accounts(&tested);
+    CHECK(registration != 0 && tested.move_count == 2);
+    end_rig(&tested);
+    CHECK(tested.move_count == 2 && tested.sink.count == 1);
 }
 
 int main(int argument_count, char **arguments) {
@@ -1238,6 +1269,7 @@ int main(int argument_count, char **arguments) {
     a_registration_past_an_unfired_deadline_loses();
     a_callback_racing_a_re_arm_never_advances_before_the_deadline();
     a_destroy_racing_a_re_arm_leaves_nothing_scheduled_and_reads_no_clock_afterwards();
+    the_observer_hears_each_move_once_outside_every_lock_and_a_failing_one_goes_to_the_sink();
     CHECK(deadline_polls == 0);
     CHECK(weivel_c_core_unload(&real_table) == WEIVEL_C_STATUS_OK);
     return check_summary("timer");

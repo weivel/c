@@ -143,7 +143,6 @@ static int ask(want_run *run, world_plugin *consumer, const want_given *given) {
         WEIVEL_C_STATUS_OK) {
         return conformance_world_fail(run->world, "the consumer's want was not made", given->id);
     }
-    conformance_world_note_timer(run->world);
     return 1;
 }
 
@@ -160,7 +159,6 @@ static int register_at(want_run *run, world_plugin *provider, const want_given *
         WEIVEL_C_STATUS_OK) {
         return conformance_world_fail(run->world, "the provider's registration was not made", given->id);
     }
-    conformance_world_note_timer(run->world);
     return 1;
 }
 

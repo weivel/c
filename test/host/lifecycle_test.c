@@ -99,7 +99,7 @@ static void run_in_a_dispatch(host_world *in, weivel_c_status (*run)(void *data,
     uint32_t here = 0;
     step.run = run;
     step.data = data;
-    CHECK(weivel_c_host_core(in->host, &core) == WEIVEL_C_STATUS_OK);
+    core = wrapper_of(in);
     CHECK(weivel_c_core_defer(core, &step, &here) == WEIVEL_C_STATUS_OK && here == 1);
 }
 
@@ -188,7 +188,8 @@ static void after_a_destroy_every_call_answers_quietly_that_the_host_is_destroye
     weivel_c_activation activation = WEIVEL_INIT(weivel_c_activation);
     weivel_activation_plan plan = WEIVEL_INIT(weivel_activation_plan);
     weivel_c_context *context = NULL;
-    weivel_c_core *core = NULL;
+    weivel_ledger_snapshot snapshot = WEIVEL_INIT(weivel_ledger_snapshot);
+    weivel_ledger_row row = WEIVEL_INIT(weivel_ledger_row);
     weivel_handle handle = 0;
     uint32_t state = 0;
     begin_host_world(&in);
@@ -205,7 +206,8 @@ static void after_a_destroy_every_call_answers_quietly_that_the_host_is_destroye
     CHECK(weivel_c_host_release(in.host, plugin.handle, NULL) == WEIVEL_C_STATUS_DESTROYED);
     CHECK(weivel_c_host_plugin_state(in.host, plugin.handle, &state) == WEIVEL_C_STATUS_DESTROYED);
     CHECK(weivel_c_host_context(in.host, &context) == WEIVEL_C_STATUS_DESTROYED);
-    CHECK(weivel_c_host_core(in.host, &core) == WEIVEL_C_STATUS_DESTROYED);
+    CHECK(weivel_c_host_ledger(in.host, &snapshot, NULL) == WEIVEL_C_STATUS_DESTROYED);
+    CHECK(weivel_c_host_ledger_row(in.host, plugin.handle, &row, NULL) == WEIVEL_C_STATUS_DESTROYED);
     CHECK(weivel_c_completion_finish(plugin.activation, WEIVEL_C_ENTRY_DONE, NULL) == WEIVEL_C_STATUS_DESTROYED);
     CHECK(weivel_c_context_log(plugin.context, WEIVEL_LOG_ERROR, "after") == WEIVEL_C_STATUS_OK);
     CHECK(sink_count(&in) == 0 && in.log.count == 1);
@@ -402,7 +404,7 @@ static weivel_c_status hear_and_probe(void *data, const weivel_c_outcome *outcom
     weivel_c_core *core = NULL;
     uint32_t here = 0;
     (void)outcome;
-    CHECK(weivel_c_host_core(self->in->host, &core) == WEIVEL_C_STATUS_OK);
+    core = wrapper_of(self->in);
     CHECK(weivel_c_core_defer(core, &self->probe, &here) == WEIVEL_C_STATUS_OK);
     self->told++;
     self->told_outside_a_dispatch += here;

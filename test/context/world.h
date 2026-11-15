@@ -272,7 +272,7 @@ static inline void begin_world_rest(world *self, int with_clock) {
     scheduler.cancel = world_cancel;
     scheduler.data = &self->clock;
     CHECK(weivel_c_handles_create(&self->handles) == WEIVEL_C_STATUS_OK);
-    CHECK(weivel_c_timer_create(self->core, with_clock ? &scheduler : NULL, &self->timer) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_timer_create(self->core, with_clock ? &scheduler : NULL, NULL, &self->timer) == WEIVEL_C_STATUS_OK);
     options.core = self->core;
     options.handles = self->handles;
     options.timer = self->timer;

@@ -27,12 +27,16 @@ typedef struct ticket {
  * @implNote `lock` guards every field below the scheduler and is a leaf: it is never held while the scheduler or the
  * core is called. Only one thread at a time is in `follow`, which the wrapper sees to, so only a callback and a
  * destroy ever meet it here. `waited_for` is the ticket of the one task the timer waits for, NULL once that task's
- * callback began; `task` is its token once `schedule` has answered it.
+ * callback began; `task` is its token once `schedule` has answered it. `told_armed` and `told_at` are the last move
+ * the observer was told, so arming again for the same deadline tells it nothing.
  */
 struct weivel_c_timer {
     weivel_c_mutex lock;
     weivel_c_core *core;
     weivel_c_scheduler scheduler;
+    weivel_c_timer_observer observer;
+    uint32_t told_armed;
+    int64_t told_at;
     uint32_t keeps_time;
     uint32_t destroyed;
     uint32_t armed;
@@ -174,24 +178,54 @@ static weivel_c_status schedule_task(weivel_c_timer *timer, int64_t at, ticket *
     return task != NULL ? WEIVEL_C_STATUS_OK : WEIVEL_C_STATUS_FAILED;
 }
 
-/** The wrapper's `follow` hook: arms the scheduler for the latest deadline drained, or disarms it. */
+/** Under the lock: 1 when arming for `at`, or disarming, differs from the last move the observer was told. */
+static int take_a_move(weivel_c_timer *timer, int64_t at, uint32_t set) {
+    int moved = set != timer->told_armed || (set && at != timer->told_at);
+    timer->told_armed = set;
+    timer->told_at = at;
+    return moved;
+}
+
+/** Outside every lock: tells the observer a move, and the sink when it answers a failure. */
+static void tell_the_observer(weivel_c_timer *timer, int64_t at, uint32_t set) {
+    weivel_c_status heard;
+    if (timer->observer.moved == NULL) {
+        return;
+    }
+    heard = timer->observer.moved(timer->observer.data, set, set ? at : 0);
+    if (heard != WEIVEL_C_STATUS_OK) {
+        weivel_c_failure failure = WEIVEL_INIT(weivel_c_failure);
+        failure.kind = WEIVEL_C_FAILURE_TIMER_OBSERVER;
+        failure.status = (uint32_t)heard;
+        failure.event_kind = WEIVEL_EVENT_NONE;
+        failure.text = "the timer's observer answered a failure for a move of the timer";
+        weivel_c_core_report(timer->core, &failure);
+    }
+}
+
+/** The wrapper's `follow` hook: arms the scheduler for the latest deadline drained, or disarms it, and tells so. */
 static weivel_c_status follow(void *data, int64_t at, uint32_t set) {
     weivel_c_timer *timer = data;
     cancelled_task stopped = {NULL, NULL};
     ticket *called_with = NULL;
     weivel_c_status status = WEIVEL_C_STATUS_OK;
     int destroyed;
+    int moved = 0;
     weivel_c_mutex_lock(&timer->lock);
     destroyed = (int)timer->destroyed;
     if (!destroyed) {
+        moved = take_a_move(timer, at, set);
         status = begin_arming(timer, at, set, &stopped, &called_with);
     }
     weivel_c_mutex_unlock(&timer->lock);
     cancel_task(timer, stopped);
-    if (destroyed || called_with == NULL) {
-        return status;
+    if (called_with != NULL) {
+        status = schedule_task(timer, at, called_with);
     }
-    return schedule_task(timer, at, called_with);
+    if (moved) {
+        tell_the_observer(timer, at, set);
+    }
+    return status;
 }
 
 static void report_a_failed_advance(weivel_c_timer *timer, weivel_c_status status) {
@@ -285,7 +319,7 @@ static void discard(weivel_c_timer *timer) {
 }
 
 weivel_c_status weivel_c_timer_create(weivel_c_core *core, const weivel_c_scheduler *scheduler,
-                                      weivel_c_timer **timer) {
+                                      const weivel_c_timer_observer *observer, weivel_c_timer **timer) {
     weivel_c_timer *created;
     weivel_c_status status = WEIVEL_C_STATUS_OK;
     if (timer == NULL) {
@@ -301,6 +335,9 @@ weivel_c_status weivel_c_timer_create(weivel_c_core *core, const weivel_c_schedu
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
     created->core = core;
+    if (observer != NULL) {
+        created->observer = *observer;
+    }
     if (scheduler != NULL) {
         weivel_c_deadline_hooks hooks = hooks_of(created);
         adopt_scheduler(created, scheduler);
