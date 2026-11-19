@@ -371,7 +371,7 @@ C11 and CMake, with no other dependency. The static library is the target `weive
 `weivel_c_standard_shared` are built from it as well, linking the standard's `weivel_standard` and
 `weivel_standard_shared`, and `weivel_c_conformance` linking `weivel_standard`; the tests need them.
 
-`.weivel/repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks them out there;
+`repo.json` pins `core`, `standard` and `conformance` by commit under `siblings/`. CI checks them out there;
 locally, link or clone each checkout into `siblings/`. The tests build the pinned core as a shared library and load
 it:
 
