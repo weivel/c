@@ -200,6 +200,18 @@ definition. A consumer that resolves the service is answered that very object.
   `size` below `2 * sizeof(void *)`, refuses the load as the caller's mistake, the symbol named in the failure's
   `refused_definition`, with nothing registered. So is a definition beside another function of its service, or one
   given context facts (named in `wrong_kind`).
+- A definition's service may declare a description, the symbol of a `const weivel_standard_description *f(void)`
+  (`weivel/description.h` of the standard), which the declaration's `descriptions` names. The host binds nothing from
+  it, since a C plugin casts a definition to its header's struct, but it does not load one it cannot vouch for: it
+  calls the symbol once at the load and hands what it answered to the description check of the host's options, a
+  `weivel_c_description_check`, and registers the definition only when the check accepts it, as the very pointer the
+  definition's symbol answered. The host never links the standard, so the check is the caller's to give; the
+  `standard` module's `weivel_c_standard_check_description` is the standard's own. A description that is missing
+  answers `WEIVEL_C_STATUS_MISSING_SYMBOL`; one that answers NULL, that the check refuses, that is empty or beside a
+  service of bytes functions, or that a host given no check is asked to load, refuses the load as the caller's
+  mistake, named in the failure's `refused_description`, with nothing registered and the binary closed again; a check
+  that runs out of memory answers `WEIVEL_C_STATUS_OUT_OF_MEMORY`. A declaration that ends before `descriptions` is
+  loaded as one that declares none.
 
 - A call crosses no core call and takes no lock: the input is the caller's own pointer and length, handed to the
   library for the call, and the output is answered in place, as a `weivel_c_bytes` holding the library's own
@@ -277,6 +289,9 @@ parsing and ordering. The module adds what joins the standard's answers to the h
   service as a host service under the id the standard's binary answers, so a plugin resolving it through its context
   holds that very object.
 - `weivel_c_standard_status` translates a status of the standard's into the layer's.
+- `weivel_c_standard_check_description` is the standard's `weivel_standard_description_check` as a host's description
+  check, its `data` the caller's empty refusal or NULL: a description the check refuses answers
+  `WEIVEL_C_STATUS_REFUSED_BY_THE_STANDARD`, which the host's load turns into its refusal of the library.
 
 The module holds no default of its own: a test reads its sources and header and fails on any string, a literal, an
 identifier stringized or a character literal; on a service id or placeholder macro of the standard's that would
@@ -318,10 +333,19 @@ pass. `weivel_c_conformance_vector_ids` lists every vector under a directory at 
   the events the core's release queued have been heard, so the `get` steps a holder makes straight after its
   `releaseHolder` are made as late calls from its listener, as it hears its release revoke what it held, and the
   `forgetHolder` that follows holds the host to having forgotten it.
+- A `description` vector is driven as a `library` vector, on the standard's described test library the caller names in
+  the options' `described_path`, with the host's description check set to the `standard` module's. C binds nothing of
+  a description, so it witnesses the vectors directly under `description/`, which load the library and get its
+  services, and none under `description/binding/`, which the kit's language list exempts it from; a step that calls an
+  operation through a binding is one the driver does not drive, so it could never pass.
 
 `test/conformance/` holds one test per layer vector of the pinned kit, named by its id and reading the kit's file at
-run time, and a coverage test that lists the kit's vector directory and fails on a vector no test names. The kit's
-location comes from the build: `siblings/conformance`, or `WEIVEL_C_KIT_DIRECTORY`.
+run time, and a coverage test that lists the kit's vector directory and fails on a vector no test names, but for those
+under a directory the kit's `checks/languages.txt` exempts C from with a `c layer-exempt` line, which no test may name,
+and on an exemption no vector lies under. The kit's location comes from the build: `siblings/conformance`, or
+`WEIVEL_C_KIT_DIRECTORY`. The described library the `description` vectors load is built in the test build from the
+pinned standard's `test/described` sources with the standard's own `weivel_describe`, as `echo` is built from the
+core's sources, since the standard defines that target only as a project of its own.
 
 ### The `benchmarks` module: the layer's half of the platform's benchmarks
 

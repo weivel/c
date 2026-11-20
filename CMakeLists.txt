@@ -83,7 +83,8 @@ function(weivel_c_add_the_standard)
     set_target_properties(weivel_standard_shared PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 endfunction()
 
-set(WEIVEL_C_STANDARD_MODULE_SOURCES src/standard/status.c src/standard/manifests.c src/standard/services.c)
+set(WEIVEL_C_STANDARD_MODULE_SOURCES src/standard/status.c src/standard/manifests.c src/standard/services.c
+    src/standard/descriptions.c)
 
 # The optional standard module: its own library, the one target of this repository that links the standard.
 function(weivel_c_add_the_standard_module)
@@ -118,7 +119,7 @@ endif()
 # so links the standard, as the standard module does and no host target may.
 function(weivel_c_add_the_conformance_module)
     add_library(weivel_c_conformance STATIC ${WEIVEL_C_CONFORMANCE_SOURCES})
-    target_link_libraries(weivel_c_conformance PUBLIC weivel_c weivel_standard)
+    target_link_libraries(weivel_c_conformance PUBLIC weivel_c weivel_c_standard weivel_standard)
     target_include_directories(weivel_c_conformance PRIVATE ${WEIVEL_C_CORE_INCLUDE_DIRECTORY}/../test/echo)
     weivel_c_strict_warnings(weivel_c_conformance)
 endfunction()

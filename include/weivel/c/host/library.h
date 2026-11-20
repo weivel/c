@@ -18,6 +18,12 @@
  *   function pointers that begins with its `uint32_t size`. The host calls it once at the load and registers the very
  *   pointer it answered, with no wrapper, count or copy, through weivel_c_context_register_service_awaiting_releases,
  *   so a consumer's call through it is a plain call into the library. The host reads its `size` and nothing past it.
+ * - A definition's service may declare a description (weivel/description.h), the symbol of a
+ *   `const weivel_standard_description *f(void)`, as the declaration's `descriptions` names it. The host binds
+ *   nothing from it, since a C plugin casts the definition to its header's struct, but it calls the symbol once at the
+ *   load and hands what it answers to the description check of the host's options, and registers the definition only
+ *   when the check accepts it, as the very pointer the definition's symbol answered. A description that is missing,
+ *   answers NULL or is refused refuses the load, as a definition that answers NULL does.
  * - A library unloaded, by weivel_c_host_unload_library or by the host's destroy, has its services unregistered and
  *   refuses every call made after it through a bytes object. A definition is called directly, so no call to it can be
  *   refused: its unregistration revokes every holding of it, each holder told by a WEIVEL_C_PLUGIN_EVENT_REVOKED whose
@@ -160,6 +166,12 @@ typedef struct weivel_c_library_load_failure {
      * `2 * sizeof(void *)`, that definition's symbol, the declaration's own text. NULL otherwise.
      */
     const char *refused_definition;
+    /**
+     * After WEIVEL_C_STATUS_MISUSE for a description its symbol answered NULL for, that the host's description check
+     * refused, or that the host was given no check for, that description's symbol, the declaration's own text. NULL
+     * otherwise.
+     */
+    const char *refused_description;
 } weivel_c_library_load_failure;
 
 /**
@@ -167,8 +179,9 @@ typedef struct weivel_c_library_load_failure {
  *
  * Opens the shared library at `path` with the platform's loader, as weivel_c_core_load does: a path with no directory
  * separator is searched for by the platform, so give an absolute path to load exactly one file. Binds the declared
- * release symbol and every declared function's symbol, calls each definition's symbol once, then registers each
- * service through the host's own context.
+ * release symbol and every declared function's symbol, calls each definition's symbol once and each declared
+ * description's symbol once, hands each description to the host's description check, then registers each service
+ * through the host's own context.
  *
  * A load that does not finish once a service is registered is undone as an unload is: its services are closed to
  * calls and unregistered, and its binary closes once nothing holds it, so an object a consumer was told of meanwhile
@@ -184,8 +197,8 @@ typedef struct weivel_c_library_load_failure {
  * @param refusal the core's refusal of a service's registration; may be NULL.
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE (a NULL or empty path, a NULL argument, a declaration or failure
  * smaller than its first shape, an empty text or list the declaration needs, a function the host does not load as
- * declared, a definition that answers NULL or a struct whose `size` is below `2 * sizeof(void *)`, an id it lists
- * twice, or an id a registration under this host holds already, a plugin's, another live library's or the
+ * declared, a definition that answers NULL or a struct whose `size` is below `2 * sizeof(void *)`, a description that
+ * answers NULL, that the host's check refuses or that the host was given no check for, an id it lists twice, or an id a registration under this host holds already, a plugin's, another live library's or the
  * host's own, since registering it under WEIVEL_HOST would replace that registration; each the caller's mistake that
  * is told to nobody else); WEIVEL_C_STATUS_NOT_A_LIBRARY; WEIVEL_C_STATUS_MISSING_SYMBOL; WEIVEL_C_STATUS_REFUSED with
  * the core's refusal of a registration; WEIVEL_C_STATUS_OUT_OF_MEMORY; WEIVEL_C_STATUS_DESTROYED. Nothing stays

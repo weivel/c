@@ -28,6 +28,9 @@ typedef void (*library_release)(uint8_t *buffer);
 /** A declared function of the definition kind, as WEIVEL_STANDARD_FUNCTION_DEFINITION gives its signature. */
 typedef const void *(*library_definition)(void);
 
+/** A definition's declared description, as the declaration's `descriptions` gives its signature. */
+typedef const struct weivel_standard_description *(*library_description)(void);
+
 /** The smallest `size` a definition's struct may have: the `size` and one pointer under the platform's alignment. */
 #define WEIVEL_C_DEFINITION_FLOOR (2 * sizeof(void *))
 

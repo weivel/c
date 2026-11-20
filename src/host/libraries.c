@@ -12,6 +12,8 @@
 #define FIRST_FAILURE_SIZE END_OF(weivel_c_library_load_failure, wrong_kind)
 #define TAKEN_ID_FAILURE_SIZE END_OF(weivel_c_library_load_failure, taken_id)
 #define REFUSED_DEFINITION_FAILURE_SIZE END_OF(weivel_c_library_load_failure, refused_definition)
+#define REFUSED_DESCRIPTION_FAILURE_SIZE END_OF(weivel_c_library_load_failure, refused_description)
+#define DESCRIBED_DECLARATION_SIZE END_OF(weivel_standard_library, descriptions)
 
 #if defined(WEIVEL_C_TESTING)
 /**
@@ -57,6 +59,20 @@ static void tell_refused_definition(weivel_c_library_load_failure *failure, cons
     }
 }
 
+static void tell_refused_description(weivel_c_library_load_failure *failure, const char *symbol) {
+    if (failure != NULL && failure->size >= REFUSED_DESCRIPTION_FAILURE_SIZE) {
+        failure->refused_description = symbol;
+    }
+}
+
+/** The description symbol the declaration gives its service at `at`, NULL when it gives none. */
+static const char *description_of(const weivel_standard_library *declaration, size_t at) {
+    if (declaration->size < DESCRIBED_DECLARATION_SIZE || declaration->descriptions == NULL) {
+        return NULL;
+    }
+    return declaration->descriptions[at];
+}
+
 /** 1 for a bytes function, and for a definition that is its service's only function and reads no context. */
 static int is_loaded_as_declared(const weivel_standard_library_function *function, size_t function_count) {
     if (function->kind == WEIVEL_STANDARD_FUNCTION_BYTES) {
@@ -94,6 +110,22 @@ static weivel_c_status check_service(const weivel_standard_library_service *serv
         status = check_function(&service->functions[at], service->function_count, failure);
     }
     return status;
+}
+
+/**
+ * The first description the host cannot take: an empty one, one beside a service of bytes functions, which has no
+ * definition to describe, or any at all when the host was given no check. NULL when it can take every one.
+ */
+static const char *untakable_description(const weivel_c_host *host, const weivel_standard_library *declaration) {
+    size_t at;
+    for (at = 0; at < declaration->service_count; at++) {
+        const char *description = description_of(declaration, at);
+        if (description != NULL && (!is_text(description) || !is_definition(&declaration->services[at]) ||
+                                    host->description_check.check == NULL)) {
+            return description;
+        }
+    }
+    return NULL;
 }
 
 static int declares_bytes(const weivel_standard_library *declaration) {
@@ -139,10 +171,16 @@ static weivel_c_status check_declaration(const weivel_standard_library *declarat
 static weivel_c_status check_before_opening(weivel_c_host *host, const weivel_standard_library *declaration,
                                             weivel_c_library_load_failure *failure) {
     const char *registered;
+    const char *untakable;
     weivel_c_status status = check_declaration(declaration, failure);
     status = status == WEIVEL_C_STATUS_OK && !weivel_c_host_is_running(host) ? WEIVEL_C_STATUS_DESTROYED : status;
     if (status != WEIVEL_C_STATUS_OK) {
         return status;
+    }
+    untakable = untakable_description(host, declaration);
+    if (untakable != NULL) {
+        tell_refused_description(failure, untakable);
+        return WEIVEL_C_STATUS_MISUSE;
     }
     registered = weivel_c_host_find_registered_id(host, declaration);
     if (registered != NULL) {
@@ -182,11 +220,34 @@ static void fill_object(library_service *made) {
 }
 
 /**
+ * Calls a description's symbol once and hands what it answered to the host's check, which reads it during the call
+ * alone: the host keeps nothing of it.
+ */
+static weivel_c_status check_description(weivel_c_library *library, const char *symbol,
+                                         weivel_c_library_load_failure *failure) {
+    const weivel_c_description_check *check = &library->host->description_check;
+    weivel_c_binary_function found;
+    const struct weivel_standard_description *description;
+    weivel_c_status status = find_symbol(library->binary, symbol, &found, failure);
+    if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
+    description = ((library_description)found)();
+    status = description == NULL ? WEIVEL_C_STATUS_MISUSE : check->check(check->data, description);
+    if (status == WEIVEL_C_STATUS_OK || status == WEIVEL_C_STATUS_OUT_OF_MEMORY) {
+        return status;
+    }
+    tell_refused_description(failure, symbol);
+    return WEIVEL_C_STATUS_MISUSE;
+}
+
+/**
  * Calls a definition's symbol once and keeps the pointer it answered, which then holds a reference on the library
- * until nothing holds the service any more. Only its `size` is read.
+ * until nothing holds the service any more. Only its `size` is read. The description declared for it, if any, is
+ * checked before the reference is taken.
  */
 static weivel_c_status bind_definition(library_service *made, weivel_c_library *library,
-                                       const weivel_standard_library_function *declared,
+                                       const weivel_standard_library_function *declared, const char *description,
                                        weivel_c_library_load_failure *failure) {
     weivel_c_binary_function found;
     const void *definition;
@@ -199,6 +260,10 @@ static weivel_c_status bind_definition(library_service *made, weivel_c_library *
         tell_refused_definition(failure, declared->symbol);
         return WEIVEL_C_STATUS_MISUSE;
     }
+    status = description == NULL ? WEIVEL_C_STATUS_OK : check_description(library, description, failure);
+    if (status != WEIVEL_C_STATUS_OK) {
+        return status;
+    }
     if (weivel_c_references_take(&library->references) != WEIVEL_C_REFERENCE_TAKEN) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
@@ -210,7 +275,7 @@ static weivel_c_status bind_definition(library_service *made, weivel_c_library *
 
 /** Binds each declared function of a service, or its definition, and copies every text it keeps. */
 static weivel_c_status build_service(library_service *made, weivel_c_library *library,
-                                     const weivel_standard_library_service *declared,
+                                     const weivel_standard_library_service *declared, const char *description,
                                      weivel_c_library_load_failure *failure) {
     size_t count = declared->function_count;
     size_t at;
@@ -220,7 +285,7 @@ static weivel_c_status build_service(library_service *made, weivel_c_library *li
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;
     }
     if (is_definition(declared)) {
-        return bind_definition(made, library, &declared->functions[0], failure);
+        return bind_definition(made, library, &declared->functions[0], description, failure);
     }
     made->functions = calloc(count, sizeof *made->functions);
     made->names = calloc(count, sizeof *made->names);
@@ -261,7 +326,8 @@ static weivel_c_status build_library(weivel_c_library *made, const weivel_standa
     }
     made->service_count = (uint32_t)declaration->service_count;
     for (at = 0; at < declaration->service_count && status == WEIVEL_C_STATUS_OK; at++) {
-        status = build_service(&made->services[at], made, &declaration->services[at], failure);
+        status = build_service(&made->services[at], made, &declaration->services[at], description_of(declaration, at),
+                               failure);
     }
     return status;
 }
@@ -396,6 +462,7 @@ static void clear_failure(weivel_c_library_load_failure *failure) {
         failure->wrong_kind = NULL;
         tell_taken_id(failure, NULL);
         tell_refused_definition(failure, NULL);
+        tell_refused_description(failure, NULL);
     }
 }
 

@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <weivel/c/standard.h>
+
 static void keep_report(conformance_world *world, const char *text) {
     if (world->reported_count < CONFORMANCE_REPORTED) {
         snprintf(world->reported[world->reported_count++], CONFORMANCE_REPORT_TEXT, "%s", text == NULL ? "" : text);
@@ -51,6 +53,7 @@ int conformance_world_begin(conformance_world *world, const char *core_path, con
     options.log.data = world;
     options.timer_observer.moved = conformance_world_hear_timer_move;
     options.timer_observer.data = world;
+    options.description_check.check = weivel_c_standard_check_description;
     status = weivel_c_host_create(&options, &world->host, NULL);
     if (status != WEIVEL_C_STATUS_OK) {
         return conformance_world_fail(world, "the host could not be made on the core", core_path);

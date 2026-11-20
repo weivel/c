@@ -6,6 +6,10 @@
  * layer" states. Each step runs only once the layer has nothing left to run from the one before, which in C is so of
  * every call made where no dispatch runs, as each step's is.
  *
+ * A `description` vector is driven here too, on the standard's described library: C binds nothing of a description,
+ * so its load, its gets and what they serve are all the driver witnesses of it, and a step that calls an operation
+ * through a binding is one this driver does not drive.
+ *
  * In C a holder lets go of a revoked holding with weivel_c_context_release_holding, handed the `handle` its
  * revocation named, and of a kept bytes answer with the object's `release_bytes`.
  *
@@ -658,7 +662,7 @@ static int build_and_check(library_run *run, const weivel_json_value *given) {
     size_t at;
     run->declaration = (weivel_standard_library)WEIVEL_INIT(weivel_standard_library);
     if (run->world->library_path == NULL) {
-        return conformance_world_fail(run->world, "a library vector needs the echo library's path", NULL);
+        return conformance_world_fail(run->world, "the vector needs the path of the library its op loads", NULL);
     }
     if (!conformance_world_knows_keys(run->world, given, keys, 4, "the given") ||
         (declaration != NULL && !read_declaration(run, declaration))) {

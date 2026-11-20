@@ -163,6 +163,19 @@ WEIVEL_C_STANDARD_API weivel_c_status weivel_c_standard_offer_paths(weivel_c_hos
                                                                     weivel_handle *registration,
                                                                     weivel_c_refusal *refusal);
 
+/**
+ * The standard's weivel_standard_description_check as a host's description check (see weivel_c_description_check):
+ * set a host's `description_check.check` to it, and `data` to the caller's empty weivel_standard_refusal, or NULL to
+ * be told the status alone. The refusal, filled by the check with the fault's path when it refuses, is the caller's to
+ * release with weivel_standard_refusal_release, and must be empty again before the next load that checks one.
+ *
+ * @return WEIVEL_C_STATUS_OK for a description the check passes; WEIVEL_C_STATUS_OUT_OF_MEMORY when the refusal's
+ * texts could not be made; WEIVEL_C_STATUS_REFUSED_BY_THE_STANDARD for every other answer of the check, a description
+ * it refuses among them, which the host then refuses to load.
+ */
+WEIVEL_C_STANDARD_API weivel_c_status weivel_c_standard_check_description(
+    void *refusal, const struct weivel_standard_description *description);
+
 #ifdef __cplusplus
 }
 #endif

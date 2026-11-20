@@ -1,7 +1,8 @@
 /**
  * @file
  * The strong check beside the kit's `layers`: every layer vector of the pinned kit, read from its directory at run
- * time, is named by a test of the suite's table. A probe directory under the build shows the check finds a vector no
+ * time, is named by a test of the suite's table, but for those under a directory the kit's language list exempts C
+ * from, which no test of the table may name. A probe directory under the build shows the check finds a vector no
  * test names however deep it sits, and refuses a vector whose id is not its path.
  *
  * @implNote MSVC calls the standard `fopen` unsafe unless told not to before any header is read.
@@ -18,6 +19,45 @@
 #include "layer_vectors.h"
 
 static const char *const PROBED_ID = "nested/deeper/a-vector-no-test-names";
+
+#define EXEMPTIONS 8
+#define EXEMPTION_TEXT 256
+
+/** The directories the kit's language list exempts C from, read from its `c layer-exempt` lines. */
+static char exemptions[EXEMPTIONS][EXEMPTION_TEXT];
+static uint32_t exemption_count;
+/** How many vectors of the pinned kit lie under each exemption. */
+static uint32_t exempted[EXEMPTIONS];
+
+static int read_exemptions(const char *languages_path) {
+    static const char prefix[] = "c layer-exempt ";
+    char line[EXEMPTION_TEXT];
+    FILE *file = fopen(languages_path, "r");
+    if (file == NULL) {
+        fprintf(stderr, "the kit's language list %s cannot be read\n", languages_path);
+        return 0;
+    }
+    while (fgets(line, sizeof line, file) != NULL) {
+        line[strcspn(line, "\r\n")] = '\0';
+        if (strncmp(line, prefix, sizeof prefix - 1) == 0 && exemption_count < EXEMPTIONS) {
+            snprintf(exemptions[exemption_count++], EXEMPTION_TEXT, "%s", line + sizeof prefix - 1);
+        }
+    }
+    fclose(file);
+    return 1;
+}
+
+/** The exemption `id` lies under, as its index, or -1 for none. */
+static int exemption_of(const char *id) {
+    uint32_t index;
+    for (index = 0; index < exemption_count; index++) {
+        size_t length = strlen(exemptions[index]);
+        if (strncmp(id, exemptions[index], length) == 0 && id[length] == '/') {
+            return (int)index;
+        }
+    }
+    return -1;
+}
 
 static int is_named_by_a_test(const char *id) {
     uint32_t index;
@@ -41,7 +81,14 @@ static int unnamed_vectors(const char *directory, const char *only_unnamed) {
         return -1;
     }
     for (index = 0; index < ids.count; index++) {
-        if (!is_named_by_a_test(ids.items[index])) {
+        int exemption = exemption_of(ids.items[index]);
+        if (exemption >= 0) {
+            exempted[exemption]++;
+            if (is_named_by_a_test(ids.items[index])) {
+                fprintf(stderr, "a test of the suite names %s, which C is exempt from\n", ids.items[index]);
+                unnamed += 100;
+            }
+        } else if (!is_named_by_a_test(ids.items[index])) {
             fprintf(stderr, "no test of the suite names the layer vector %s\n", ids.items[index]);
             unnamed += only_unnamed == NULL || strcmp(ids.items[index], only_unnamed) == 0 ? 1 : 100;
         }
@@ -64,7 +111,14 @@ static int write_vector(const char *probe, const char *relative, const char *id)
 }
 
 static void every_vector_of_the_pinned_kit_is_named_by_a_test(const char *kit) {
+    uint32_t index;
     CHECK(unnamed_vectors(kit, NULL) == 0);
+    for (index = 0; index < exemption_count; index++) {
+        if (exempted[index] == 0) {
+            fprintf(stderr, "C is exempt from %s, under which no layer vector lies\n", exemptions[index]);
+            check_failures++;
+        }
+    }
 }
 
 static void a_vector_no_test_names_is_found_however_deep_it_sits(const char *probe) {
@@ -84,8 +138,9 @@ static void a_vector_whose_id_is_not_its_path_is_refused(const char *probe) {
 }
 
 int main(int argument_count, char **arguments) {
-    if (argument_count != 3) {
-        fprintf(stderr, "usage: conformance_coverage_test <layer-vector-directory> <probe-directory>\n");
+    if (argument_count != 4 || !read_exemptions(arguments[3])) {
+        fprintf(stderr, "usage: conformance_coverage_test <layer-vector-directory> <probe-directory> "
+                        "<languages-file>\n");
         return 2;
     }
     every_vector_of_the_pinned_kit_is_named_by_a_test(arguments[1]);
