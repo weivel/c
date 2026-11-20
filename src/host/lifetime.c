@@ -141,6 +141,9 @@ weivel_c_status weivel_c_host_create(const weivel_c_host_options *options, weive
     }
     ready_the_destroy(made);
     made->allocator = (weivel_c_allocator){allocate_plainly, release_plainly, NULL};
+    if (options->size >= END_OF(weivel_c_host_options, description_check)) {
+        made->description_check = options->description_check;
+    }
     status = adopt_the_table(made, options, failure);
     status = status == WEIVEL_C_STATUS_OK ? make_the_core(made, options) : status;
     status = status == WEIVEL_C_STATUS_OK ? make_the_contexts(made, options) : status;

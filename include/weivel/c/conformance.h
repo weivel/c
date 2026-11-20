@@ -33,6 +33,11 @@ typedef struct weivel_c_conformance_options {
      * vector alone, which is otherwise a problem; NULL for every other.
      */
     const char *library_path;
+    /**
+     * The C library a `description` vector loads: the standard's described test library, built from the standard the
+     * repository pins. Required for such a vector alone, as `library_path` is for a `library` vector.
+     */
+    const char *described_path;
 } weivel_c_conformance_options;
 
 /** What the driver saw of one vector. Everything in it lives until weivel_c_conformance_witness_release. */

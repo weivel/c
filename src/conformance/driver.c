@@ -12,16 +12,33 @@ typedef struct witness_storage {
     char problem[CONFORMANCE_PROBLEM];
 } witness_storage;
 
+/** Which library of the driver's options a vector of an op loads. */
+typedef enum op_library { OP_LOADS_NO_LIBRARY, OP_LOADS_ECHO, OP_LOADS_DESCRIBED } op_library;
+
 typedef struct conformance_op {
     const char *name;
     conformance_drive drive;
     void (*core_options)(const conformance_vector *vector, weivel_core_options *options, const char **well_known);
+    op_library library;
 } conformance_op;
 
-static const conformance_op OPS[] = {{"consume", conformance_drive_consume, NULL},
-                                     {"want", conformance_drive_want, conformance_want_core_options},
-                                     {"lifecycle", conformance_drive_lifecycle, NULL},
-                                     {"library", conformance_drive_library, NULL}};
+/**
+ * @implNote A `description` vector is driven as a `library` vector: C binds nothing of a description, so of its op
+ * the driver witnesses only the load and the gets, which the `library` op's steps already are.
+ */
+static const conformance_op OPS[] = {
+    {"consume", conformance_drive_consume, NULL, OP_LOADS_NO_LIBRARY},
+    {"want", conformance_drive_want, conformance_want_core_options, OP_LOADS_NO_LIBRARY},
+    {"lifecycle", conformance_drive_lifecycle, NULL, OP_LOADS_NO_LIBRARY},
+    {"library", conformance_drive_library, NULL, OP_LOADS_ECHO},
+    {"description", conformance_drive_library, NULL, OP_LOADS_DESCRIBED}};
+
+static const char *library_path_of(const weivel_c_conformance_options *options, const conformance_op *op) {
+    if (op->library == OP_LOADS_ECHO) {
+        return options->library_path;
+    }
+    return op->library == OP_LOADS_DESCRIBED ? options->described_path : NULL;
+}
 
 static const conformance_op *op_named(const char *name) {
     uint32_t index;
@@ -58,7 +75,7 @@ static int drive_vector(const weivel_c_conformance_options *options, const confo
     if (!conformance_world_begin(world, options->core_path, &core_options, problem)) {
         return 0;
     }
-    world->library_path = options->library_path;
+    world->library_path = library_path_of(options, op);
     if (!op->drive(world, vector, observed)) {
         conformance_world_end(world);
         return 0;

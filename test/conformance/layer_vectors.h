@@ -19,12 +19,13 @@ extern const layer_vector_test LAYER_VECTOR_TESTS[];
 extern const uint32_t LAYER_VECTOR_TEST_COUNT;
 
 /**
- * Where the suite runs: the core's binary, the kit's layer vector directory and the core's echo library a `library`
- * vector loads, as the build passed them.
+ * Where the suite runs: the core's binary, the kit's layer vector directory, the core's echo library a `library`
+ * vector loads and the standard's described library a `description` vector loads, as the build passed them.
  */
 extern const char *layer_core_path;
 extern const char *layer_vector_directory;
 extern const char *layer_library_path;
+extern const char *layer_described_path;
 
 /** Runs every test of the table, and answers what check_summary answers for them. */
 int run_layer_vector_tests(void);

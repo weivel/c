@@ -13,6 +13,7 @@
 const char *layer_core_path;
 const char *layer_vector_directory;
 const char *layer_library_path;
+const char *layer_described_path;
 
 /** Drives the vector; answers 1 when the run agrees with its `then`, printing both sides when it does not. */
 static int witnessed(const char *id, weivel_c_conformance_witness *witness) {
@@ -21,6 +22,7 @@ static int witnessed(const char *id, weivel_c_conformance_witness *witness) {
     options.core_path = layer_core_path;
     options.vector_directory = layer_vector_directory;
     options.library_path = layer_library_path;
+    options.described_path = layer_described_path;
     status = weivel_c_conformance_witness_vector(&options, id, witness);
     if (status == WEIVEL_C_STATUS_OK && witness->agrees) {
         return 1;
@@ -74,7 +76,10 @@ const layer_vector_test LAYER_VECTOR_TESTS[] = {
     {"library/a-held-bytes-answer-keeps-the-binary-open-past-the-last-holding", witness_alone},
     {"library/an-owner-hears-the-release-its-own-release-queued", witness_alone},
     {"library/a-release-event-after-its-owner-was-quarantined-reaches-no-one", witness_alone},
-    {"library/a-forgotten-holder-ends-its-late-holding", witness_alone}};
+    {"library/a-forgotten-holder-ends-its-late-holding", witness_alone},
+    {"description/a-checked-description-registers-the-providers-own-pointer", witness_alone},
+    {"description/a-broken-count-description-fails-the-load", witness_alone},
+    {"description/a-definition-declared-without-its-description-loads-as-before", witness_alone}};
 
 const uint32_t LAYER_VECTOR_TEST_COUNT = sizeof LAYER_VECTOR_TESTS / sizeof LAYER_VECTOR_TESTS[0];
 

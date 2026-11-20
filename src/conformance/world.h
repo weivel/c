@@ -89,7 +89,10 @@ typedef struct conformance_world {
     uint32_t reported_count;
     world_plugin plugins[CONFORMANCE_PLUGINS];
     uint32_t plugin_count;
-    /** The C library a `library` vector loads, as the driver's caller gave it; NULL when it gave none. */
+    /**
+     * The C library a `library` or `description` vector loads, as the driver's caller gave it for the vector's op;
+     * NULL when it gave none.
+     */
     const char *library_path;
     char *problem;
     int has_problem;

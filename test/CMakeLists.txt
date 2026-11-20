@@ -38,6 +38,23 @@ set_target_properties(echo_library PROPERTIES
     C_VISIBILITY_PRESET hidden
     ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/shared)
 
+# The standard's described test library, built from the pinned standard's sources as echo is from the core's: the
+# standard defines it only as a top-level project.
+set(described_sources ${WEIVEL_C_STANDARD_SOURCE_DIRECTORY}/test/described)
+add_library(described_library SHARED ${described_sources}/described.c ${described_sources}/broken.c)
+target_compile_definitions(described_library PRIVATE DESCRIBED_BUILDING)
+weivel_c_strict_warnings(described_library)
+set_target_properties(described_library PROPERTIES
+    OUTPUT_NAME weivel_standard_described
+    C_VISIBILITY_PRESET hidden
+    ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/shared)
+weivel_describe(described_library
+    HEADERS ${WEIVEL_C_STANDARD_SOURCE_DIRECTORY}/include/weivel/services.h ${described_sources}/described.h
+    PREFIX described_generated_
+    EXPORT DESCRIBED_API
+    SERVICE described_mirror SYMBOL described_mirror_description
+    SERVICE described_walker SYMBOL described_walker_description)
+
 include(host/link_graph.cmake)
 weivel_c_write_link_graph_at_the_end(${CMAKE_CURRENT_BINARY_DIR}/links.txt)
 
@@ -98,6 +115,9 @@ foreach(variant "" _shared)
     weivel_c_test(standard_library_test${variant} standard/library_test.c weivel_c_standard${variant}
         $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:service_library>)
     add_dependencies(standard_library_test${variant} weivel_core_shared service_library)
+    weivel_c_test(standard_description_test${variant} standard/description_test.c weivel_c_standard${variant}
+        $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:described_library>)
+    add_dependencies(standard_description_test${variant} weivel_core_shared described_library)
     weivel_c_test(standard_discovery_test${variant} standard/discovery_test.c weivel_c_standard${variant}
         $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:entry_library>
         ${CMAKE_CURRENT_BINARY_DIR}/standard_discovery_test${variant}.plugins)
@@ -112,12 +132,13 @@ if(NOT EXISTS ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer/LAYER.md)
 endif()
 weivel_c_test(conformance_layer_vectors_test "conformance/layer_vectors_test.c;conformance/layer_vectors.c"
     weivel_c_conformance $<TARGET_FILE:weivel_core_shared> ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer
-    $<TARGET_FILE:echo_library>)
-add_dependencies(conformance_layer_vectors_test weivel_core_shared echo_library)
+    $<TARGET_FILE:echo_library> $<TARGET_FILE:described_library>)
+add_dependencies(conformance_layer_vectors_test weivel_core_shared echo_library described_library)
 set(conformance_probe ${CMAKE_CURRENT_BINARY_DIR}/conformance_probe)
 file(MAKE_DIRECTORY ${conformance_probe}/nested/deeper)
 weivel_c_test(conformance_coverage_test "conformance/coverage_test.c;conformance/layer_vectors.c"
-    weivel_c_conformance ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer ${conformance_probe})
+    weivel_c_conformance ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer ${conformance_probe}
+    ${WEIVEL_C_KIT_DIRECTORY}/checks/languages.txt)
 
 # Writes each definition the build gives the standard module's targets, one `<target> <definition>` a line, for the
 # check that the module compiles no value of its own in.
@@ -186,6 +207,9 @@ add_dependencies(host_library_loading_test weivel_core_shared service_library ec
 weivel_c_test(host_definition_test host/definition_test.c weivel_c_testing
     $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:echo_library>)
 add_dependencies(host_definition_test weivel_core_shared echo_library)
+weivel_c_test(host_description_test host/description_test.c weivel_c_testing
+    $<TARGET_FILE:weivel_core_shared> $<TARGET_FILE:described_library> $<TARGET_FILE:echo_library>)
+add_dependencies(host_description_test weivel_core_shared described_library echo_library)
 weivel_c_test(host_references_test host/references_test.c weivel_c_testing)
 weivel_c_test(host_seams_test host/seams_test.c weivel_c_testing $<TARGET_FILE:weivel_core_shared>)
 add_dependencies(host_seams_test weivel_core_shared)

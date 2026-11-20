@@ -44,6 +44,23 @@ extern "C" {
 /** One host. Opaque; made by weivel_c_host_create, destroyed by weivel_c_host_destroy, freed by weivel_c_host_free. */
 typedef struct weivel_c_host weivel_c_host;
 
+/** The standard's description of a definition, which the host hands its check unread (see weivel/description.h). */
+struct weivel_standard_description;
+
+/**
+ * What decides whether a C library's description of a definition may be bound, before the host registers that
+ * definition (see weivel/c/host/library.h): `check` and the `data` it is called with. It reads the description only
+ * during the call, and answers WEIVEL_C_STATUS_OK for one that may be bound, WEIVEL_C_STATUS_OUT_OF_MEMORY when it
+ * could not tell for want of memory, and any other status to refuse it. The standard module's
+ * weivel_c_standard_check_description is the standard's check as one.
+ *
+ * @implNote The host never links the standard, so the check its load makes is handed in rather than called by name.
+ */
+typedef struct weivel_c_description_check {
+    weivel_c_status (*check)(void *data, const struct weivel_standard_description *description);
+    void *data;
+} weivel_c_description_check;
+
 /** What a host is made from. Zero, or a field beyond `size`, means the default. */
 typedef struct weivel_c_host_options {
     uint32_t size;
@@ -67,6 +84,11 @@ typedef struct weivel_c_host_options {
      * a NULL `moved` for none. A host given no scheduler arms none, so its observer hears nothing.
      */
     weivel_c_timer_observer timer_observer;
+    /**
+     * What checks each description a library declares, copied; a NULL `check` for a host that loads no library
+     * declaring one, and refuses every library that does.
+     */
+    weivel_c_description_check description_check;
 } weivel_c_host_options;
 
 /**

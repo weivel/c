@@ -39,7 +39,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/../read_tokens.cmake)
 set(stems "weivel_(c_)?standard" "weivel_json_")
 set(allowed_to_link_the_standard weivel_c_standard weivel_c_standard_shared weivel_c_conformance
     conformance_layer_vectors_test conformance_coverage_test)
-foreach(suite manifest services library discovery)
+foreach(suite manifest services library description discovery)
     list(APPEND allowed_to_link_the_standard standard_${suite}_test standard_${suite}_test_shared)
 endforeach()
 set(host_targets weivel_c weivel_c_shared weivel_c_testing)

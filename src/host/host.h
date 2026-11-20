@@ -129,6 +129,8 @@ struct weivel_c_host {
     weivel_c_timer *timer;
     weivel_c_contexts *contexts;
     weivel_c_context *own_context;
+    /** The caller's check of a library's descriptions; a NULL `check` when it gave none. */
+    weivel_c_description_check description_check;
     /** Guarded by the host's lock, as every field below. */
     host_plugin *first_plugin;
     host_plugin *last_plugin;
