@@ -198,8 +198,9 @@ typedef struct weivel_c_library_load_failure {
  * @return WEIVEL_C_STATUS_OK; WEIVEL_C_STATUS_MISUSE (a NULL or empty path, a NULL argument, a declaration or failure
  * smaller than its first shape, an empty text or list the declaration needs, a function the host does not load as
  * declared, a definition that answers NULL or a struct whose `size` is below `2 * sizeof(void *)`, a description that
- * answers NULL, that the host's check refuses or that the host was given no check for, an id it lists twice, or an id a registration under this host holds already, a plugin's, another live library's or the
- * host's own, since registering it under WEIVEL_HOST would replace that registration; each the caller's mistake that
+ * answers NULL, that the host's check refuses or that the host was given no check for, an id it lists twice, or an id
+ * a registration under this host holds already, a plugin's, another live library's or the host's own, since
+ * registering it under WEIVEL_HOST would replace that registration; each the caller's mistake that
  * is told to nobody else); WEIVEL_C_STATUS_NOT_A_LIBRARY; WEIVEL_C_STATUS_MISSING_SYMBOL; WEIVEL_C_STATUS_REFUSED with
  * the core's refusal of a registration; WEIVEL_C_STATUS_OUT_OF_MEMORY; WEIVEL_C_STATUS_DESTROYED. Nothing stays
  * loaded, registered or held on any answer but OK: an id found registered already is found from the layer's own

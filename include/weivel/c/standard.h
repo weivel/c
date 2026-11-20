@@ -169,6 +169,10 @@ WEIVEL_C_STANDARD_API weivel_c_status weivel_c_standard_offer_paths(weivel_c_hos
  * be told the status alone. The refusal, filled by the check with the fault's path when it refuses, is the caller's to
  * release with weivel_standard_refusal_release, and must be empty again before the next load that checks one.
  *
+ * The refusal is one struct for every load the host makes, written by whichever load's check refuses, so it must not
+ * be shared by loads running at the same time on several threads: give NULL unless the caller loads one library at a
+ * time.
+ *
  * @return WEIVEL_C_STATUS_OK for a description the check passes; WEIVEL_C_STATUS_OUT_OF_MEMORY when the refusal's
  * texts could not be made; WEIVEL_C_STATUS_REFUSED_BY_THE_STANDARD for every other answer of the check, a description
  * it refuses among them, which the host then refuses to load.
