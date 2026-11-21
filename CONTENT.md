@@ -211,7 +211,8 @@ definition. A consumer that resolves the service is answered that very object.
   service of bytes functions, or that a host given no check is asked to load, refuses the load as the caller's
   mistake, named in the failure's `refused_description`, with nothing registered and the binary closed again; a check
   that runs out of memory answers `WEIVEL_C_STATUS_OUT_OF_MEMORY`. A declaration that ends before `descriptions` is
-  loaded as one that declares none.
+  loaded as one that declares none. A grown description, one marking `blocking` operations or nesting the description
+  of a definition it carries, is checked at the load as any is, by the same check, and bound to nothing.
 
 - A call crosses no core call and takes no lock: the input is the caller's own pointer and length, handed to the
   library for the call, and the output is answered in place, as a `weivel_c_bytes` holding the library's own
@@ -337,7 +338,8 @@ pass. `weivel_c_conformance_vector_ids` lists every vector under a directory at 
   the options' `described_path`, with the host's description check set to the `standard` module's. C binds nothing of
   a description, so it witnesses the vectors directly under `description/`, which load the library and get its
   services, and none under `description/binding/`, which the kit's language list exempts it from; a step that calls an
-  operation through a binding is one the driver does not drive, so it could never pass.
+  operation through a binding is one the driver does not drive, so it could never pass. C ships no host program, so
+  the kit's `host/` vectors, which only a language with one sits, are exempt too.
 
 `test/conformance/` holds one test per layer vector of the pinned kit, named by its id and reading the kit's file at
 run time, and a coverage test that lists the kit's vector directory and fails on a vector no test names, but for those
