@@ -79,7 +79,8 @@ const layer_vector_test LAYER_VECTOR_TESTS[] = {
     {"library/a-forgotten-holder-ends-its-late-holding", witness_alone},
     {"description/a-checked-description-registers-the-providers-own-pointer", witness_alone},
     {"description/a-broken-count-description-fails-the-load", witness_alone},
-    {"description/a-definition-declared-without-its-description-loads-as-before", witness_alone}};
+    {"description/a-definition-declared-without-its-description-loads-as-before", witness_alone},
+    {"description/a-definition-described-without-its-nested-description-fails-the-load", witness_alone}};
 
 const uint32_t LAYER_VECTOR_TEST_COUNT = sizeof LAYER_VECTOR_TESTS / sizeof LAYER_VECTOR_TESTS[0];
 
