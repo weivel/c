@@ -2,8 +2,8 @@
 
 What the C layer measures and the gates that hold it to bounds. A call through the layer must cost next to nothing
 beyond the same call made without it, so the layer's overhead is measured on every runner and judged against bounds
-the kit owns, never the layer, which could otherwise loosen its own; the kit's `docs/benchmarks.md` states the rows and the budget files, and the core's
-`docs/contract/benchmarks.md` what the module must do in any language.
+the kit owns, never the layer, which could otherwise loosen its own; the kit's `docs/benchmarks.md` states the rows
+and the budget files, and the core's `docs/contract/benchmarks.md` what the module must do in any language.
 
 `src/benchmarks/` is a library of its own, `weivel_c_benchmarks`, linked by its tests alone; it has no public header.
 It times a call in batches, the paths compared sampled in turn one batch each per round, and builds what it measures

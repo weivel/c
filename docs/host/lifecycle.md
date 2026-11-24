@@ -43,7 +43,8 @@ declaring two strides is handed to the core as the caller built it, so the host 
   one step queued in the release's own hold of the layer lock behind its events, the detach made in the forget's own
   hold. A quarantine queues the ending of its plugin's entries the same way. Where no dispatch runs, the release has
   finished when it returns. A deactivate that answers pending holds the core's release and everything after it until
-  it finishes, however long.
+  it finishes, however long. What a holder of the released plugin's services hears, the revocation and the
+  `weivel_c_context_release_holding` it answers with, is [the context doc](../context.md)'s.
 - `weivel_c_host_destroy` releases every plugin the host opened and has not released, the last opened first, one in
   flight and one quarantined included; lets every event and step those releases left run; unloads every C library it
   loaded, telling the sink of one whose binary does not close and unloading the rest; then disarms the timer and

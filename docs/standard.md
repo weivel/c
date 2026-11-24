@@ -1,16 +1,17 @@
 # `standard`, optional and its own library
 
-C's access to the standard's defaults, each feeding the host. It is a library apart from the host so that a host that
-wants none of the standard's defaults links none of its code (see [the host's side of that](host/standard-boundary.md)).
-The rules the module keeps in any language are the core's `docs/contract/standard.md`.
+It is a library apart from the host so that a host that wants none of the standard's defaults links none of its code
+(see [the host's side of that](host/standard-boundary.md)). The rules the module keeps in any language are the core's
+`docs/contract/standard.md`.
 
 `include/weivel/c/standard.h` is C's access to the standard's defaults, each feeding the host. It is optional and a
-library of its own, `weivel_c_standard` (`weivel_c_standard_shared` for the shared build), the one target that links
-the standard; the host never links, loads or requires it, and every host test links without it. The standard is a C
-library, so C reaches it by calling its functions: where nothing needs translating the caller calls the standard
-directly, `weivel_standard_discover` to lay out and discover plugins on disk, `weivel_standard_read_library`, whose
-declaration is exactly what `weivel_c_host_load_library` takes with the path the caller gives, and the identity
-parsing and ordering. The module adds what joins the standard's answers to the host:
+library of its own, `weivel_c_standard` (`weivel_c_standard_shared` for the shared build), one of the two library
+modules that link the standard, beside [`conformance`](conformance.md); the host never links, loads or requires it,
+and every host test links without it. The standard is a C library, so C reaches it by calling its functions: where
+nothing needs translating the caller calls the standard directly, `weivel_standard_discover` to lay out and discover
+plugins on disk, `weivel_standard_read_library`, whose declaration is exactly what `weivel_c_host_load_library` takes
+with the path the caller gives, and the identity parsing and ordering. The module adds what joins the standard's
+answers to the host:
 
 - `weivel_c_standard_register_manifest` validates and reads a JSON manifest with the standard and registers it with
   an entry and the identity the caller supplies. The standard's manifest is the standard's, freed by its own release;
