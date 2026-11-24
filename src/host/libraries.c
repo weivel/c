@@ -220,10 +220,10 @@ static void fill_object(library_service *made) {
 }
 
 /**
- * Calls a description's symbol once and hands what it answered to the host's check, which reads it during the call
- * alone: the host keeps nothing of it.
+ * Calls a description's symbol once and hands what it answered to the host's check, with the definition the service's
+ * symbol answered, both read during the call alone: the host keeps nothing of the description.
  */
-static weivel_c_status check_description(weivel_c_library *library, const char *symbol,
+static weivel_c_status check_description(weivel_c_library *library, const char *symbol, const void *definition,
                                          weivel_c_library_load_failure *failure) {
     const weivel_c_description_check *check = &library->host->description_check;
     weivel_c_binary_function found;
@@ -233,7 +233,7 @@ static weivel_c_status check_description(weivel_c_library *library, const char *
         return status;
     }
     description = ((library_description)found)();
-    status = description == NULL ? WEIVEL_C_STATUS_MISUSE : check->check(check->data, description);
+    status = description == NULL ? WEIVEL_C_STATUS_MISUSE : check->check(check->data, description, definition);
     if (status == WEIVEL_C_STATUS_OK || status == WEIVEL_C_STATUS_OUT_OF_MEMORY) {
         return status;
     }
@@ -260,7 +260,7 @@ static weivel_c_status bind_definition(library_service *made, weivel_c_library *
         tell_refused_definition(failure, declared->symbol);
         return WEIVEL_C_STATUS_MISUSE;
     }
-    status = description == NULL ? WEIVEL_C_STATUS_OK : check_description(library, description, failure);
+    status = description == NULL ? WEIVEL_C_STATUS_OK : check_description(library, description, definition, failure);
     if (status != WEIVEL_C_STATUS_OK) {
         return status;
     }

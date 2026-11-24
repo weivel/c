@@ -1,7 +1,8 @@
 /**
  * @file
  * Descriptions a C library declares for its definitions: the host calls each description's symbol once and hands
- * what it answered to the check its options give, binding nothing of it, and registers each definition as the very
+ * what it answered to the check its options give, beside the definition its service's symbol answered, binding nothing
+ * of it, and registers each definition as the very
  * pointer its symbol answered only once every description was accepted. A description that is missing, answers NULL
  * or is refused, or one the host was given no check for, refuses the load with nothing registered, the refused one's
  * symbol named; a check that runs out of memory answers that; and a declaration that ends before its descriptions
@@ -56,16 +57,19 @@ static void declare_described(described *self, const char *walker_description) {
 /** What the test's check saw, and what it answers. */
 typedef struct checking {
     const void *seen[4];
+    const void *definitions_seen[4];
     uint32_t calls;
     /** The call, counted from 1, the check answers `refusal` for; 0 to accept every one. */
     uint32_t refuse_call;
     weivel_c_status refusal;
 } checking;
 
-static weivel_c_status check_by_the_test(void *data, const struct weivel_standard_description *description) {
+static weivel_c_status check_by_the_test(void *data, const struct weivel_standard_description *description,
+                                         const void *definition) {
     checking *self = data;
     if (self->calls < 4) {
         self->seen[self->calls] = description;
+        self->definitions_seen[self->calls] = definition;
     }
     self->calls++;
     return self->calls == self->refuse_call ? self->refusal : WEIVEL_C_STATUS_OK;
@@ -123,6 +127,8 @@ static void each_description_is_checked_and_each_definition_registered_as_its_ow
     CHECK(check.calls == 2);
     CHECK(check.seen[0] == answered_by("described_mirror_description"));
     CHECK(check.seen[1] == answered_by("described_walker_description"));
+    CHECK(check.definitions_seen[0] == answered_by("described_mirror_definition"));
+    CHECK(check.definitions_seen[1] == answered_by("described_walker_definition"));
     CHECK((const void *)service_of(&in, "described-mirror") == answered_by("described_mirror_definition"));
     CHECK((const void *)service_of(&in, "described-walker") == answered_by("described_walker_definition"));
     CHECK(sink_count(&in) == 0);

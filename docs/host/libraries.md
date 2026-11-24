@@ -24,9 +24,12 @@ definition. A consumer that resolves the service is answered that very object.
   (`weivel/description.h` of the standard), which the declaration's `descriptions` names. The host binds nothing from
   it, since a C plugin casts a definition to its header's struct, but it does not load one it cannot vouch for: it
   calls the symbol once at the load and hands what it answered to the description check of the host's options, a
-  `weivel_c_description_check`, and registers the definition only when the check accepts it, as the very pointer the
-  definition's symbol answered. The host never links the standard, so the check is the caller's to give; the
-  `standard` module's `weivel_c_standard_check_description` is the standard's own. A description that is missing
+  `weivel_c_description_check`, beside the definition the service's definition symbol answered, so the check can
+  refuse a description that describes another definition than the one served beside it. It registers the definition
+  only when the check accepts it, as the very pointer the definition's symbol answered. The host never links the
+  standard, so the check is the caller's to give; the `standard` module's `weivel_c_standard_check_description` is the
+  standard's own, which also requires the description's `answered_by` to answer that very definition. A description
+  that is missing
   answers `WEIVEL_C_STATUS_MISSING_SYMBOL`; one that answers NULL, that the check refuses, that is empty or beside a
   service of bytes functions, or that a host given no check is asked to load, refuses the load as the caller's
   mistake, named in the failure's `refused_description`, with nothing registered and the binary closed again; a check

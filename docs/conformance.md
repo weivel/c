@@ -48,5 +48,6 @@ run time, and a coverage test that lists the kit's vector directory and fails on
 under a directory the kit's `checks/languages.txt` exempts C from with a `c layer-exempt` line, which no test may name,
 and on an exemption no vector lies under. The kit's location comes from the build: `siblings/conformance`, or
 `WEIVEL_C_KIT_DIRECTORY`. The described library the `description` vectors load is built in the test build from the
-pinned standard's `test/described` sources with the standard's own `weivel_describe`, as `echo` is built from the
-core's sources, since the standard defines that target only as a project of its own.
+pinned standard's `test/described` sources with the standard's own `weivel_describe`, each description naming its
+definition with `ANSWERED_BY` as the standard's own build of it does, as `echo` is built from the core's sources,
+since the standard defines that target only as a project of its own.

@@ -3,8 +3,12 @@
 #include <weivel/description.h>
 
 weivel_c_status weivel_c_standard_check_description(void *refusal,
-                                                    const struct weivel_standard_description *description) {
+                                                    const struct weivel_standard_description *description,
+                                                    const void *definition) {
     weivel_status status = weivel_standard_description_check(description, refusal);
+    if (status == WEIVEL_STATUS_OK) {
+        status = weivel_standard_description_answers(description, definition, refusal);
+    }
     if (status == WEIVEL_STATUS_OK) {
         return WEIVEL_C_STATUS_OK;
     }

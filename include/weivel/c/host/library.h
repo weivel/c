@@ -21,7 +21,8 @@
  * - A definition's service may declare a description (weivel/description.h), the symbol of a
  *   `const weivel_standard_description *f(void)`, as the declaration's `descriptions` names it. The host binds
  *   nothing from it, since a C plugin casts the definition to its header's struct, but it calls the symbol once at the
- *   load and hands what it answers to the description check of the host's options, and registers the definition only
+ *   load and hands what it answers, with the definition its service's symbol answered, to the description check of
+ *   the host's options, which can so refuse a description of another definition, and registers the definition only
  *   when the check accepts it, as the very pointer the definition's symbol answered. A description that is missing,
  *   answers NULL or is refused refuses the load, as a definition that answers NULL does.
  * - A library unloaded, by weivel_c_host_unload_library or by the host's destroy, has its services unregistered and
@@ -180,7 +181,8 @@ typedef struct weivel_c_library_load_failure {
  * Opens the shared library at `path` with the platform's loader, as weivel_c_core_load does: a path with no directory
  * separator is searched for by the platform, so give an absolute path to load exactly one file. Binds the declared
  * release symbol and every declared function's symbol, calls each definition's symbol once and each declared
- * description's symbol once, hands each description to the host's description check, then registers each service
+ * description's symbol once, hands each description and its service's definition to the host's description check,
+ * then registers each service
  * through the host's own context.
  *
  * A load that does not finish once a service is registered is undone as an unload is: its services are closed to

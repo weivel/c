@@ -52,8 +52,10 @@ weivel_describe(described_library
     HEADERS ${WEIVEL_C_STANDARD_SOURCE_DIRECTORY}/include/weivel/services.h ${described_sources}/described.h
     PREFIX described_generated_
     EXPORT DESCRIBED_API
-    SERVICE described_mirror SYMBOL described_mirror_description
-    SERVICE described_walker SYMBOL described_walker_description)
+    SERVICE described_mirror SYMBOL described_mirror_description ANSWERED_BY described_mirror_definition
+    SERVICE described_mirror SYMBOL described_mirror_without_halve_description
+        ANSWERED_BY described_mirror_without_halve_definition
+    SERVICE described_walker SYMBOL described_walker_description ANSWERED_BY described_walker_definition)
 
 include(host/link_graph.cmake)
 weivel_c_write_link_graph_at_the_end(${CMAKE_CURRENT_BINARY_DIR}/links.txt)
