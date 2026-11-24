@@ -391,7 +391,7 @@ function(weivel_c_benchmark name expected_exit must_match)
             "-DARGUMENTS=${arguments}" -DEXPECTED_EXIT=${expected_exit} -DCONFIG=$<CONFIG>
             "-DMUST_MATCH=${must_match}" ${WEIVEL_C_BENCHMARK_RELEASE_ONLY}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/run.cmake)
-    set_tests_properties(benchmarks_${name} PROPERTIES TIMEOUT 300)
+    set_tests_properties(benchmarks_${name} PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
     if(NOT WEIVEL_C_BENCHMARKS_REQUIRED)
         set_tests_properties(benchmarks_${name} PROPERTIES SKIP_RETURN_CODE 77)
     endif()
