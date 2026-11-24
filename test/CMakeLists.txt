@@ -126,7 +126,7 @@ endforeach()
 
 set(WEIVEL_C_KIT_DIRECTORY ${PROJECT_SOURCE_DIR}/siblings/conformance
     CACHE PATH "The conformance kit checkout, at the commit repo.json pins, whose layer vectors the suite reads")
-if(NOT EXISTS ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer/LAYER.md)
+if(NOT IS_DIRECTORY ${WEIVEL_C_KIT_DIRECTORY}/vectors/layer)
     message(FATAL_ERROR "no vectors/layer under ${WEIVEL_C_KIT_DIRECTORY}: link or clone the conformance kit checkout "
         "at siblings/conformance, or set WEIVEL_C_KIT_DIRECTORY to it")
 endif()
