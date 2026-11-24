@@ -182,8 +182,7 @@ typedef struct weivel_c_library_load_failure {
  * separator is searched for by the platform, so give an absolute path to load exactly one file. Binds the declared
  * release symbol and every declared function's symbol, calls each definition's symbol once and each declared
  * description's symbol once, hands each description and its service's definition to the host's description check,
- * then registers each service
- * through the host's own context.
+ * then registers each service through the host's own context.
  *
  * A load that does not finish once a service is registered is undone as an unload is: its services are closed to
  * calls and unregistered, and its binary closes once nothing holds it, so an object a consumer was told of meanwhile
