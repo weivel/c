@@ -5,7 +5,8 @@
  * @file
  * The bounds the `benchmarks` module gates against, every one the kit's and none the layer's own: the core's control
  * call budget, `benchmarks/budget.txt` of the pinned kit, and the C layer's own, `benchmarks/c.txt`, read as the
- * kit's RUNNER.md lays a language's budget out. The caller names both files; the module has no path of its own.
+ * kit's docs/benchmarks.md lays a language's budget out. The caller names both files; the module has no path of its
+ * own.
  */
 
 #include <stddef.h>

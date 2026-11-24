@@ -8,7 +8,8 @@
  * each built as a manifest value and an entry.
  *
  * The scheduler runs a task the layer gave it only when the driver moves time forward over the task's due time, at
- * that time, and never on its own, as LAYER.md's "The `want` op's clock and scheduler" states.
+ * that time, and never on its own, as "The `want` op's clock and scheduler" of the kit's docs/vectors/layer/want.md
+ * states.
  */
 
 #include <stdint.h>

@@ -1,7 +1,8 @@
 /**
  * @file
  * Each test reads its vector from the pinned kit at run time, drives it through the host's public surface on the real
- * core, and holds the run to the vector's `then` as a value, then to what LAYER.md states beyond it.
+ * core, and holds the run to the vector's `then` as a value, then to what the kit's docs/vectors/layer/
+ * states beyond it.
  */
 
 #include "layer_vectors.h"

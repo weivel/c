@@ -4,7 +4,8 @@
 /**
  * @file
  * The `lifecycle` op's run: the entries its plugins are built with, which run the vector's actions in order and
- * record what LAYER.md's "The `lifecycle` op" records, and the trace, the pending wants and what the steps saw.
+ * record what "The `lifecycle` op" of the kit's docs/vectors/layer/lifecycle.md records, and the trace, the pending
+ * wants and what the steps saw.
  */
 
 #include "world.h"

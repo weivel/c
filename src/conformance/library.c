@@ -2,9 +2,9 @@
  * @file
  * The `library` op: the vector's declaration read by the standard's reader and loaded through the host's public load
  * call with the core's echo library beside it; holders opened through the host's activation with an activate that
- * stays pending, each consuming every declared id; then the vector's steps, as LAYER.md's "The `library` op in a
- * layer" states. Each step runs only once the layer has nothing left to run from the one before, which in C is so of
- * every call made where no dispatch runs, as each step's is.
+ * stays pending, each consuming every declared id; then the vector's steps, as "The `library` op in a layer" of the
+ * kit's docs/vectors/layer/library.md states. Each step runs only once the layer has nothing left to run from the
+ * one before, which in C is so of every call made where no dispatch runs, as each step's is.
  *
  * A `description` vector is driven here too, on the standard's described library: C binds nothing of a description,
  * so its load, its gets and what they serve are all the driver witnesses of it, and a step that calls an operation
@@ -396,7 +396,10 @@ static int echo_step(library_run *run, world_plugin *holder, const char *text) {
     int32_t status;
     if (definition == NULL || text == NULL || run->echoed_count == LIBRARY_STEPS) {
         return definition == NULL ? 0
-                                  : conformance_world_fail(run->world, "an echo step is not as LAYER.md has it", NULL);
+                                  : conformance_world_fail(run->world,
+                                                           "an echo step is not as the kit's "
+                                                           "docs/vectors/layer/library.md has it",
+                                                           NULL);
     }
     status = definition->echo(definition->context, (const uint8_t *)text, strlen(text), &output, &length);
     if (status == 0 && length < LIBRARY_TEXT) {
@@ -551,7 +554,10 @@ static int register_awaiting_step(library_run *run, const weivel_json_value *ste
     owner_registration *made;
     if (owner == NULL || owner->context == NULL || id == NULL || run->registration_count == LIBRARY_HOLDINGS) {
         return owner == NULL ? 0
-                             : conformance_world_fail(run->world, "a registration step is not as LAYER.md has it", id);
+                             : conformance_world_fail(run->world,
+                                                      "a registration step is not as the kit's "
+                                                      "docs/vectors/layer/library.md has it",
+                                                      id);
     }
     made = &run->registrations[run->registration_count++];
     made->owner = owner;
@@ -620,7 +626,7 @@ static int holder_step(library_run *run, const weivel_json_value *step) {
     return release_holding_step(run, holder, string_at(step, "releaseHolding"));
 }
 
-/** Refuses a step whose keys are not exactly those of one step LAYER.md names. */
+/** Refuses a step whose keys are not exactly those of one step the kit's docs/vectors/layer/library.md names. */
 static int check_step(library_run *run, const weivel_json_value *step) {
     static const char *const alone[] = {"load",          "unload",     "readUnloads",
                                         "releaseHolder", "quarantine", "forgetHolder"};
@@ -632,7 +638,9 @@ static int check_step(library_run *run, const weivel_json_value *step) {
     if (weivel_json_object_get(step, "owner") != NULL) {
         return conformance_world_knows_keys(run->world, step, owner_keys, 2, "a step") &&
                (weivel_json_object_size(step) == 2 ||
-                conformance_world_fail(run->world, "an owner's step is not as LAYER.md has it", NULL));
+                conformance_world_fail(run->world,
+                                       "an owner's step is not as the kit's docs/vectors/layer/library.md has it",
+                                       NULL));
     }
     for (at = 0; at < 6; at++) {
         if (weivel_json_object_get(step, alone[at]) != NULL) {
