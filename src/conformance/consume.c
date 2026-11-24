@@ -6,7 +6,8 @@
  *
  * In C a listener "throws" by answering a status other than WEIVEL_C_STATUS_OK, which the layer hands its error sink.
  * A refusal of the run is a refusal a step's call through a context answered; a `verify` step's refusal is the check
- * the step makes, which the host acts on, and is no refusal of the run, as LAYER.md states for the refused verify.
+ * the step makes, which the host acts on, and is no refusal of the run, as the kit's docs/vectors/layer/consume.md
+ * states for the refused verify.
  */
 
 #include <stdio.h>

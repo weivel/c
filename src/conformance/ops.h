@@ -3,7 +3,8 @@
 
 /**
  * @file
- * The ops a layer vector may have, each driven through the host's public surface as LAYER.md states it.
+ * The ops a layer vector may have, each driven through the host's public surface as the kit's docs/vectors/layer/
+ * states it.
  */
 
 #include "text.h"
