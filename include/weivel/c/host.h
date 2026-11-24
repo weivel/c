@@ -49,15 +49,17 @@ struct weivel_standard_description;
 
 /**
  * What decides whether a C library's description of a definition may be bound, before the host registers that
- * definition (see weivel/c/host/library.h): `check` and the `data` it is called with. It reads the description only
- * during the call, and answers WEIVEL_C_STATUS_OK for one that may be bound, WEIVEL_C_STATUS_OUT_OF_MEMORY when it
- * could not tell for want of memory, and any other status to refuse it. The standard module's
- * weivel_c_standard_check_description is the standard's check as one.
+ * definition (see weivel/c/host/library.h): `check` and the `data` it is called with. It is handed the description
+ * and the definition the service's definition symbol answered, neither NULL, so it can refuse a description of another
+ * definition. It reads both only during the call, and answers WEIVEL_C_STATUS_OK for a description that may be bound,
+ * WEIVEL_C_STATUS_OUT_OF_MEMORY when it could not tell for want of memory, and any other status to refuse it. The
+ * standard module's weivel_c_standard_check_description is the standard's check as one.
  *
  * @implNote The host never links the standard, so the check its load makes is handed in rather than called by name.
  */
 typedef struct weivel_c_description_check {
-    weivel_c_status (*check)(void *data, const struct weivel_standard_description *description);
+    weivel_c_status (*check)(void *data, const struct weivel_standard_description *description,
+                             const void *definition);
     void *data;
 } weivel_c_description_check;
 
