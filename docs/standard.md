@@ -27,9 +27,9 @@ answers to the host:
 - `weivel_c_standard_status` translates a status of the standard's into the layer's.
 - `weivel_c_standard_check_description` is the standard's `weivel_standard_description_check`, then its
   `weivel_standard_description_answers` with the definition the host hands it, as a host's description check, its
-  `data` the caller's empty refusal or NULL: a description either refuses, one whose `answered_by` is NULL or answers
-  another definition than the service's among them, answers `WEIVEL_C_STATUS_REFUSED_BY_THE_STANDARD`, which the
-  host's load turns into its refusal of the library.
+  `data` the caller's empty refusal or NULL: a description either check refuses, one whose `answered_by` is NULL or
+  answers another definition than the service's among them, answers `WEIVEL_C_STATUS_REFUSED_BY_THE_STANDARD`, which
+  the host's load turns into its refusal of the library.
 
 The module holds no default of its own, since a default is the standard's to own and a replacement must be able to
 take every one of them away: a test reads its sources and header and fails on any string, a literal, an identifier

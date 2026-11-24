@@ -29,13 +29,13 @@ definition. A consumer that resolves the service is answered that very object.
   only when the check accepts it, as the very pointer the definition's symbol answered. The host never links the
   standard, so the check is the caller's to give; the `standard` module's `weivel_c_standard_check_description` is the
   standard's own, which also requires the description's `answered_by` to answer that very definition. A description
-  that is missing
-  answers `WEIVEL_C_STATUS_MISSING_SYMBOL`; one that answers NULL, that the check refuses, that is empty or beside a
-  service of bytes functions, or that a host given no check is asked to load, refuses the load as the caller's
-  mistake, named in the failure's `refused_description`, with nothing registered and the binary closed again; a check
-  that runs out of memory answers `WEIVEL_C_STATUS_OUT_OF_MEMORY`. A declaration that ends before `descriptions` is
-  loaded as one that declares none. A grown description, one marking `blocking` operations or nesting the description
-  of a definition it carries, is checked at the load as any is, by the same check, and bound to nothing.
+  that is missing answers `WEIVEL_C_STATUS_MISSING_SYMBOL`; one that answers NULL, that the check refuses, that is
+  empty or beside a service of bytes functions, or that a host given no check is asked to load, refuses the load as
+  the caller's mistake, named in the failure's `refused_description`, with nothing registered and the binary closed
+  again; a check that runs out of memory answers `WEIVEL_C_STATUS_OUT_OF_MEMORY`. A declaration that ends before
+  `descriptions` is loaded as one that declares none. A grown description, one marking `blocking` operations or
+  nesting the description of a definition it carries, is checked at the load as any is, by the same check, and bound
+  to nothing.
 - A call crosses no core call and takes no lock: the input is the caller's own pointer and length, handed to the
   library for the call, and the output is answered in place, as a `weivel_c_bytes` holding the library's own
   pointer. `weivel_c_bytes_release`, also reachable as the object's `release_bytes` for a plugin that links nothing of
