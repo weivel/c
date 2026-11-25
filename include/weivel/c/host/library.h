@@ -190,9 +190,11 @@ typedef struct weivel_c_library_load_failure {
  *
  * @param path the library, UTF-8; the declaration names none. Read only during the call. Required.
  * @param declaration read only during the call: every text the host keeps it copies. Required, with at least one
- * service, each with an id no other service of it repeats and at least one function, and each function with a name, a
- * symbol and the kind WEIVEL_STANDARD_FUNCTION_BYTES or WEIVEL_STANDARD_FUNCTION_DEFINITION, a definition being its
- * service's only function and reading no context; and with a release symbol when any function is of the bytes kind.
+ * service, or no service (`services` NULL and `service_count` 0) and at least one contract, which loads the library
+ * and registers nothing, since the host binds nothing from a contract; each service with an id no other service of it
+ * repeats and at least one function, and each function with a name, a symbol and the kind
+ * WEIVEL_STANDARD_FUNCTION_BYTES or WEIVEL_STANDARD_FUNCTION_DEFINITION, a definition being its service's only
+ * function and reading no context; and with a release symbol when any function is of the bytes kind.
  * @param library receives the loaded library. Required; NULL on every answer but OK.
  * @param failure receives what a status alone cannot say; may be NULL. Cleared first when given and large enough.
  * @param refusal the core's refusal of a service's registration; may be NULL.
