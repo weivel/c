@@ -572,7 +572,7 @@ static int register_awaiting_step(library_run *run, const weivel_json_value *ste
 static int host_step(library_run *run, const weivel_json_value *step) {
     world_plugin *plugin;
     if (weivel_json_object_get(step, "load") != NULL) {
-        if (run->declaration.service_count == 0) {
+        if (run->declaration.import_name == NULL) {
             return conformance_world_fail(run->world, "a load step comes with no declaration", NULL);
         }
         run->load_made = 1;

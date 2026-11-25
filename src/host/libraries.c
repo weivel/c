@@ -14,6 +14,7 @@
 #define REFUSED_DEFINITION_FAILURE_SIZE END_OF(weivel_c_library_load_failure, refused_definition)
 #define REFUSED_DESCRIPTION_FAILURE_SIZE END_OF(weivel_c_library_load_failure, refused_description)
 #define DESCRIBED_DECLARATION_SIZE END_OF(weivel_standard_library, descriptions)
+#define CONTRACTED_DECLARATION_SIZE END_OF(weivel_standard_library, contract_count)
 
 #if defined(WEIVEL_C_TESTING)
 /**
@@ -138,11 +139,18 @@ static int declares_bytes(const weivel_standard_library *declaration) {
     return 0;
 }
 
+/** 1 for a declaration of no service that lists at least one contract: it loads, and registers nothing. */
+static int only_publishes_contracts(const weivel_standard_library *declaration) {
+    return declaration->services == NULL && declaration->service_count == 0 &&
+           declaration->size >= CONTRACTED_DECLARATION_SIZE &&
+           holds_some_items(declaration->contracts, declaration->contract_count);
+}
+
 /**
  * Checks everything of the declaration the host relies on before anything is opened: the caller's mistakes.
  *
- * @implNote A declaration of no service, or a service of no function, is refused, as the standard's reader refuses
- * both, so a declaration the caller builds cannot load what a read one never could.
+ * @implNote A declaration of neither a service nor a contract, or a service of no function, is refused, as the
+ * standard's reader refuses both, so a declaration the caller builds cannot load what a read one never could.
  */
 static weivel_c_status check_declaration(const weivel_standard_library *declaration,
                                          weivel_c_library_load_failure *failure) {
@@ -151,7 +159,8 @@ static weivel_c_status check_declaration(const weivel_standard_library *declarat
     size_t at;
     if (declaration->size < FIRST_DECLARATION_SIZE ||
         (declaration->release != NULL && !is_text(declaration->release)) ||
-        !holds_some_items(declaration->services, declaration->service_count)) {
+        !(holds_some_items(declaration->services, declaration->service_count) ||
+          only_publishes_contracts(declaration))) {
         return WEIVEL_C_STATUS_MISUSE;
     }
     for (at = 0; at < declaration->service_count && status == WEIVEL_C_STATUS_OK; at++) {
@@ -320,6 +329,9 @@ static weivel_c_status build_library(weivel_c_library *made, const weivel_standa
         return status;
     }
     made->release = (library_release)release;
+    if (declaration->service_count == 0) {
+        return WEIVEL_C_STATUS_OK;
+    }
     made->services = calloc(declaration->service_count, sizeof *made->services);
     if (made->services == NULL) {
         return WEIVEL_C_STATUS_OUT_OF_MEMORY;

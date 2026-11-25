@@ -5,8 +5,9 @@
  * readable and answers unloaded, and nothing stays registered; an id the declaration lists twice, or one a
  * registration under the host holds already, a plugin's, another library's or the host's own, is the caller's
  * mistake, refused with the id named before anything is registered and without the host holding what it found; the
- * host registering an id a live library declares is refused the same way; and a declaration of no service or a
- * service of no function is refused as the standard's reader refuses it.
+ * host registering an id a live library declares is refused the same way; a declaration of contracts alone loads
+ * and registers nothing; and a declaration of neither a service nor a contract, or a service of no function, is
+ * refused as the standard's reader refuses it.
  */
 
 #include "libraries.h"
@@ -222,12 +223,41 @@ static void an_id_a_plugin_or_the_host_holds_is_refused_and_keeps_its_registrati
     end_host_world(&in);
 }
 
-static void a_declaration_of_no_service_or_a_service_of_no_function_is_refused(void) {
+static const weivel_standard_library_contract published[] = {{"probe.provider", "probe_provider_description"}};
+
+static void declare_contracts_alone(declared *probe) {
+    declare_probe(probe, "probe");
+    probe->library.services = NULL;
+    probe->library.service_count = 0;
+    probe->library.contracts = published;
+    probe->library.contract_count = 1;
+}
+
+static void a_declaration_of_contracts_alone_loads_and_registers_nothing(void) {
+    host_world in;
+    declared probe;
+    weivel_c_library *library = NULL;
+    uint32_t closes;
+    begin_host_world(&in);
+    declare_contracts_alone(&probe);
+    closes = weivel_c_testing_closes_made;
+    CHECK(weivel_c_host_load_library(in.host, library_path_of_probe, &probe.library, &library, NULL, NULL) ==
+          WEIVEL_C_STATUS_OK);
+    CHECK(library != NULL && service_of(&in, "probe") == NULL && service_of(&in, "probe.provider") == NULL);
+    CHECK(weivel_c_host_unload_library(in.host, library) == WEIVEL_C_STATUS_OK);
+    CHECK(weivel_c_testing_closes_made == closes + 1 && sink_count(&in) == 0);
+    end_host_world(&in);
+}
+
+static void a_declaration_of_neither_a_service_nor_a_contract_or_a_service_of_no_function_is_refused(void) {
     host_world in;
     declared probe;
     begin_host_world(&in);
     declare_probe(&probe, "probe");
     probe.library.service_count = 0;
+    refused_naming(&in, library_path_of_probe, &probe, NULL);
+    declare_contracts_alone(&probe);
+    probe.library.contract_count = 0;
     refused_naming(&in, library_path_of_probe, &probe, NULL);
     declare_probe(&probe, "probe");
     probe.service.function_count = 0;
@@ -330,7 +360,8 @@ int main(int argument_count, char **arguments) {
     an_id_a_library_still_loading_declares_is_refused_with_the_binary_closed();
     an_id_the_declaration_lists_twice_is_refused_before_anything_opens();
     an_id_a_plugin_or_the_host_holds_is_refused_and_keeps_its_registration();
-    a_declaration_of_no_service_or_a_service_of_no_function_is_refused();
+    a_declaration_of_contracts_alone_loads_and_registers_nothing();
+    a_declaration_of_neither_a_service_nor_a_contract_or_a_service_of_no_function_is_refused();
     a_refused_load_leaves_the_host_holding_nothing_it_is_later_revoked();
     the_host_registering_an_id_a_live_library_declares_is_refused();
     a_failure_given_again_no_longer_names_the_id_it_named();

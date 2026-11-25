@@ -13,6 +13,10 @@ functions as one `weivel_c_library_service`, the service id, the declared functi
 takes the object, a function's index, the input and an answer; and a service that declares a definition as that
 definition. A consumer that resolves the service is answered that very object.
 
+- A declaration may list no service and only contracts, the descriptions a library publishes for plugins to
+  implement. Such a library loads, its binary opened and its release symbol bound when it declares one, and registers
+  nothing: the host binds nothing from a contract, and does not yet check a capability a plugin provides against the
+  contract describing it. It unloads as any library does.
 - A definition is a symbol `const void *f(void)` answering a static struct of function pointers that begins with its
   `uint32_t size`, whose layout is the library's own. The host calls it once at the load and registers the pointer it
   answered, with no wrapper, count or copy, through `weivel_c_context_register_service_awaiting_releases`, so a
@@ -44,7 +48,8 @@ definition. A consumer that resolves the service is answered that very object.
 - A status other than 0 answers `WEIVEL_C_STATUS_FAILED` with the status and the body, and `body_is_utf8` says
   whether the body is well-formed UTF-8, so it reads as the text saying why; an empty body counts as UTF-8.
 - A declaration the caller built is refused as the caller's mistake, `WEIVEL_C_STATUS_MISUSE` told to nobody else,
-  when it has a function of another kind (named), no service or a service of no function, an id it lists twice, or an
+  when it has a function of another kind (named), neither a service nor a contract, a service of no function, an id
+  it lists twice, or an
   id a registration under the host already holds, a plugin's, another live library's or the host's own (the id
   named): registering under `WEIVEL_HOST` replaces a registration, so loading it would silently take that service
   over. The id is looked for in the layer's own records of every registration, never by a get, so a refused load
