@@ -25,7 +25,9 @@ pass. `weivel_c_conformance_vector_ids` lists every vector under a directory at 
   that is no answer to a well-made call (anything but OK, REFUSED, NONE and DESTROYED), and a verify is `quiet` when
   it does not and nothing reached the log or the sink meanwhile.
 - A `library` vector reads its declaration with the standard's reader and loads it, with the core's echo library the
-  caller names in the options' `library_path`, through the host's public load call. Its holders are opened with an
+  caller names in the options' `library_path`, through the host's public load call. A declaration of neither a service
+  nor a contract, which the reader refuses, is built from its `importName`, `version` and `release` alone, so the
+  host's own refusal of it is what is witnessed. Its holders are opened with an
   activate that stays pending, so a `quarantine` step finishes it failed. A holder lets go of a revoked holding with
   `weivel_c_context_release_holding`, handed the `handle` its revocation named, and of a kept bytes answer with the
   object's `release_bytes`. `sameObject` is read at each get of a definition, by opening the binary again while the

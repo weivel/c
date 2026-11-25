@@ -235,10 +235,29 @@ static weivel_c_status hear_plugin_event(void *data, const weivel_c_plugin_event
     return WEIVEL_C_STATUS_OK;
 }
 
+static int declares_neither_a_service_nor_a_contract(const weivel_json_value *declared) {
+    return weivel_json_array_length(weivel_json_object_get(declared, "services")) == 0 &&
+           weivel_json_array_length(weivel_json_object_get(declared, "contracts")) == 0;
+}
+
+/**
+ * A declaration the standard's reader refuses, since it declares nothing, built from its texts alone, the vector's
+ * own, so the host's own refusal of it is what the vector witnesses.
+ */
+static void build_an_empty_declaration(library_run *run, const weivel_json_value *declared) {
+    run->declaration.import_name = weivel_json_as_string(weivel_json_object_get(declared, "importName"));
+    run->declaration.version = weivel_json_as_string(weivel_json_object_get(declared, "version"));
+    run->declaration.release = weivel_json_as_string(weivel_json_object_get(declared, "release"));
+}
+
 static int read_declaration(library_run *run, const weivel_json_value *declared) {
     conformance_text text;
     weivel_status read;
     run->declaration = (weivel_standard_library)WEIVEL_INIT(weivel_standard_library);
+    if (declares_neither_a_service_nor_a_contract(declared)) {
+        build_an_empty_declaration(run, declared);
+        return 1;
+    }
     conformance_text_start(&text);
     conformance_text_append_json(&text, declared);
     read = text.failed ? WEIVEL_STATUS_OUT_OF_MEMORY
