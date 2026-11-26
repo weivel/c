@@ -56,12 +56,14 @@ static char entry_file[DISK_PATH];
 
 static int lay_out_the_plugins(void) {
     char probe[DISK_PATH * 2];
-    snprintf(probe, sizeof probe, "{\"importName\": \"probe\", \"api\": 1, \"language\": \"c\", \"entry\": \"%s\"}", entry_file);
+    snprintf(probe, sizeof probe, "{\"importName\": \"probe\", \"api\": 1, \"language\": \"c\", \"entry\": \"%s\"}",
+             entry_file);
     return disk_make_directory(directory) && disk_copy(entry_library_path, directory, entry_file) &&
            disk_write(directory, "probe.json", probe) &&
            disk_write(directory, "probe_identity.json", "{\"id\": \"forge:7/probe\", \"name\": \"owner/probe\"}") &&
            disk_write(directory, "bare.json", "{\"importName\": \"bare\", \"api\": 1, \"language\": \"c\"}") &&
-           disk_write(directory, "gone.json", "{\"importName\": \"gone\", \"api\": 1, \"language\": \"c\", \"entry\": \"gone.so\"}");
+           disk_write(directory, "gone.json",
+                      "{\"importName\": \"gone\", \"api\": 1, \"language\": \"c\", \"entry\": \"gone.so\"}");
 }
 
 static void remove_the_plugins(void) {

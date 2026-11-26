@@ -10,7 +10,8 @@
 
 #include "host/plugins.h"
 
-static const char PROBE[] = "{\"importName\": \"probe\", \"api\": 2, \"language\": \"c\", \"services\": {\"provides\": [\"probe:thing\"]}}";
+static const char PROBE[] =
+    "{\"importName\": \"probe\", \"api\": 2, \"language\": \"c\", \"services\": {\"provides\": [\"probe:thing\"]}}";
 
 /** Activates `plugin` alone and answers the manifest its context answers. */
 static const weivel_manifest *manifest_seen_by(host_world *in, test_plugin *plugin) {
