@@ -11,8 +11,10 @@
  * Linking this module links the standard, and every function of the standard's headers is the caller's to call
  * directly where nothing needs translating: weivel_standard_discover lays out and discovers plugins on disk,
  * weivel_standard_read_library reads a library declaration whose answer is exactly what weivel_c_host_load_library
- * takes, with the path the caller gives, and weivel_standard_identity_parse and weivel_standard_identity_compare take
- * identities apart and order them. What this module adds is what joins the standard's answers to the host:
+ * takes, with the path the caller gives, weivel_standard_identity_parse and weivel_standard_identity_compare take
+ * identities apart and order them, and weivel_standard_manifest_language answers the language a discovered plugin's
+ * manifest names, the weivel implementation that loads it. What this module adds is what joins the standard's answers
+ * to the host:
  *
  * - a manifest read from JSON, validated first, registered with an entry, the standard's manifest released at once
  *   because the host copies what it registers;

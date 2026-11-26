@@ -10,12 +10,15 @@ modules that link the standard, beside [`conformance`](conformance.md); the host
 and every host test links without it. The standard is a C library, so C reaches it by calling its functions: where
 nothing needs translating the caller calls the standard directly, `weivel_standard_discover` to lay out and discover
 plugins on disk, `weivel_standard_read_library`, whose declaration is exactly what `weivel_c_host_load_library` takes
-with the path the caller gives, and the identity parsing and ordering. The module adds what joins the standard's
-answers to the host:
+with the path the caller gives, the identity parsing and ordering, and `weivel_standard_manifest_language`, the
+language a discovered plugin's manifest names, the weivel implementation that loads it. The module adds what joins the
+standard's answers to the host:
 
 - `weivel_c_standard_register_manifest` validates and reads a JSON manifest with the standard and registers it with
   an entry and the identity the caller supplies. The standard's manifest is the standard's, freed by its own release;
-  the module releases it before returning, since the host copies what it registers. A document the standard declines
+  the module releases it before returning, since the host copies what it registers, so the manifest's `language` is
+  gone with it: a host that wants the language calls `weivel_standard_load_manifest` and
+  `weivel_standard_manifest_language` itself, then registers the view. A document the standard declines
   answers `WEIVEL_C_STATUS_REFUSED_BY_THE_STANDARD`, the validation saying why, with nothing registered.
 - `weivel_c_standard_discovered_manifest` fills a manifest value with a discovered plugin's manifest and the identity
   its identity file gives; `weivel_c_standard_register_discovered` registers it with the entry read from the file its
