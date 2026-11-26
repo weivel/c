@@ -56,12 +56,12 @@ static char entry_file[DISK_PATH];
 
 static int lay_out_the_plugins(void) {
     char probe[DISK_PATH * 2];
-    snprintf(probe, sizeof probe, "{\"importName\": \"probe\", \"api\": 1, \"entry\": \"%s\"}", entry_file);
+    snprintf(probe, sizeof probe, "{\"importName\": \"probe\", \"api\": 1, \"language\": \"c\", \"entry\": \"%s\"}", entry_file);
     return disk_make_directory(directory) && disk_copy(entry_library_path, directory, entry_file) &&
            disk_write(directory, "probe.json", probe) &&
            disk_write(directory, "probe_identity.json", "{\"id\": \"forge:7/probe\", \"name\": \"owner/probe\"}") &&
-           disk_write(directory, "bare.json", "{\"importName\": \"bare\", \"api\": 1}") &&
-           disk_write(directory, "gone.json", "{\"importName\": \"gone\", \"api\": 1, \"entry\": \"gone.so\"}");
+           disk_write(directory, "bare.json", "{\"importName\": \"bare\", \"api\": 1, \"language\": \"c\"}") &&
+           disk_write(directory, "gone.json", "{\"importName\": \"gone\", \"api\": 1, \"language\": \"c\", \"entry\": \"gone.so\"}");
 }
 
 static void remove_the_plugins(void) {
@@ -166,6 +166,8 @@ static void a_discovered_manifest_is_filled_within_the_callers_size(void) {
     CHECK(weivel_c_standard_discovered_manifest(found_named(&discovery, "bare"), &manifest) == WEIVEL_C_STATUS_OK);
     CHECK(manifest.size == sizeof manifest && manifest.identity == NULL && manifest.entry == NULL);
     check_text(manifest.import_name, "bare", "the bare plugin's import name");
+    check_text(weivel_standard_manifest_language(found_named(&discovery, "bare")->manifest), "c",
+               "the bare plugin's language");
     manifest.size = 4;
     CHECK(weivel_c_standard_discovered_manifest(found_named(&discovery, "bare"), &manifest) == WEIVEL_C_STATUS_MISUSE);
     CHECK(weivel_c_standard_discovered_manifest(NULL, &manifest) == WEIVEL_C_STATUS_MISUSE);

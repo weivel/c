@@ -10,7 +10,7 @@
 
 #include "host/plugins.h"
 
-static const char PROBE[] = "{\"importName\": \"probe\", \"api\": 2, \"services\": {\"provides\": [\"probe:thing\"]}}";
+static const char PROBE[] = "{\"importName\": \"probe\", \"api\": 2, \"language\": \"c\", \"services\": {\"provides\": [\"probe:thing\"]}}";
 
 /** Activates `plugin` alone and answers the manifest its context answers. */
 static const weivel_manifest *manifest_seen_by(host_world *in, test_plugin *plugin) {
@@ -99,8 +99,9 @@ static void a_document_the_standard_declines_is_its_refusal_with_nothing_registe
     weivel_c_entry entry = WEIVEL_INIT(weivel_c_entry);
     weivel_handle plugin = 0;
     begin_host_world(&in);
-    refused(&in, "{\"importName\": \"Probe!\", \"api\": 1}", "importName");
-    refused(&in, "{\"importName\": \"probe\"}", "api");
+    refused(&in, "{\"importName\": \"Probe!\", \"api\": 1, \"language\": \"c\"}", "importName");
+    refused(&in, "{\"importName\": \"probe\", \"language\": \"c\"}", "api");
+    refused(&in, "{\"importName\": \"probe\", \"api\": 1}", "language");
     refused(&in, "not a manifest", "");
     entry.activate = activate_and_answer_done;
     CHECK(weivel_c_standard_register_manifest(in.host, NULL, &entry, &plugin, NULL, NULL) == WEIVEL_C_STATUS_MISUSE);
