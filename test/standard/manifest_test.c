@@ -56,7 +56,7 @@ static void a_document_is_validated_and_registered_with_the_identity_the_caller_
     test_plugin plugin;
     weivel_c_standard_manifest_document document = WEIVEL_INIT(weivel_c_standard_manifest_document);
     char json[sizeof PROBE + 8];
-    char identity[] = "forge:7/probe";
+    char identity[] = "git:4b825dc642cb6eb9a060e54bf8d69288fbee4904/probe";
     const weivel_manifest *seen;
     begin_host_world(&in);
     name_acting_plugin(&plugin, &in, "probe", activate_and_answer_done, NULL);
@@ -71,7 +71,8 @@ static void a_document_is_validated_and_registered_with_the_identity_the_caller_
     identity[0] = 'X';
     seen = manifest_seen_by(&in, &plugin);
     check_the_probe(seen);
-    check_text(seen == NULL ? NULL : seen->identity, "forge:7/probe", "the identity the plugin is registered with");
+    check_text(seen == NULL ? NULL : seen->identity, "git:4b825dc642cb6eb9a060e54bf8d69288fbee4904/probe",
+               "the identity the plugin is registered with");
     end_host_world(&in);
 }
 

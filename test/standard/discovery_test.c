@@ -50,6 +50,9 @@ static int library_is_loaded(const char *path) {
 }
 #endif
 
+#define PROBE_ID "git:4b825dc642cb6eb9a060e54bf8d69288fbee4904/probe"
+#define LATER_ID "git:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
 static const char *entry_library_path;
 static char directory[DISK_PATH];
 static char entry_file[DISK_PATH];
@@ -60,7 +63,7 @@ static int lay_out_the_plugins(void) {
              entry_file);
     return disk_make_directory(directory) && disk_copy(entry_library_path, directory, entry_file) &&
            disk_write(directory, "probe.json", probe) &&
-           disk_write(directory, "probe_identity.json", "{\"id\": \"forge:7/probe\", \"name\": \"owner/probe\"}") &&
+           disk_write(directory, "probe_identity.json", "{\"id\": \"" PROBE_ID "\", \"name\": \"owner/probe\"}") &&
            disk_write(directory, "bare.json", "{\"importName\": \"bare\", \"api\": 1, \"language\": \"c\"}") &&
            disk_write(directory, "gone.json",
                       "{\"importName\": \"gone\", \"api\": 1, \"language\": \"c\", \"entry\": \"gone.so\"}");
@@ -89,11 +92,11 @@ static void the_found_identity_compares_as_the_standard_orders(const weivel_stan
     weivel_standard_identity later = WEIVEL_INIT(weivel_standard_identity);
     CHECK(weivel_standard_identity_parse(probe->identity_id, strlen(probe->identity_id), &parsed, NULL) ==
           WEIVEL_STATUS_OK);
-    CHECK(weivel_standard_identity_parse("forge:10", 8, &later, NULL) == WEIVEL_STATUS_OK);
+    CHECK(weivel_standard_identity_parse(LATER_ID, strlen(LATER_ID), &later, NULL) == WEIVEL_STATUS_OK);
     CHECK(weivel_standard_identity_compare(&parsed, &probe->identity) == 0);
     CHECK(weivel_standard_identity_compare(&parsed, &later) < 0);
     CHECK(weivel_standard_identity_compare(&later, &parsed) > 0);
-    CHECK(parsed.kind == WEIVEL_STANDARD_IDENTITY_FORGE && parsed.number == 7);
+    CHECK(parsed.kind == WEIVEL_STANDARD_IDENTITY_GIT && parsed.commit_length == 40 && parsed.segment_count == 1);
     weivel_standard_identity_release(&parsed);
     weivel_standard_identity_release(&later);
 }
@@ -155,7 +158,7 @@ static void a_discovered_plugin_is_registered_with_its_identity_and_the_entry_it
     CHECK(state != NULL && state->activations == 1 && state->context != NULL);
     CHECK(state != NULL && weivel_c_context_manifest(state->context, &seen) == WEIVEL_C_STATUS_OK);
     check_text(seen == NULL ? NULL : seen->import_name, "probe", "the discovered import name");
-    check_text(seen == NULL ? NULL : seen->identity, "forge:7/probe", "the discovered identity");
+    check_text(seen == NULL ? NULL : seen->identity, PROBE_ID, "the discovered identity");
     CHECK(sink_count(&in) == 0);
     end_host_world(&in);
     CHECK(weivel_c_entry_unload(&kept) == WEIVEL_C_STATUS_OK);
